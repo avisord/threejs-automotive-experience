@@ -17,9 +17,9 @@ import type { BallConfig } from './balls'
  *   ballpit.clear()                          // empty the scene
  */
 export const DEFAULT_COMPOSITION: BallConfig[] = [
-  //{ surface: 'chrome', radius: 1.7 },
-  //{ surface: 'gold', radius: 1.3 },
-  //{ surface: 'copper', radius: 1.05 },
+  { surface: 'chrome', radius: 1.7, count: 10 },
+  { surface: 'gold', radius: 1.3 },
+  { surface: 'copper', radius: 1.05 },
   { surface: 'glass', radius: 1.45, count: 50 },
   { surface: 'neon', radius: 1.4, options: { color: 0x0aa4f7 }, count: 50 },
   { surface: 'neon', radius: 1.4, options: { color: 0x510af7 }, count: 50 },

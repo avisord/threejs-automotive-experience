@@ -152,6 +152,24 @@ hint.className = 'hint'
 hint.textContent = 'drag a ball · throw it · watch it fall'
 app.appendChild(hint)
 
+const fpsEl = document.createElement('div')
+fpsEl.className = 'fps'
+fpsEl.textContent = '— fps'
+app.appendChild(fpsEl)
+
+let frameCount = 0
+let fpsWindowStart = performance.now()
+function tickFps(): void {
+  frameCount++
+  const now = performance.now()
+  const elapsed = now - fpsWindowStart
+  if (elapsed >= 500) {
+    fpsEl.textContent = `${Math.round((frameCount * 1000) / elapsed)} fps`
+    frameCount = 0
+    fpsWindowStart = now
+  }
+}
+
 const clock = new THREE.Clock()
 const MAX_STEP = 1 / 120
 
@@ -164,5 +182,6 @@ function animate(): void {
   const h = dt / steps
   for (let i = 0; i < steps; i++) stepPhysics(balls, h, bounds)
   composer.render()
+  tickFps()
 }
 animate()
