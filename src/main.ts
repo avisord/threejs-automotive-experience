@@ -6,15 +6,17 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { createBalls, disposeBall, type Ball } from './balls'
 import type { SurfaceOptions } from './materials'
 import { listSurfaces, registerSurface } from './materials'
-import { DEFAULT_COMPOSITION } from './composition'
 import { stepPhysics, type Bounds } from './physics'
 import { setupDragging } from './drag'
 import { createModuleHost, type SceneContext } from './modules/module'
-import { backgroundModule } from './modules/background'
-import { environmentModule } from './modules/environment'
-import { lightingModule } from './modules/lighting'
-import { floorModule } from './modules/floor'
+import type { backgroundModule } from './modules/background'
+import type { floorModule } from './modules/floor'
+import { SCENES, type SceneName } from './scenes'
 import './style.css'
+
+// ─── SWITCH SCENE HERE ──────────────────────────────────────────────────────
+const ACTIVE_SCENE: SceneName = 'neon-pit'
+// ────────────────────────────────────────────────────────────────────────────
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
@@ -43,26 +45,27 @@ function updateBounds(): void {
 }
 updateBounds()
 
-// ---------------------------------------------------------------------------
-// scene modules — each is a self-contained piece of the environment.
-// add your own: modules.add({ name: 'my-thing', setup(ctx) { ... } })
-// ---------------------------------------------------------------------------
 const ctx: SceneContext = { scene, camera, renderer, bounds }
 const modules = createModuleHost(ctx)
+const balls: Ball[] = []
 
-const background = modules.add(backgroundModule({ color: 0x12152b }))
-modules.add(environmentModule({ intensity: 0.55 }))
-modules.add(lightingModule({ rim: true, key: false }))
-const floor = modules.add(
-  floorModule({
-    color: 0x445370,
-    glow: { color: 0x3d5aff, intensity: 1.2 },
-    areaLight: false,
-  }),
-)
-
-const balls = createBalls(DEFAULT_COMPOSITION, bounds)
-for (const b of balls) scene.add(b.mesh)
+/** Tear down the current world and build the given scene. */
+function loadScene(name: SceneName): void {
+  const def = SCENES[name]
+  while (balls.length > 0) {
+    const ball = balls.pop()!
+    scene.remove(ball.mesh)
+    disposeBall(ball)
+  }
+  for (const moduleName of modules.list()) modules.remove(moduleName)
+  for (const m of def.createModules()) modules.add(m)
+  for (const ball of createBalls(def.composition, bounds)) {
+    scene.add(ball.mesh)
+    balls.push(ball)
+  }
+  console.info(`[ballpit] scene "${name}" loaded`)
+}
+loadScene(ACTIVE_SCENE)
 
 setupDragging(renderer.domElement, camera, balls)
 
@@ -88,10 +91,17 @@ const ballpit = {
     })
   },
   count: () => balls.length,
+  /** switch the whole world: ballpit.scene('studio') */
+  scene: loadScene,
+  scenes: () => Object.keys(SCENES) as SceneName[],
   /** light the scene from the floor: ballpit.groundGlow(0xff2266, 2) · off: ballpit.groundGlow(0, 0) */
-  groundGlow: floor.setGlow,
+  groundGlow(color?: THREE.ColorRepresentation, intensity?: number): void {
+    ;(modules.get('floor') as ReturnType<typeof floorModule> | undefined)?.setGlow(color, intensity)
+  },
   /** change the background/fog color: ballpit.background(0x1a1420) */
-  background: (color: THREE.ColorRepresentation) => background.setColor(color),
+  background(color: THREE.ColorRepresentation): void {
+    ;(modules.get('background') as ReturnType<typeof backgroundModule> | undefined)?.setColor(color)
+  },
   /** scene module host — ballpit.modules.list(), .add(), .remove('lighting') */
   modules,
   remove(ball: Ball): void {
