@@ -1,6 +1,4 @@
 import * as THREE from 'three'
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-//import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
@@ -11,6 +9,11 @@ import { listSurfaces, registerSurface } from './materials'
 import { DEFAULT_COMPOSITION } from './composition'
 import { stepPhysics, type Bounds } from './physics'
 import { setupDragging } from './drag'
+import { createModuleHost, type SceneContext } from './modules/module'
+import { backgroundModule } from './modules/background'
+import { environmentModule } from './modules/environment'
+import { lightingModule } from './modules/lighting'
+import { floorModule } from './modules/floor'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -25,66 +28,10 @@ renderer.toneMappingExposure = 1.0
 app.appendChild(renderer.domElement)
 
 const scene = new THREE.Scene()
-const BG_COLOR = 0x12152b // deep indigo — tweak freely, fog follows automatically
-scene.background = new THREE.Color(BG_COLOR)
-scene.fog = new THREE.Fog(BG_COLOR, 70, 170)
 
 const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 300)
 camera.position.set(0, 9, 34)
 camera.lookAt(0, 9, 0)
-
-// image-based lighting for realistic reflections on metal/glass
-const pmrem = new THREE.PMREMGenerator(renderer)
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-scene.environmentIntensity = 0.55
-
-// key light with soft shadows
-//const keyLight = new THREE.DirectionalLight(0xfff2e0, 2.4)
-//keyLight.position.set(14, 28, 18)
-//keyLight.castShadow = true
-//keyLight.shadow.mapSize.set(2048, 2048)
-//keyLight.shadow.camera.left = -30
-//keyLight.shadow.camera.right = 30
-//keyLight.shadow.camera.top = 30
-//keyLight.shadow.camera.bottom = -10
-//keyLight.shadow.camera.far = 80
-//keyLight.shadow.bias = -0.0005
-//keyLight.shadow.radius = 6
-//scene.add(keyLight)
-
-const rimLight = new THREE.DirectionalLight(0x6a8fff, 0.8)
-rimLight.position.set(-18, 10, -14)
-scene.add(rimLight)
-
-// glossy dark floor
-const floorMaterial = new THREE.MeshPhysicalMaterial({
-  color: 0x445370,
-  roughness: 0.85,
-  metalness: 0,
-  clearcoat: 0,
-  envMapIntensity: 0.15, // don't mirror the bright room env
-  specularIntensity: 0.2,
-})
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), floorMaterial)
-floor.rotation.x = -Math.PI / 2
-floor.receiveShadow = true
-scene.add(floor)
-
-// ground glow — an area light lying on the floor, shining straight up
-//RectAreaLightUniformsLib.init()
-//const groundLight = new THREE.RectAreaLight(0x3d5aff, 0, 40, 14)
-//groundLight.position.set(0, 0.05, 0)
-//groundLight.lookAt(0, 10, 0)
-//scene.add(groundLight)
-
-/** Set the ground's light emission; intensity 0 switches it off. */
-function setGroundGlow(color: THREE.ColorRepresentation = 0x3d5aff, intensity = 1.5): void {
-  //groundLight.color.set(color)
-  //groundLight.intensity = intensity
-  // faint surface glow so the floor itself looks like the light source
-  floorMaterial.emissive.set(color)
-  floorMaterial.emissiveIntensity = intensity * 0.03
-}
 
 // play-area bounds derived from what the camera can actually see at z = 0
 const bounds: Bounds = { x: 20, z: 4, ceiling: 24 }
@@ -93,11 +40,26 @@ function updateBounds(): void {
   const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * dist
   bounds.x = Math.max(6, halfH * camera.aspect - 2)
   bounds.ceiling = camera.position.y + halfH
-  //groundLight.width = bounds.x * 2
-  //groundLight.height = bounds.z * 2 + 8
 }
 updateBounds()
-setGroundGlow(0x3d5aff, 1.2)
+
+// ---------------------------------------------------------------------------
+// scene modules — each is a self-contained piece of the environment.
+// add your own: modules.add({ name: 'my-thing', setup(ctx) { ... } })
+// ---------------------------------------------------------------------------
+const ctx: SceneContext = { scene, camera, renderer, bounds }
+const modules = createModuleHost(ctx)
+
+const background = modules.add(backgroundModule({ color: 0x12152b }))
+modules.add(environmentModule({ intensity: 0.55 }))
+modules.add(lightingModule({ rim: true, key: false }))
+const floor = modules.add(
+  floorModule({
+    color: 0x445370,
+    glow: { color: 0x3d5aff, intensity: 1.2 },
+    areaLight: false,
+  }),
+)
 
 const balls = createBalls(DEFAULT_COMPOSITION, bounds)
 for (const b of balls) scene.add(b.mesh)
@@ -127,7 +89,11 @@ const ballpit = {
   },
   count: () => balls.length,
   /** light the scene from the floor: ballpit.groundGlow(0xff2266, 2) · off: ballpit.groundGlow(0, 0) */
-  groundGlow: setGroundGlow,
+  groundGlow: floor.setGlow,
+  /** change the background/fog color: ballpit.background(0x1a1420) */
+  background: (color: THREE.ColorRepresentation) => background.setColor(color),
+  /** scene module host — ballpit.modules.list(), .add(), .remove('lighting') */
+  modules,
   remove(ball: Ball): void {
     const i = balls.indexOf(ball)
     if (i === -1) return
@@ -146,7 +112,7 @@ declare global {
   }
 }
 window.ballpit = ballpit
-console.info('[ballpit] registry API ready — try: ballpit.surfaces() · ballpit.add("glass", 2.5) · ballpit.add("neon", 1, { color: 0x00ff88 })')
+console.info('[ballpit] registry API ready — try: ballpit.surfaces() · ballpit.add("glass", 2.5) · ballpit.modules.list()')
 
 // bloom makes the emissive balls actually glow
 const composer = new EffectComposer(renderer)
@@ -166,6 +132,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
   updateBounds()
+  modules.resize()
 })
 
 const hint = document.createElement('div')
@@ -202,6 +169,7 @@ function animate(): void {
   const steps = Math.max(1, Math.ceil(dt / MAX_STEP))
   const h = dt / steps
   for (let i = 0; i < steps; i++) stepPhysics(balls, h, bounds)
+  modules.update(dt)
   composer.render()
   tickFps()
 }
