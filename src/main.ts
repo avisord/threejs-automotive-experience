@@ -57,7 +57,7 @@ scene.add(rimLight)
 
 // glossy dark floor
 const floorMaterial = new THREE.MeshPhysicalMaterial({
-  color: 0x101216,
+  color: 0x445370,
   roughness: 0.85,
   metalness: 0,
   clearcoat: 0,
