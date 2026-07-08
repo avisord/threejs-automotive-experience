@@ -11,7 +11,6 @@ import { listSurfaces, registerSurface } from './materials'
 import { DEFAULT_COMPOSITION } from './composition'
 import { stepPhysics, type Bounds } from './physics'
 import { setupDragging } from './drag'
-import { createBackground, HORIZON_FOG_COLOR } from './background'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -26,9 +25,9 @@ renderer.toneMappingExposure = 1.0
 app.appendChild(renderer.domElement)
 
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x010208)
-scene.fog = new THREE.Fog(HORIZON_FOG_COLOR, 70, 190)
-scene.add(createBackground())
+const BG_COLOR = 0x12152b // deep indigo — tweak freely, fog follows automatically
+scene.background = new THREE.Color(BG_COLOR)
+scene.fog = new THREE.Fog(BG_COLOR, 70, 170)
 
 const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 300)
 camera.position.set(0, 9, 34)
