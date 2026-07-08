@@ -87,9 +87,9 @@ const composer = new EffectComposer(renderer)
 composer.addPass(new RenderPass(scene, camera))
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.16, // strength — subtle halo, not fog
-  0.1, // radius — keep the glow hugging the ball surface
-  1.1, // threshold — only the brightest (emissive) surfaces bloom
+  0.07, // strength — barely-there halo
+  0.02, // radius — keep the glow hugging the ball surface
+  1.2, // threshold — only the brightest (emissive) surfaces bloom
 )
 composer.addPass(bloom)
 composer.addPass(new OutputPass())
