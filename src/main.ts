@@ -4,7 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { createBall, createBalls, disposeBall, type Ball } from './balls'
+import { createBalls, disposeBall, type Ball } from './balls'
 import type { SurfaceOptions } from './materials'
 import { listSurfaces, registerSurface } from './materials'
 import { DEFAULT_COMPOSITION } from './composition'
@@ -89,12 +89,24 @@ setupDragging(renderer.domElement, camera, balls)
 const ballpit = {
   surfaces: listSurfaces,
   register: registerSurface,
-  add(surface: string, radius = 1.2, options?: SurfaceOptions): Ball {
-    const ball = createBall({ surface, radius, options }, bounds)
-    scene.add(ball.mesh)
-    balls.push(ball)
-    return ball
+  add(surface: string, radius = 1.2, options?: SurfaceOptions, count = 1): Ball[] {
+    const added = createBalls([{ surface, radius, options, count }], bounds)
+    for (const ball of added) {
+      scene.add(ball.mesh)
+      balls.push(ball)
+    }
+    return added
   },
+  /** random assortment: n balls drawn from the registered surfaces */
+  fill(n: number, minRadius = 0.7, maxRadius = 1.8): Ball[] {
+    const names = listSurfaces()
+    return Array.from({ length: n }, () => {
+      const surface = names[Math.floor(Math.random() * names.length)]
+      const radius = minRadius + Math.random() * (maxRadius - minRadius)
+      return ballpit.add(surface, radius)[0]
+    })
+  },
+  count: () => balls.length,
   remove(ball: Ball): void {
     const i = balls.indexOf(ball)
     if (i === -1) return

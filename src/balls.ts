@@ -23,6 +23,8 @@ export interface BallConfig {
   position?: [number, number, number]
   /** per-ball surface tweaks, e.g. { color: 0xff0000 } */
   options?: SurfaceOptions
+  /** how many balls to spawn from this config (default 1) */
+  count?: number
 }
 
 export interface SpawnArea {
@@ -83,7 +85,22 @@ export function createBall(config: BallConfig, area: SpawnArea): Ball {
 }
 
 export function createBalls(configs: BallConfig[], area: SpawnArea): Ball[] {
-  return configs.map((c) => createBall(c, area))
+  return configs.flatMap((c) => {
+    const count = Math.max(1, Math.floor(c.count ?? 1))
+    return Array.from({ length: count }, (_, i) => {
+      // duplicates of a fixed position get a jitter so they don't spawn
+      // perfectly coincident (collision resolution can't separate dist === 0)
+      const position: [number, number, number] | undefined =
+        c.position && i > 0
+          ? [
+              c.position[0] + (Math.random() - 0.5) * c.radius,
+              c.position[1] + i * c.radius * 2.1,
+              c.position[2] + (Math.random() - 0.5) * c.radius,
+            ]
+          : c.position
+      return createBall({ ...c, position }, area)
+    })
+  })
 }
 
 /** Free GPU resources when a ball is removed from the scene. */
