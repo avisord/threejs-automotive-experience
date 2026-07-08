@@ -97,7 +97,8 @@ registerSurface('neon', {
     return new THREE.MeshStandardMaterial({
       color: color.clone().multiplyScalar(0.08),
       emissive: color,
-      emissiveIntensity: 4.5,
+      // keep below tone-mapping clip: higher values wash the surface to white
+      emissiveIntensity: 1.2,
       roughness: o?.roughness ?? 0.4,
     })
   },
