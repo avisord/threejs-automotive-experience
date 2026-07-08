@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { pebbleTextures, beachBallTexture, checkerTexture, marbleTexture } from './textures'
+import { pebbleTextures, beachBallTexture, checkerTexture, marbleTexture, magmaTextures } from './textures'
 
 export interface SurfaceOptions {
   /** override the surface's base color (also drives light color on luminous surfaces) */
@@ -98,10 +98,43 @@ registerSurface('neon', {
       color: color.clone().multiplyScalar(0.01),
       emissive: color,
       // keep below tone-mapping clip: higher values wash the surface to white
-      emissiveIntensity: 4.0,
+      emissiveIntensity: 1.5,
       roughness: o?.roughness ?? 0.6,
     })
   },
+})
+
+// magma texture is shared like the pebble one
+let magmaTex: ReturnType<typeof magmaTextures> | undefined
+function magma() {
+  return (magmaTex ??= magmaTextures())
+}
+
+registerSurface('magma', {
+  density: 2.8,
+  luminous: true,
+  create: (o) =>
+    new THREE.MeshStandardMaterial({
+      map: magma().map,
+      emissiveMap: magma().emissiveMap, // only the cracks glow
+      emissive: new THREE.Color(o?.color ?? 0xff4a00),
+      emissiveIntensity: 2.2,
+      roughness: o?.roughness ?? 0.9,
+      metalness: 0,
+    }),
+})
+
+registerSurface('obsidian', {
+  density: 2.6,
+  create: (o) =>
+    new THREE.MeshPhysicalMaterial({
+      color: o?.color ?? 0x05060a,
+      roughness: o?.roughness ?? 0.06,
+      metalness: 0,
+      clearcoat: 1,
+      clearcoatRoughness: 0.04,
+      envMapIntensity: 1.3,
+    }),
 })
 
 registerSurface('stone', {
@@ -154,8 +187,8 @@ registerSurface('marble', {
     new THREE.MeshPhysicalMaterial({
       map: marbleTexture(),
       roughness: o?.roughness ?? 0.18,
-      clearcoat: 1,
-      clearcoatRoughness: 0.06,
+      clearcoat: 0.01,
+      clearcoatRoughness: 0.01,
     }),
 })
 

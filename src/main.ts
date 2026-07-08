@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
+//import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
@@ -38,18 +38,18 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 scene.environmentIntensity = 0.55
 
 // key light with soft shadows
-const keyLight = new THREE.DirectionalLight(0xfff2e0, 2.4)
-keyLight.position.set(14, 28, 18)
-keyLight.castShadow = true
-keyLight.shadow.mapSize.set(2048, 2048)
-keyLight.shadow.camera.left = -30
-keyLight.shadow.camera.right = 30
-keyLight.shadow.camera.top = 30
-keyLight.shadow.camera.bottom = -10
-keyLight.shadow.camera.far = 80
-keyLight.shadow.bias = -0.0005
-keyLight.shadow.radius = 6
-scene.add(keyLight)
+//const keyLight = new THREE.DirectionalLight(0xfff2e0, 2.4)
+//keyLight.position.set(14, 28, 18)
+//keyLight.castShadow = true
+//keyLight.shadow.mapSize.set(2048, 2048)
+//keyLight.shadow.camera.left = -30
+//keyLight.shadow.camera.right = 30
+//keyLight.shadow.camera.top = 30
+//keyLight.shadow.camera.bottom = -10
+//keyLight.shadow.camera.far = 80
+//keyLight.shadow.bias = -0.0005
+//keyLight.shadow.radius = 6
+//scene.add(keyLight)
 
 const rimLight = new THREE.DirectionalLight(0x6a8fff, 0.8)
 rimLight.position.set(-18, 10, -14)
@@ -70,16 +70,16 @@ floor.receiveShadow = true
 scene.add(floor)
 
 // ground glow — an area light lying on the floor, shining straight up
-RectAreaLightUniformsLib.init()
-const groundLight = new THREE.RectAreaLight(0x3d5aff, 0, 40, 14)
-groundLight.position.set(0, 0.05, 0)
-groundLight.lookAt(0, 10, 0)
-scene.add(groundLight)
+//RectAreaLightUniformsLib.init()
+//const groundLight = new THREE.RectAreaLight(0x3d5aff, 0, 40, 14)
+//groundLight.position.set(0, 0.05, 0)
+//groundLight.lookAt(0, 10, 0)
+//scene.add(groundLight)
 
 /** Set the ground's light emission; intensity 0 switches it off. */
 function setGroundGlow(color: THREE.ColorRepresentation = 0x3d5aff, intensity = 1.5): void {
-  groundLight.color.set(color)
-  groundLight.intensity = intensity
+  //groundLight.color.set(color)
+  //groundLight.intensity = intensity
   // faint surface glow so the floor itself looks like the light source
   floorMaterial.emissive.set(color)
   floorMaterial.emissiveIntensity = intensity * 0.03
@@ -92,8 +92,8 @@ function updateBounds(): void {
   const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * dist
   bounds.x = Math.max(6, halfH * camera.aspect - 2)
   bounds.ceiling = camera.position.y + halfH
-  groundLight.width = bounds.x * 2
-  groundLight.height = bounds.z * 2 + 8
+  //groundLight.width = bounds.x * 2
+  //groundLight.height = bounds.z * 2 + 8
 }
 updateBounds()
 setGroundGlow(0x3d5aff, 1.2)

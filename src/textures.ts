@@ -91,6 +91,66 @@ export function checkerTexture(): THREE.CanvasTexture {
   return tex
 }
 
+/** Dark basalt crust with branching lava cracks — color map + emissive mask. */
+export function magmaTextures(): { map: THREE.CanvasTexture; emissiveMap: THREE.CanvasTexture } {
+  const size = 1024
+  const [colorCanvas, ctx] = makeCanvas(size)
+  const [glowCanvas, gctx] = makeCanvas(size)
+
+  // cooled crust
+  ctx.fillStyle = '#170c07'
+  ctx.fillRect(0, 0, size, size)
+  for (let i = 0; i < 6000; i++) {
+    const v = 14 + Math.floor(Math.random() * 26)
+    ctx.fillStyle = `rgba(${v + 12},${v},${v - 6},0.35)`
+    ctx.fillRect(Math.random() * size, Math.random() * size, 2 + Math.random() * 4, 2 + Math.random() * 4)
+  }
+  // emissive mask starts black — only the cracks glow
+  gctx.fillStyle = '#000'
+  gctx.fillRect(0, 0, size, size)
+
+  const crack = (x: number, y: number, angle: number, steps: number, width: number): void => {
+    for (let s = 0; s < steps; s++) {
+      const nx = x + Math.cos(angle) * (10 + Math.random() * 22)
+      const ny = y + Math.sin(angle) * (10 + Math.random() * 22)
+      // dim heat halo on the color map, hot core on both
+      ctx.strokeStyle = 'rgba(140,30,0,0.5)'
+      ctx.lineCap = 'round'
+      ctx.lineWidth = width * 3
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(nx, ny)
+      ctx.stroke()
+      ctx.strokeStyle = '#ff7a1a'
+      ctx.lineWidth = width
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(nx, ny)
+      ctx.stroke()
+      gctx.strokeStyle = '#ffffff'
+      gctx.lineCap = 'round'
+      gctx.lineWidth = width
+      gctx.beginPath()
+      gctx.moveTo(x, y)
+      gctx.lineTo(nx, ny)
+      gctx.stroke()
+
+      x = nx
+      y = ny
+      angle += (Math.random() - 0.5) * 1.2
+      if (Math.random() < 0.16 && width > 1.5) crack(x, y, angle + (Math.random() < 0.5 ? 1.2 : -1.2), Math.floor(steps / 2), width * 0.6)
+    }
+  }
+  for (let i = 0; i < 14; i++) {
+    crack(Math.random() * size, Math.random() * size, Math.random() * Math.PI * 2, 12 + Math.floor(Math.random() * 14), 2.5 + Math.random() * 2.5)
+  }
+
+  return {
+    map: toTexture(colorCanvas),
+    emissiveMap: toTexture(glowCanvas),
+  }
+}
+
 /** Veined white marble. */
 export function marbleTexture(): THREE.CanvasTexture {
   const size = 512
