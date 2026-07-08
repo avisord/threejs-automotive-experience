@@ -4,7 +4,10 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { createBalls } from './balls'
+import { createBall, createBalls, disposeBall, type Ball } from './balls'
+import type { SurfaceOptions } from './materials'
+import { listSurfaces, registerSurface } from './materials'
+import { DEFAULT_COMPOSITION } from './composition'
 import { stepPhysics, type Bounds } from './physics'
 import { setupDragging } from './drag'
 import './style.css'
@@ -77,10 +80,40 @@ function updateBounds(): void {
 }
 updateBounds()
 
-const balls = createBalls(bounds)
+const balls = createBalls(DEFAULT_COMPOSITION, bounds)
 for (const b of balls) scene.add(b.mesh)
 
 setupDragging(renderer.domElement, camera, balls)
+
+// runtime composition API — play with the scene from the browser console
+const ballpit = {
+  surfaces: listSurfaces,
+  register: registerSurface,
+  add(surface: string, radius = 1.2, options?: SurfaceOptions): Ball {
+    const ball = createBall({ surface, radius, options }, bounds)
+    scene.add(ball.mesh)
+    balls.push(ball)
+    return ball
+  },
+  remove(ball: Ball): void {
+    const i = balls.indexOf(ball)
+    if (i === -1) return
+    balls.splice(i, 1)
+    scene.remove(ball.mesh)
+    disposeBall(ball)
+  },
+  clear(): void {
+    while (balls.length > 0) ballpit.remove(balls[balls.length - 1])
+  },
+  list: () => [...balls],
+}
+declare global {
+  interface Window {
+    ballpit: typeof ballpit
+  }
+}
+window.ballpit = ballpit
+console.info('[ballpit] registry API ready — try: ballpit.surfaces() · ballpit.add("glass", 2.5) · ballpit.add("neon", 1, { color: 0x00ff88 })')
 
 // bloom makes the emissive balls actually glow
 const composer = new EffectComposer(renderer)
