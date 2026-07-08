@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
@@ -55,20 +56,34 @@ rimLight.position.set(-18, 10, -14)
 scene.add(rimLight)
 
 // glossy dark floor
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(400, 400),
-  new THREE.MeshPhysicalMaterial({
-    color: 0x101216,
-    roughness: 0.85,
-    metalness: 0,
-    clearcoat: 0,
-    envMapIntensity: 0.15, // don't mirror the bright room env
-    specularIntensity: 0.2,
-  }),
-)
+const floorMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0x101216,
+  roughness: 0.85,
+  metalness: 0,
+  clearcoat: 0,
+  envMapIntensity: 0.15, // don't mirror the bright room env
+  specularIntensity: 0.2,
+})
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), floorMaterial)
 floor.rotation.x = -Math.PI / 2
 floor.receiveShadow = true
 scene.add(floor)
+
+// ground glow — an area light lying on the floor, shining straight up
+RectAreaLightUniformsLib.init()
+const groundLight = new THREE.RectAreaLight(0x3d5aff, 0, 40, 14)
+groundLight.position.set(0, 0.05, 0)
+groundLight.lookAt(0, 10, 0)
+scene.add(groundLight)
+
+/** Set the ground's light emission; intensity 0 switches it off. */
+function setGroundGlow(color: THREE.ColorRepresentation = 0x3d5aff, intensity = 1.5): void {
+  groundLight.color.set(color)
+  groundLight.intensity = intensity
+  // faint surface glow so the floor itself looks like the light source
+  floorMaterial.emissive.set(color)
+  floorMaterial.emissiveIntensity = intensity * 0.03
+}
 
 // play-area bounds derived from what the camera can actually see at z = 0
 const bounds: Bounds = { x: 20, z: 4, ceiling: 24 }
@@ -77,8 +92,11 @@ function updateBounds(): void {
   const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * dist
   bounds.x = Math.max(6, halfH * camera.aspect - 2)
   bounds.ceiling = camera.position.y + halfH
+  groundLight.width = bounds.x * 2
+  groundLight.height = bounds.z * 2 + 8
 }
 updateBounds()
+setGroundGlow(0x3d5aff, 1.2)
 
 const balls = createBalls(DEFAULT_COMPOSITION, bounds)
 for (const b of balls) scene.add(b.mesh)
@@ -107,6 +125,8 @@ const ballpit = {
     })
   },
   count: () => balls.length,
+  /** light the scene from the floor: ballpit.groundGlow(0xff2266, 2) · off: ballpit.groundGlow(0, 0) */
+  groundGlow: setGroundGlow,
   remove(ball: Ball): void {
     const i = balls.indexOf(ball)
     if (i === -1) return

@@ -98,7 +98,7 @@ registerSurface('neon', {
       color: color.clone().multiplyScalar(0.01),
       emissive: color,
       // keep below tone-mapping clip: higher values wash the surface to white
-      emissiveIntensity: 0.5,
+      emissiveIntensity: 4.0,
       roughness: o?.roughness ?? 0.6,
     })
   },
