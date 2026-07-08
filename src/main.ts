@@ -1,60 +1,124 @@
+import * as THREE from 'three'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { createBalls } from './balls'
+import { stepPhysics, type Bounds } from './physics'
+import { setupDragging } from './drag'
 import './style.css'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import { setupCounter } from './counter.ts'
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src="${viteLogo}" class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+const app = document.querySelector<HTMLDivElement>('#app')!
 
-<div class="ticks"></div>
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.0
+app.appendChild(renderer.domElement)
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src="${viteLogo}" alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+const scene = new THREE.Scene()
+scene.background = new THREE.Color(0x0b0d12)
+scene.fog = new THREE.Fog(0x0b0d12, 70, 160)
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 300)
+camera.position.set(0, 9, 34)
+camera.lookAt(0, 9, 0)
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+// image-based lighting for realistic reflections on metal/glass
+const pmrem = new THREE.PMREMGenerator(renderer)
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+scene.environmentIntensity = 0.55
+
+// key light with soft shadows
+const keyLight = new THREE.DirectionalLight(0xfff2e0, 2.4)
+keyLight.position.set(14, 28, 18)
+keyLight.castShadow = true
+keyLight.shadow.mapSize.set(2048, 2048)
+keyLight.shadow.camera.left = -30
+keyLight.shadow.camera.right = 30
+keyLight.shadow.camera.top = 30
+keyLight.shadow.camera.bottom = -10
+keyLight.shadow.camera.far = 80
+keyLight.shadow.bias = -0.0005
+keyLight.shadow.radius = 6
+scene.add(keyLight)
+
+const rimLight = new THREE.DirectionalLight(0x6a8fff, 0.8)
+rimLight.position.set(-18, 10, -14)
+scene.add(rimLight)
+
+// glossy dark floor
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(400, 400),
+  new THREE.MeshPhysicalMaterial({
+    color: 0x101216,
+    roughness: 0.85,
+    metalness: 0,
+    clearcoat: 0,
+    envMapIntensity: 0.15, // don't mirror the bright room env
+    specularIntensity: 0.2,
+  }),
+)
+floor.rotation.x = -Math.PI / 2
+floor.receiveShadow = true
+scene.add(floor)
+
+// play-area bounds derived from what the camera can actually see at z = 0
+const bounds: Bounds = { x: 20, z: 4, ceiling: 24 }
+function updateBounds(): void {
+  const dist = camera.position.z
+  const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * dist
+  bounds.x = Math.max(6, halfH * camera.aspect - 2)
+  bounds.ceiling = camera.position.y + halfH
+}
+updateBounds()
+
+const balls = createBalls(bounds)
+for (const b of balls) scene.add(b.mesh)
+
+setupDragging(renderer.domElement, camera, balls)
+
+// bloom makes the emissive balls actually glow
+const composer = new EffectComposer(renderer)
+composer.addPass(new RenderPass(scene, camera))
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.16, // strength — subtle halo, not fog
+  0.1, // radius — keep the glow hugging the ball surface
+  1.1, // threshold — only the brightest (emissive) surfaces bloom
+)
+composer.addPass(bloom)
+composer.addPass(new OutputPass())
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize(window.innerWidth, window.innerHeight)
+  composer.setSize(window.innerWidth, window.innerHeight)
+  updateBounds()
+})
+
+const hint = document.createElement('div')
+hint.className = 'hint'
+hint.textContent = 'drag a ball · throw it · watch it fall'
+app.appendChild(hint)
+
+const clock = new THREE.Clock()
+const FIXED_DT = 1 / 120
+
+let accumulator = 0
+function animate(): void {
+  requestAnimationFrame(animate)
+  // fixed-step physics so behavior is identical across refresh rates
+  accumulator += Math.min(clock.getDelta(), 0.05)
+  while (accumulator >= FIXED_DT) {
+    stepPhysics(balls, FIXED_DT, bounds)
+    accumulator -= FIXED_DT
+  }
+  composer.render()
+}
+animate()
