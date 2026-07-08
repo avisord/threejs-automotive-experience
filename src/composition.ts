@@ -29,7 +29,7 @@ export const DEFAULT_COMPOSITION: BallConfig[] = [
   //{ surface: 'polished-pebble', radius: 2.15, count: 90 },
   //{ surface: 'beach-ball', radius: 1.75 },
   //{ surface: 'checker', radius: 1.2 },
-  { surface: 'marble', radius: 1.8, count: 100 },
+  { surface: 'marble', radius: 1.8, count: 10 },
   //{ surface: 'rubber', radius: 1.3 },
   //{ surface: 'iridescent', radius: 1.15, count: 0 },
   { surface: 'magma', radius: 1.9 },
