@@ -22,7 +22,7 @@ export const DEFAULT_COMPOSITION: BallConfig[] = [
   //{ surface: 'copper', radius: 1.05, count: 0 },
   //{ surface: 'glass', radius: 1.45, count: 100 },
   { surface: 'neon', radius: 2.4, options: { color: 0x0aa4f7 }, count: 10 },
-  //{ surface: 'neon', radius: 1.4, options: { color: 0x510af7 }, count: 0 },
+  { surface: 'neon', radius: 2.4, options: { color: 0xfcba03 }, count: 10 },
   //{ surface: 'neon', radius: 1.2, options: { color: 0xff3fd4 } },
   //{ surface: 'neon', radius: 0.9, options: { color: 0xffa02e } },
   //{ surface: 'stone', radius: 2.35, count: 50 },

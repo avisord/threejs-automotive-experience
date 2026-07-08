@@ -75,7 +75,7 @@ export function createBall(config: BallConfig, area: SpawnArea): Ball {
     const color = new THREE.Color(config.options?.color ?? 0x35e0ff)
     const standard = material as THREE.MeshStandardMaterial
     if (standard.emissive) color.copy(standard.emissive)
-    const light = new THREE.PointLight(color, 410, 34, 2)
+    const light = new THREE.PointLight(color, 110, 34, 2)
     light.castShadow = true
     light.shadow.mapSize.set(512, 512)
     // near plane outside the ball's own surface, otherwise the mesh the light
