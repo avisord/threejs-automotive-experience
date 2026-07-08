@@ -153,17 +153,16 @@ hint.textContent = 'drag a ball · throw it · watch it fall'
 app.appendChild(hint)
 
 const clock = new THREE.Clock()
-const FIXED_DT = 1 / 120
+const MAX_STEP = 1 / 120
 
-let accumulator = 0
 function animate(): void {
   requestAnimationFrame(animate)
-  // fixed-step physics so behavior is identical across refresh rates
-  accumulator += Math.min(clock.getDelta(), 0.05)
-  while (accumulator >= FIXED_DT) {
-    stepPhysics(balls, FIXED_DT, bounds)
-    accumulator -= FIXED_DT
-  }
+  // substep so physics advances exactly one frame's worth of time each render —
+  // a fixed-step accumulator judders on displays that aren't a multiple of the step rate
+  const dt = Math.min(clock.getDelta(), 0.05)
+  const steps = Math.max(1, Math.ceil(dt / MAX_STEP))
+  const h = dt / steps
+  for (let i = 0; i < steps; i++) stepPhysics(balls, h, bounds)
   composer.render()
 }
 animate()
