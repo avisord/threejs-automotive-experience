@@ -1,0 +1,345 @@
+import * as THREE from 'three'
+import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
+import type { GradeLook } from '../post'
+
+/**
+ * A garage: the room around the car and everything that lights it. Swapping
+ * the garage swaps the whole scene — geometry, lights, background and the
+ * environment map the car reflects (captured from the room, see main.ts).
+ */
+export interface GarageDef {
+  id: string
+  name: string
+  /** one-liner on the card */
+  tag: string
+  /** the light palette, shown as a strip on the card */
+  palette: string[]
+  /** colour grade look applied when the garage is picked */
+  look: GradeLook
+  create(): Room
+}
+
+export interface Room {
+  group: THREE.Group
+  reflector: Reflector
+  /**
+   * Things lying on the floor (tile overlay, markings, contact shadow). They
+   * are hidden while the mirror renders, otherwise they'd block the reflection.
+   */
+  floorLayers: THREE.Object3D[]
+  /** where the camera may go: the interior minus a margin, clear of walls and pillars */
+  bounds: THREE.Box3
+  background: THREE.Color
+  environmentIntensity: number
+  /** match the mirror's render target to the viewport, at the current reflection scale */
+  resize(width: number, height: number, pixelRatio: number): void
+  /**
+   * Floor mirror resolution relative to the canvas (0.5 reads as polished
+   * epoxy). 0 switches the mirror off entirely — the car is then drawn once
+   * per frame instead of twice — and makes the floor surface opaque.
+   */
+  setReflectionScale(scale: number): void
+  /** free every geometry, material, texture and render target the room made */
+  dispose(): void
+}
+
+/**
+ * Unlit HDR material — values above 1 light up reflections, and with `bloom`
+ * they're picked up by the "lights only" bloom (see collectGlowMeshes).
+ * Big soft emitters (softboxes, windows) look better without the bloom.
+ */
+export function glowMaterial(color: THREE.ColorRepresentation, glow: number, bloom = true): THREE.MeshBasicMaterial {
+  const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(glow) })
+  material.userData.glow = bloom
+  return material
+}
+
+/** every mesh drawn with a light-emitting material — what "lights only" bloom blooms */
+export function collectGlowMeshes(root: THREE.Object3D): THREE.Object3D[] {
+  const found: THREE.Object3D[] = []
+  root.traverse((obj) => {
+    const material = (obj as THREE.Mesh).material as THREE.Material | undefined
+    if ((obj as THREE.Mesh).isMesh && material?.userData.glow) found.push(obj)
+  })
+  return found
+}
+
+export function box(
+  parent: THREE.Object3D,
+  size: [number, number, number],
+  material: THREE.Material,
+  position: [number, number, number],
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material)
+  mesh.position.set(...position)
+  parent.add(mesh)
+  return mesh
+}
+
+/**
+ * A rect area light with a visible emitter panel of the same size, facing
+ * `target`. Rect lights emit along their -z; the panel is lit on that side.
+ */
+export function softbox(
+  parent: THREE.Object3D,
+  opts: {
+    size: [width: number, height: number]
+    position: [number, number, number]
+    target: [number, number, number]
+    color: THREE.ColorRepresentation
+    intensity: number
+    /** HDR brightness of the visible panel */
+    glow: number
+    bloom?: boolean
+  },
+): THREE.RectAreaLight {
+  const [width, height] = opts.size
+  const light = new THREE.RectAreaLight(opts.color, opts.intensity, width, height)
+  light.position.set(...opts.position)
+  // aiming straight down would leave the default up vector parallel to the aim
+  const [x, y, z] = opts.position
+  const [tx, ty, tz] = opts.target
+  if (Math.hypot(tx - x, tz - z) < 1e-3 * Math.abs(ty - y)) light.up.set(0, 0, -1)
+  light.lookAt(tx, ty, tz)
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(width, height), glowMaterial(opts.color, opts.glow, opts.bloom ?? false))
+  panel.rotation.y = Math.PI // plane faces +z; flip it to face along the light
+  panel.position.z = 0.01
+  // dark housing a little larger than the panel: reads as a frame, hides the unlit back
+  const housing = new THREE.Mesh(
+    new THREE.PlaneGeometry(width + 0.14, height + 0.14),
+    new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 0.6, side: THREE.DoubleSide }),
+  )
+  housing.position.z = 0.03
+  light.add(panel, housing)
+  parent.add(light)
+  return light
+}
+
+/** Seamless floor tile: bright base (the material colour tints it) with dark seams and a little grain. */
+export function floorTileTexture(repeat: [number, number], seam = '#3a3a3a'): THREE.CanvasTexture {
+  const size = 512
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const g = canvas.getContext('2d')!
+  const grain = g.createImageData(size, size)
+  for (let i = 0; i < grain.data.length; i += 4) {
+    const v = 235 + Math.random() * 20
+    grain.data[i] = grain.data[i + 1] = grain.data[i + 2] = v
+    grain.data[i + 3] = 255
+  }
+  g.putImageData(grain, 0, 0)
+  g.fillStyle = seam
+  g.fillRect(0, 0, size, 3)
+  g.fillRect(0, 0, 3, size)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping
+  texture.repeat.set(...repeat)
+  texture.anisotropy = 8
+  return texture
+}
+
+/** Tileable blotchy noise for concrete and plaster: white-ish, tint it with the material colour. */
+export function concreteTexture(repeat: [number, number], contrast = 1): THREE.CanvasTexture {
+  const size = 512
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const g = canvas.getContext('2d')!
+  g.fillStyle = '#d8d8d8'
+  g.fillRect(0, 0, size, size)
+  // soft blotches, drawn wrapped so the tile repeats seamlessly
+  for (let i = 0; i < 260; i++) {
+    const x = Math.random() * size
+    const y = Math.random() * size
+    const r = 8 + Math.random() * 60
+    const v = Math.round(200 + (Math.random() - 0.5) * 90 * contrast)
+    for (const dx of [-size, 0, size]) {
+      for (const dy of [-size, 0, size]) {
+        const grad = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r)
+        grad.addColorStop(0, `rgba(${v},${v},${v},0.35)`)
+        grad.addColorStop(1, `rgba(${v},${v},${v},0)`)
+        g.fillStyle = grad
+        g.fillRect(x + dx - r, y + dy - r, r * 2, r * 2)
+      }
+    }
+  }
+  const grain = g.getImageData(0, 0, size, size)
+  for (let i = 0; i < grain.data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 28 * contrast
+    grain.data[i] += n
+    grain.data[i + 1] += n
+    grain.data[i + 2] += n
+  }
+  g.putImageData(grain, 0, 0)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping
+  texture.repeat.set(...repeat)
+  texture.anisotropy = 8
+  return texture
+}
+
+/**
+ * Reflector shader with a soft, glossy look instead of a perfect mirror:
+ * a golden-angle disc of taps over a blurred mip level of the reflection.
+ */
+const BlurredReflectorShader = {
+  name: 'BlurredReflectorShader',
+  uniforms: {
+    color: { value: null },
+    tDiffuse: { value: null },
+    textureMatrix: { value: null },
+    /** disc radius in screen uv */
+    blur: { value: 0.012 },
+    /** mip level sampled — each step halves the resolution */
+    lod: { value: 1.5 },
+  },
+  vertexShader: /* glsl */ `
+    uniform mat4 textureMatrix;
+    varying vec4 vUv;
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
+    void main() {
+      vUv = textureMatrix * vec4( position, 1.0 );
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+      #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform vec3 color;
+    uniform sampler2D tDiffuse;
+    uniform float blur;
+    uniform float lod;
+    varying vec4 vUv;
+    #include <logdepthbuf_pars_fragment>
+    void main() {
+      #include <logdepthbuf_fragment>
+      vec2 uv = vUv.xy / vUv.w;
+      vec3 sum = vec3( 0.0 );
+      const int TAPS = 16;
+      for ( int i = 0; i < TAPS; i ++ ) {
+        float fi = float( i ) + 0.5;
+        float a = fi * 2.39996323; // golden angle spreads taps evenly over the disc
+        vec2 offset = vec2( cos( a ), sin( a ) ) * sqrt( fi / float( TAPS ) ) * blur;
+        sum += textureLod( tDiffuse, uv + offset, lod ).rgb;
+      }
+      gl_FragColor = vec4( color * sum / float( TAPS ), 1.0 );
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+}
+
+export interface FloorOptions {
+  /** floor outline in the XY plane; it's laid flat at y = 0 */
+  geometry: THREE.BufferGeometry
+  /** reflection tint — darker is a weaker mirror */
+  tint: THREE.ColorRepresentation
+  /** how soft the reflection is, in screen uv (0.012 = polished epoxy, lower = wet) */
+  blur?: number
+  lod?: number
+  /** the surface laid over the mirror; its opacity sets how much reflection shows through */
+  surface: THREE.MeshStandardMaterial
+}
+
+export interface Floor {
+  reflector: Reflector
+  floorLayers: THREE.Object3D[]
+  resize: Room['resize']
+  setReflectionScale: Room['setReflectionScale']
+}
+
+/** Floor mirror underneath, a semi-opaque surface on top. */
+export function createFloor(parent: THREE.Object3D, opts: FloorOptions): Floor {
+  const reflector = new Reflector(opts.geometry, {
+    color: opts.tint,
+    textureWidth: 1024,
+    textureHeight: 1024,
+    clipBias: 0.003,
+    shader: BlurredReflectorShader,
+  })
+  const uniforms = (reflector.material as THREE.ShaderMaterial).uniforms
+  uniforms.blur.value = opts.blur ?? 0.012
+  uniforms.lod.value = opts.lod ?? 1.5
+  reflector.rotation.x = -Math.PI / 2
+  // the blur samples a mip level, so the mirror target needs a mip chain
+  const mirrorTexture = reflector.getRenderTarget().texture
+  mirrorTexture.generateMipmaps = true
+  mirrorTexture.minFilter = THREE.LinearMipmapLinearFilter
+  parent.add(reflector)
+
+  const surfaceOpacity = opts.surface.opacity
+  opts.surface.transparent = true
+  opts.surface.depthWrite = false
+  const surface = new THREE.Mesh(opts.geometry.clone(), opts.surface)
+  surface.rotation.x = -Math.PI / 2
+  surface.position.y = 0.002
+  parent.add(surface)
+
+  const floorLayers: THREE.Object3D[] = [surface]
+  const baseBeforeRender = reflector.onBeforeRender
+  reflector.onBeforeRender = (...args) => {
+    for (const o of floorLayers) o.visible = false
+    baseBeforeRender.apply(reflector, args)
+    for (const o of floorLayers) o.visible = true
+  }
+
+  let reflectionScale = 0.5
+  const viewport = { width: 1, height: 1, pixelRatio: 1 }
+  function sizeMirror(): void {
+    const k = viewport.pixelRatio * Math.max(reflectionScale, 0.05)
+    reflector.getRenderTarget().setSize(Math.round(viewport.width * k), Math.round(viewport.height * k))
+  }
+
+  return {
+    reflector,
+    floorLayers,
+    resize(width, height, pixelRatio) {
+      Object.assign(viewport, { width, height, pixelRatio })
+      sizeMirror()
+    },
+    setReflectionScale(scale) {
+      reflectionScale = scale
+      reflector.visible = scale > 0
+      opts.surface.opacity = scale > 0 ? surfaceOpacity : 1
+      sizeMirror()
+    },
+  }
+}
+
+/** everything a garage needs besides its group and floor */
+export interface RoomOptions {
+  /** interior box (min/max corners) the camera may occupy */
+  bounds: [min: [number, number, number], max: [number, number, number]]
+  background: THREE.ColorRepresentation
+  environmentIntensity: number
+}
+
+export function assembleRoom(group: THREE.Group, floor: Floor, opts: RoomOptions): Room {
+  return {
+    group,
+    reflector: floor.reflector,
+    floorLayers: floor.floorLayers,
+    bounds: new THREE.Box3(new THREE.Vector3(...opts.bounds[0]), new THREE.Vector3(...opts.bounds[1])),
+    background: new THREE.Color(opts.background),
+    environmentIntensity: opts.environmentIntensity,
+    resize: floor.resize,
+    setReflectionScale: floor.setReflectionScale,
+    dispose: () => disposeTree(group),
+  }
+}
+
+function disposeTree(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    if (obj instanceof Reflector) {
+      obj.dispose() // render target and material, not the geometry
+      obj.geometry.dispose()
+      return
+    }
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    mesh.geometry.dispose()
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      for (const value of Object.values(material)) if ((value as THREE.Texture | null)?.isTexture) (value as THREE.Texture).dispose()
+      material.dispose()
+    }
+  })
+}
