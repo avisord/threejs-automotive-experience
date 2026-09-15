@@ -6,11 +6,12 @@ import { disposeCar, loadCar } from './car'
 import { CARS, DEFAULT_CAR, carTitle } from './cars'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
-import { createPostProcessing, type PostProcessing } from './post'
+import { REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
 import { mountPanel, menuList, type Nav, type Page } from './ui/panel'
 import { carPage } from './ui/car-page'
 import { garagePage } from './ui/garage-page'
 import { graphicsPage } from './ui/graphics-page'
+import { displayPage } from './ui/display-page'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -48,16 +49,14 @@ window.addEventListener('keydown', (e) => {
   else return
   e.preventDefault()
 })
-/** advance OrbitControls, easing in any pending keyboard zoom */
-function updateControls(dt: number): void {
-  if (Math.abs(zoomPending) < 1e-4) {
-    controls.update()
-    return
-  }
+/** advance OrbitControls, easing in any pending keyboard zoom; true if the camera moved */
+function updateControls(dt: number): boolean {
+  if (Math.abs(zoomPending) < 1e-4) return controls.update()
   const step = zoomPending * Math.min(1, dt * 12)
   zoomPending -= step
   // radius *= e^step (clamped to min/max distance); dollyIn() runs update() itself
   controls.dollyIn(Math.exp(step))
+  return true
 }
 
 // room interior the camera may occupy (walls/ceiling minus a margin)
@@ -118,8 +117,37 @@ scene.add(new THREE.HemisphereLight(0xbfd6ff, 0x0a0b0d, 0.25))
 }
 scene.environmentIntensity = 1.0
 
-// ─── post: AO, bloom, grade, vignette ───────────────────────────────────────
+// ─── post: AO, bloom, grade, vignette, AA ───────────────────────────────────
 const post = createPostProcessing(renderer, scene, camera, () => collectGlowMeshes(room.group))
+
+/**
+ * Frames still to draw. In on-demand mode (the default) nothing is drawn
+ * unless something changed — the camera, the car, a setting, the viewport —
+ * so an idle garage costs next to nothing.
+ */
+let dirtyFrames = 0
+function invalidate(frames = 2): void {
+  dirtyFrames = Math.max(dirtyFrames, frames)
+}
+
+const MAX_ANISOTROPY = renderer.capabilities.getMaxAnisotropy()
+/** apply the texture-filtering setting to every texture under `root` */
+function applyAnisotropy(root: THREE.Object3D): void {
+  const n = Math.min(post.settings.quality.anisotropy, MAX_ANISOTROPY)
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      for (const value of Object.values(material)) {
+        const texture = value as THREE.Texture | null
+        // render-target textures (contact shadow) have no image to re-upload
+        if (!texture?.isTexture || texture.isRenderTargetTexture || texture.anisotropy === n) continue
+        texture.anisotropy = n
+        texture.needsUpdate = true
+      }
+    }
+  })
+}
 
 // width the configurator panel takes on the right (panel + margins, see style.css)
 const PANEL_INSET = 328
@@ -140,18 +168,31 @@ function resize(): void {
   const fullH = h + insetY
   // focal length in px: 42° vertical on wide screens; on narrow portrait
   // screens fit ~44° across the width instead, or the car won't fit
-  const focal = wide ? h / 2 / Math.tan(THREE.MathUtils.degToRad(21)) : w / 2 / Math.tan(THREE.MathUtils.degToRad(22))
+  const half = post.settings.display.fov / 2
+  const focal = wide
+    ? h / 2 / Math.tan(THREE.MathUtils.degToRad(half))
+    : w / 2 / Math.tan(THREE.MathUtils.degToRad(half * (44 / 42)))
   baseFov = THREE.MathUtils.radToDeg(2 * Math.atan(fullH / 2 / focal))
   camera.fov = baseFov
   camera.aspect = fullW / fullH
   if (insetX > 0 || insetY > 0) camera.setViewOffset(fullW, fullH, insetX, insetY, w, h)
   else camera.clearViewOffset()
   camera.updateProjectionMatrix()
+  // render scale multiplies the (capped) native pixel ratio: <1 upsamples, >1 supersamples
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * post.settings.quality.renderScale)
   post.setSize(w, h) // also sizes the renderer
   room.resize(w, h, renderer.getPixelRatio())
+  invalidate()
 }
 window.addEventListener('resize', resize)
-resize()
+
+/** resolution, floor mirror and texture filtering — the settings outside the composer */
+function applyQuality(): void {
+  room.setReflectionScale(REFLECTION_SCALE[post.settings.quality.reflections])
+  resize()
+  applyAnisotropy(room.group)
+  if (bay) applyAnisotropy(bay.root)
+}
 
 // ─── hud ────────────────────────────────────────────────────────────────────
 const hint = document.createElement('div')
@@ -162,6 +203,7 @@ app.appendChild(hint)
 const fpsEl = document.createElement('div')
 fpsEl.className = 'fps'
 fpsEl.textContent = '— fps'
+fpsEl.hidden = !post.settings.display.showFps
 app.appendChild(fpsEl)
 
 const loader = document.createElement('div')
@@ -170,17 +212,15 @@ loader.innerHTML = '<span class="loader-label">loading vehicle</span><span class
 app.appendChild(loader)
 const loaderFill = loader.querySelector<HTMLElement>('i')!
 
-let frameCount = 0
+let framesDrawn = 0
 let fpsWindowStart = performance.now()
-function tickFps(): void {
-  frameCount++
-  const now = performance.now()
+/** readout of frames actually drawn; "idle" when on-demand has nothing to draw */
+function tickFps(now: number): void {
   const elapsed = now - fpsWindowStart
-  if (elapsed >= 500) {
-    fpsEl.textContent = `${Math.round((frameCount * 1000) / elapsed)} fps`
-    frameCount = 0
-    fpsWindowStart = now
-  }
+  if (elapsed < 500) return
+  fpsEl.textContent = framesDrawn === 0 ? 'idle' : `${Math.round((framesDrawn * 1000) / elapsed)} fps`
+  framesDrawn = 0
+  fpsWindowStart = now
 }
 
 // ─── car ────────────────────────────────────────────────────────────────────
@@ -220,7 +260,9 @@ async function showCar(id: string): Promise<void> {
     scene.add(shadow)
     room.floorLayers.push(shadow)
     const configurator = createConfigurator(root, profile)
+    applyAnisotropy(root)
     bay = { id: profile.id, root, shadow, configurator }
+    invalidate(4) // first frames also compile the new car's shaders
     garage.configurator = configurator
     try {
       localStorage.setItem(CAR_KEY, profile.id)
@@ -249,10 +291,11 @@ const pages: Record<string, Page> = {
   car: carPage(() => bay?.configurator),
   settings: {
     title: 'Settings',
-    hint: 'Graphics',
-    render: (body, nav) => body.append(menuList(pages, ['graphics'], nav)),
+    hint: 'Graphics, display',
+    render: (body, nav) => body.append(menuList(pages, ['graphics', 'display'], nav)),
   },
   graphics: graphicsPage(post),
+  display: displayPage(post),
 }
 const panelNav: Nav = mountPanel(app, pages, 'menu')
 
@@ -278,7 +321,9 @@ const garage: {
   post: PostProcessing
   /** repaint from the console: garage.configurator.set('body', { style: 'solid', colorA: '#ff0000' }) */
   configurator?: CarConfigurator
-} = { scene, camera, controls, renderer, room, post }
+  /** redraw after changing things from the console while rendering on demand */
+  invalidate: typeof invalidate
+} = { scene, camera, controls, renderer, room, post, invalidate }
 declare global {
   interface Window {
     garage: typeof garage
@@ -286,17 +331,67 @@ declare global {
 }
 window.garage = garage
 
-const timer = new THREE.Timer()
+// ─── settings that live outside the composer ────────────────────────────────
+post.onChange((sections) => {
+  if (sections.includes('quality')) applyQuality()
+  if (sections.includes('display')) {
+    resize() // field of view
+    fpsEl.hidden = !post.settings.display.showFps
+    syncRunning()
+  }
+  invalidate(3)
+})
+// anything done in the panel (pickers, sliders, cards) may change the picture
+for (const type of ['input', 'change', 'click']) app.addEventListener(type, () => invalidate())
+window.addEventListener('keydown', () => invalidate())
+applyQuality()
 
-function animate(timestamp?: number): void {
-  requestAnimationFrame(animate)
+// ─── frame loop ─────────────────────────────────────────────────────────────
+const timer = new THREE.Timer()
+let rafId = 0
+let lastFrameAt = 0
+
+function frame(timestamp: number): void {
+  rafId = requestAnimationFrame(frame)
+  tickFps(timestamp)
+  const { fpsCap, onDemand } = post.settings.display
+  if (fpsCap > 0) {
+    const interval = 1000 / fpsCap
+    const since = timestamp - lastFrameAt
+    if (since < interval - 1) return
+    // step the schedule by whole intervals so the cap doesn't drift below target
+    lastFrameAt = since < interval * 2 ? lastFrameAt + interval : timestamp
+  }
+
   timer.update(timestamp)
   const dt = Math.min(timer.getDelta(), 0.05)
-  updateControls(dt)
+  if (updateControls(dt)) invalidate() // includes damping settling after a drag
+  if (onDemand && dirtyFrames === 0) return
+  dirtyFrames = Math.max(0, dirtyFrames - 1)
+
   bay?.configurator.update()
   fitCameraInRoom()
   post.render(dt)
   restoreOrbitCamera()
-  tickFps()
+  framesDrawn++
 }
-animate()
+
+/**
+ * A hidden tab never draws — the loop is cancelled outright, not just
+ * throttled — and optionally neither does an unfocused window.
+ */
+function syncRunning(): void {
+  const run = !document.hidden && !(post.settings.display.pauseUnfocused && !document.hasFocus())
+  if (run && !rafId) {
+    rafId = requestAnimationFrame(frame)
+    invalidate()
+  } else if (!run && rafId) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+    fpsEl.textContent = 'paused'
+  }
+}
+document.addEventListener('visibilitychange', syncRunning)
+window.addEventListener('blur', syncRunning)
+window.addEventListener('focus', syncRunning)
+syncRunning()

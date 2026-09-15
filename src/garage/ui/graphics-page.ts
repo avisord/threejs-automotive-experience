@@ -1,4 +1,17 @@
-import { BLOOM_THRESHOLD, LOOKS, type AoQuality, type AoView, type GradeLook, type PostProcessing, type ToneMapper } from '../post'
+import {
+  BLOOM_THRESHOLD,
+  LOOKS,
+  matchingPreset,
+  type AoQuality,
+  type AoView,
+  type GradeLook,
+  type Msaa,
+  type PostProcessing,
+  type QualityPreset,
+  type Reflections,
+  type Smaa,
+  type ToneMapper,
+} from '../post'
 import type { Page } from './panel'
 import { actionButton, el, section, segmented, slider, toggle } from './widgets'
 
@@ -22,6 +35,22 @@ const LOOK_LABEL: Record<GradeLook, string> = {
   noir: 'Noir',
 }
 
+const PRESET_LABEL: Record<QualityPreset, string> = { low: 'Low', medium: 'Medium', high: 'High', ultra: 'Ultra' }
+
+const RENDER_SCALES = ['0.5', '0.75', '1', '1.25', '1.5', '2'] as const
+type RenderScale = (typeof RENDER_SCALES)[number]
+const RENDER_SCALE_LABEL = Object.fromEntries(RENDER_SCALES.map((v) => [v, `${Number(v) * 100}%`])) as Record<RenderScale, string>
+
+const MSAA_OPTIONS = ['0', '2', '4', '8'] as const
+const MSAA_LABEL: Record<(typeof MSAA_OPTIONS)[number], string> = { '0': 'Off', '2': '2×', '4': '4×', '8': '8×' }
+
+const SMAA_LABEL: Record<Smaa, string> = { off: 'Off', low: 'Low', medium: 'Med', high: 'High', ultra: 'Ultra' }
+
+const REFLECTION_LABEL: Record<Reflections, string> = { off: 'Off', low: 'Low', medium: 'Med', high: 'High' }
+
+const ANISO_OPTIONS = ['1', '2', '4', '8', '16'] as const
+const ANISO_LABEL = Object.fromEntries(ANISO_OPTIONS.map((v) => [v, `${v}×`])) as Record<(typeof ANISO_OPTIONS)[number], string>
+
 const fixed = (digits: number, unit = '') => (v: number) => `${v.toFixed(digits)}${unit}`
 const signed = (digits: number, unit = '') => (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(digits)}${unit}`
 
@@ -31,10 +60,66 @@ export function graphicsPage(post: PostProcessing): Page {
 
   return {
     title: 'Graphics',
-    hint: 'Ambient occlusion, bloom, colour grade, vignette',
+    hint: 'Quality, anti-aliasing, AO, bloom, grade, vignette',
     render(body, nav) {
       // toggles and mode switches rebuild the effect chain, so re-render to show/hide controls
       const structural = () => nav.refresh()
+
+      // ─── quality preset ─────────────────────────────────────────────────
+      const preset = matchingPreset(s)
+      const quality = section('Quality preset')
+      quality.append(
+        segmented(Object.keys(PRESET_LABEL) as QualityPreset[], PRESET_LABEL, preset ?? ('custom' as QualityPreset), (name) => {
+          post.applyPreset(name)
+          structural()
+        }),
+        el(
+          'p',
+          'cfg-note',
+          preset
+            ? 'Sets resolution, anti-aliasing, reflections, texture filtering and AO quality.'
+            : 'Custom — tweaked from a preset below. Pick one to reset those settings.',
+        ),
+      )
+      body.append(quality)
+
+      // ─── resolution & anti-aliasing ─────────────────────────────────────
+      const aa = section('Resolution & anti-aliasing')
+      aa.append(
+        el('div', 'cfg-label cfg-sub', 'Render scale'),
+        segmented(RENDER_SCALES, RENDER_SCALE_LABEL, String(s.quality.renderScale) as RenderScale, (v) => {
+          post.set('quality', { renderScale: Number(v) })
+          structural()
+        }),
+        el('div', 'cfg-label cfg-sub', 'MSAA'),
+        segmented(MSAA_OPTIONS, MSAA_LABEL, String(s.aa.msaa) as (typeof MSAA_OPTIONS)[number], (v) => {
+          post.set('aa', { msaa: Number(v) as Msaa })
+          structural()
+        }),
+        el('div', 'cfg-label cfg-sub', 'SMAA'),
+        segmented(Object.keys(SMAA_LABEL) as Smaa[], SMAA_LABEL, s.aa.smaa, (smaa) => {
+          post.set('aa', { smaa })
+          structural()
+        }),
+        el('p', 'cfg-note', 'MSAA smooths geometry edges, SMAA catches what it misses, render scale above 100% fixes shimmer inside surfaces.'),
+      )
+      body.append(aa)
+
+      // ─── reflections & textures ─────────────────────────────────────────
+      const detail = section('Reflections & textures')
+      detail.append(
+        el('div', 'cfg-label cfg-sub', 'Floor reflections'),
+        segmented(Object.keys(REFLECTION_LABEL) as Reflections[], REFLECTION_LABEL, s.quality.reflections, (reflections) => {
+          post.set('quality', { reflections })
+          structural()
+        }),
+        el('div', 'cfg-label cfg-sub', 'Texture filtering'),
+        segmented(ANISO_OPTIONS, ANISO_LABEL, String(s.quality.anisotropy) as (typeof ANISO_OPTIONS)[number], (v) => {
+          post.set('quality', { anisotropy: Number(v) })
+          structural()
+        }),
+      )
+      body.append(detail)
 
       // ─── ambient occlusion ──────────────────────────────────────────────
       const ao = section(

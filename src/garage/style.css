@@ -489,3 +489,9 @@ body,
   padding-top: 16px;
   color: rgba(255, 255, 255, 0.5);
 }
+
+.cfg-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.42);
+}
