@@ -262,8 +262,14 @@ export interface Room {
    * are hidden while the mirror renders, otherwise they'd block the reflection.
    */
   floorLayers: THREE.Object3D[]
-  /** match the mirror's render target to the viewport (kept at half res — a slightly soft reflection reads as polished epoxy) */
+  /** match the mirror's render target to the viewport, at the current reflection scale */
   resize(width: number, height: number, pixelRatio: number): void
+  /**
+   * Floor mirror resolution relative to the canvas (0.5 reads as polished
+   * epoxy). 0 switches the mirror off entirely — the car is then drawn once
+   * per frame instead of twice — and makes the tiles opaque.
+   */
+  setReflectionScale(scale: number): void
 }
 
 export function createRoom(): Room {
@@ -380,12 +386,27 @@ export function createRoom(): Room {
     for (const o of floorLayers) o.visible = true
   }
 
+  let reflectionScale = 0.5
+  const viewport = { width: 1, height: 1, pixelRatio: 1 }
+  const floorMaterial = floor.material as THREE.MeshStandardMaterial
+  function sizeMirror(): void {
+    const k = viewport.pixelRatio * Math.max(reflectionScale, 0.05)
+    reflector.getRenderTarget().setSize(Math.round(viewport.width * k), Math.round(viewport.height * k))
+  }
+
   return {
     group,
     reflector,
     floorLayers,
     resize(width, height, pixelRatio) {
-      reflector.getRenderTarget().setSize(Math.round(width * pixelRatio * 0.5), Math.round(height * pixelRatio * 0.5))
+      Object.assign(viewport, { width, height, pixelRatio })
+      sizeMirror()
+    },
+    setReflectionScale(scale) {
+      reflectionScale = scale
+      reflector.visible = scale > 0
+      floorMaterial.opacity = scale > 0 ? 0.8 : 1
+      sizeMirror()
     },
   }
 }

@@ -6,6 +6,8 @@ import {
   EffectPass,
   RenderPass,
   SelectiveBloomEffect,
+  SMAAEffect,
+  SMAAPreset,
   ToneMappingEffect,
   ToneMappingMode,
   VignetteEffect,
@@ -17,6 +19,11 @@ import { GradeEffect } from './grade-effect'
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 export type ToneMapper = 'agx' | 'aces' | 'neutral'
 export type GradeLook = 'natural' | 'cyber' | 'warm' | 'cold' | 'noir'
+export type Msaa = 0 | 2 | 4 | 8
+export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
+/** floor mirror resolution relative to the canvas; 0 turns the mirror off */
+export type Reflections = 'off' | 'low' | 'medium' | 'high'
+export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra'
 
 export interface GraphicsSettings {
   ao: { enabled: boolean; intensity: number; radius: number; quality: AoQuality }
@@ -32,9 +39,68 @@ export interface GraphicsSettings {
     split: number
   }
   vignette: { enabled: boolean; darkness: number; offset: number }
+  aa: { msaa: Msaa; smaa: Smaa }
+  /** applied outside the composer (renderer, room, textures) — see main.ts */
+  quality: { renderScale: number; reflections: Reflections; anisotropy: number }
+  /** frame loop and camera — see main.ts */
+  display: {
+    /** 0 = uncapped (display refresh rate) */
+    fpsCap: number
+    /** only draw when something changed (camera, car, settings); idle costs nothing */
+    onDemand: boolean
+    /** stop drawing while the window is in the background; hidden tabs always stop */
+    pauseUnfocused: boolean
+    fov: number
+    showFps: boolean
+  }
 }
 
 export type GraphicsSection = keyof GraphicsSettings
+
+export const REFLECTION_SCALE: Record<Reflections, number> = { off: 0, low: 0.25, medium: 0.5, high: 1 }
+
+type PresetValues = Pick<GraphicsSettings, 'aa' | 'quality'> & { ao: Pick<GraphicsSettings['ao'], 'enabled' | 'quality'> }
+
+/** what each quality preset sets; everything else (looks, intensities) is left alone */
+export const QUALITY_PRESETS: Record<QualityPreset, PresetValues> = {
+  low: {
+    aa: { msaa: 0, smaa: 'medium' },
+    quality: { renderScale: 0.75, reflections: 'off', anisotropy: 2 },
+    ao: { enabled: false, quality: 'Performance' },
+  },
+  medium: {
+    aa: { msaa: 2, smaa: 'off' },
+    quality: { renderScale: 1, reflections: 'low', anisotropy: 4 },
+    ao: { enabled: true, quality: 'Medium' },
+  },
+  high: {
+    aa: { msaa: 4, smaa: 'off' },
+    quality: { renderScale: 1, reflections: 'medium', anisotropy: 8 },
+    ao: { enabled: true, quality: 'High' },
+  },
+  ultra: {
+    aa: { msaa: 4, smaa: 'high' },
+    quality: { renderScale: 1.5, reflections: 'high', anisotropy: 16 },
+    ao: { enabled: true, quality: 'Ultra' },
+  },
+}
+
+/** the preset the current settings equal, or null for a custom mix */
+export function matchingPreset(s: GraphicsSettings): QualityPreset | null {
+  const same = (a: object, b: object) => Object.entries(b).every(([k, v]) => (a as Record<string, unknown>)[k] === v)
+  const hit = (Object.keys(QUALITY_PRESETS) as QualityPreset[]).find((name) => {
+    const p = QUALITY_PRESETS[name]
+    return same(s.aa, p.aa) && same(s.quality, p.quality) && same(s.ao, p.ao)
+  })
+  return hit ?? null
+}
+
+const SMAA_PRESET: Record<Exclude<Smaa, 'off'>, SMAAPreset> = {
+  low: SMAAPreset.LOW,
+  medium: SMAAPreset.MEDIUM,
+  high: SMAAPreset.HIGH,
+  ultra: SMAAPreset.ULTRA,
+}
 
 /** AO debug view — for tuning, deliberately not saved */
 export type AoView = 'final' | 'ao' | 'split'
@@ -67,6 +133,9 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   // Neutral keeps the livery's saturated pink; AgX washes it out, ACES crushes the walls
   grade: { enabled: true, toneMapper: 'neutral', look: 'cyber', exposure: 0, ...pick(LOOKS.cyber) },
   vignette: { enabled: true, darkness: 0.55, offset: 0.3 },
+  aa: { ...QUALITY_PRESETS.high.aa },
+  quality: { ...QUALITY_PRESETS.high.quality },
+  display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 42, showFps: true },
 }
 
 function pick(look: Look) {
@@ -96,7 +165,11 @@ function loadSaved(): GraphicsSettings {
 export interface PostProcessing {
   readonly settings: GraphicsSettings
   set<K extends GraphicsSection>(section: K, patch: Partial<GraphicsSettings[K]>): void
+  /** set AA, resolution, reflections, textures and AO quality in one go */
+  applyPreset(name: QualityPreset): void
   reset(): void
+  /** called after any change with the sections that changed */
+  onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
   setSize(width: number, height: number): void
   render(dt: number): void
@@ -117,28 +190,32 @@ export function createPostProcessing(
   // tone mapping happens in the effect pass, not in every material
   renderer.toneMapping = THREE.NoToneMapping
 
-  const composer = new EffectComposer(renderer, { multisampling: 4, frameBufferType: THREE.HalfFloatType })
+  const settings = loadSaved()
+  const composer = new EffectComposer(renderer, { multisampling: settings.aa.msaa, frameBufferType: THREE.HalfFloatType })
   composer.addPass(new RenderPass(scene, camera))
 
   const ao = new N8AOPostPass(scene, camera, window.innerWidth, window.innerHeight)
   ao.configuration.gammaCorrection = false // the effect pass after it handles output colour
   composer.addPass(ao)
 
-  const settings = loadSaved()
+  const listeners: ((sections: GraphicsSection[]) => void)[] = []
   let aoQuality: AoQuality | null = null
   let aoView: AoView = 'final'
 
   let effectPass: EffectPass | null = null
+  let smaaPass: EffectPass | null = null
   let bloom: BloomEffect | null = null
   let grade: GradeEffect | null = null
   let vignette: VignetteEffect | null = null
   let structureKey = ''
 
   function rebuildEffects(): void {
-    if (effectPass) {
-      composer.removePass(effectPass)
-      effectPass.dispose() // also disposes the effects it holds
+    for (const pass of [effectPass, smaaPass]) {
+      if (!pass) continue
+      composer.removePass(pass)
+      pass.dispose() // also disposes the effects it holds
     }
+    smaaPass = null
     const s = settings
     const effects: Effect[] = []
     bloom = grade = vignette = null
@@ -159,15 +236,23 @@ export function createPostProcessing(
 
     effectPass = new EffectPass(camera, ...effects)
     composer.addPass(effectPass)
+
+    // SMAA gets its own pass so it finds edges in the tone-mapped image, not raw HDR
+    if (s.aa.smaa !== 'off') {
+      smaaPass = new EffectPass(camera, new SMAAEffect({ preset: SMAA_PRESET[s.aa.smaa] }))
+      composer.addPass(smaaPass)
+    }
   }
 
   function apply(): void {
     const s = settings
-    const key = [s.bloom.enabled, s.bloom.lightsOnly, s.grade.enabled, s.grade.toneMapper, s.vignette.enabled].join()
+    const key = [s.bloom.enabled, s.bloom.lightsOnly, s.grade.enabled, s.grade.toneMapper, s.vignette.enabled, s.aa.smaa].join()
     if (key !== structureKey) {
       structureKey = key
       rebuildEffects()
     }
+
+    if (composer.multisampling !== s.aa.msaa) composer.multisampling = s.aa.msaa // reallocates the frame buffers
 
     ao.enabled = s.ao.enabled
     if (s.ao.quality !== aoQuality) {
@@ -209,6 +294,19 @@ export function createPostProcessing(
       Object.assign(settings[section], patch)
       apply()
       save()
+      for (const l of listeners) l([section])
+    },
+    applyPreset(name) {
+      const p = QUALITY_PRESETS[name]
+      Object.assign(settings.aa, p.aa)
+      Object.assign(settings.quality, p.quality)
+      Object.assign(settings.ao, p.ao)
+      apply()
+      save()
+      for (const l of listeners) l(['aa', 'quality', 'ao'])
+    },
+    onChange(listener) {
+      listeners.push(listener)
     },
     get aoView() {
       return aoView
@@ -221,6 +319,7 @@ export function createPostProcessing(
       for (const k of Object.keys(settings) as GraphicsSection[]) Object.assign(settings[k], DEFAULT_GRAPHICS[k])
       apply()
       save()
+      for (const l of listeners) l(Object.keys(settings) as GraphicsSection[])
     },
     setSize(width, height) {
       composer.setSize(width, height)
