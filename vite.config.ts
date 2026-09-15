@@ -3,6 +3,9 @@ import { defineConfig } from 'vite'
 
 // multi-page: each html at the root is its own playground
 export default defineConfig({
+  server: {
+    port: 3000
+  },
   build: {
     rollupOptions: {
       input: {

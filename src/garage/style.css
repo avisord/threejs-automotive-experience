@@ -21,12 +21,49 @@ body,
 .fps {
   position: fixed;
   top: 14px;
-  right: 16px;
+  left: 16px;
   font: 13px/1 ui-monospace, Consolas, monospace;
   letter-spacing: 0.08em;
   color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
   user-select: none;
+}
+
+.loader {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font: 12px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(5, 6, 8, 0.7);
+  pointer-events: none;
+  transition: opacity 0.8s ease;
+}
+
+.loader.done {
+  opacity: 0;
+}
+
+.loader-bar {
+  width: 220px;
+  height: 2px;
+  background: rgba(53, 224, 255, 0.15);
+  overflow: hidden;
+}
+
+.loader-bar i {
+  display: block;
+  height: 100%;
+  background: #35e0ff;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.2s ease;
 }
 
 .hint {
@@ -40,4 +77,415 @@ body,
   color: rgba(255, 255, 255, 0.35);
   pointer-events: none;
   user-select: none;
+}
+
+/* ─── configurator panel ─────────────────────────────────────────────────── */
+.cfg {
+  --cfg-accent: #35e0ff;
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  font: 12px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(8, 10, 14, 0.72);
+  border: 1px solid rgba(53, 224, 255, 0.18);
+  border-radius: 10px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+
+.cfg.is-collapsed {
+  bottom: auto;
+}
+
+.cfg.is-collapsed .cfg-body {
+  display: none;
+}
+
+.cfg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cfg-crumbs,
+.cfg h3,
+.cfg-label {
+  font: 11px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.cfg-crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.cfg-crumb {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit !important;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.cfg-crumb:hover {
+  color: #fff !important;
+}
+
+.cfg-crumb.is-current {
+  color: var(--cfg-accent) !important;
+}
+
+.cfg-crumb-sep {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.cfg-back {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 16px !important;
+  line-height: 1;
+}
+
+.cfg-back:hover,
+.cfg-toggle:hover {
+  border-color: var(--cfg-accent);
+}
+
+/* ─── menu rows ─── */
+.cfg-menu {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+}
+
+.cfg-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.cfg-menu-row:hover {
+  border-color: rgba(53, 224, 255, 0.5);
+  background: rgba(53, 224, 255, 0.07);
+}
+
+.cfg-menu-text {
+  display: grid;
+  gap: 4px;
+}
+
+.cfg-menu-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.cfg-menu-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.cfg-menu-chevron {
+  font-size: 18px;
+  color: var(--cfg-accent);
+}
+
+/* ─── section title row + switch ─── */
+.cfg-part-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cfg-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.cfg-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  transition: transform 0.15s, background 0.15s;
+}
+
+.cfg-switch.is-on {
+  border-color: var(--cfg-accent);
+  background: rgba(53, 224, 255, 0.3);
+}
+
+.cfg-switch.is-on::after {
+  transform: translateX(14px);
+  background: #fff;
+}
+
+.cfg button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cfg-toggle {
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 14px !important;
+  line-height: 1;
+}
+
+.cfg-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 14px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(53, 224, 255, 0.3) transparent;
+}
+
+.cfg-part {
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: grid;
+  gap: 10px;
+}
+
+.cfg h3 {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.cfg-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+}
+
+.cfg-sub {
+  margin-top: 2px;
+}
+
+.cfg-readout {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.cfg-seg,
+.cfg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cfg-seg button,
+.cfg-chips button {
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.cfg-seg button:hover,
+.cfg-chips button:hover {
+  border-color: rgba(53, 224, 255, 0.45);
+}
+
+.cfg-seg button.is-active,
+.cfg-chips button.is-active {
+  border-color: var(--cfg-accent);
+  background: rgba(53, 224, 255, 0.14);
+  color: #fff;
+}
+
+.cfg-color {
+  display: grid;
+  gap: 6px;
+}
+
+.cfg-color input[type='color'] {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.cfg-swatches {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 4px;
+}
+
+.cfg-swatches button {
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  background: var(--swatch);
+}
+
+.cfg-swatches button.is-active {
+  outline: 2px solid var(--cfg-accent);
+  outline-offset: 1px;
+}
+
+.cfg-slider {
+  display: grid;
+  gap: 6px;
+}
+
+.cfg-slider input {
+  width: 100%;
+  accent-color: var(--cfg-accent);
+}
+
+.cfg-reset {
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  font: 11px/1 ui-monospace, Consolas, monospace !important;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.cfg-reset:hover {
+  border-color: var(--cfg-accent);
+}
+
+/* phones: panel becomes a bottom sheet */
+@media (max-width: 640px) {
+  .cfg {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    max-height: 48vh;
+  }
+
+  .cfg.is-collapsed {
+    bottom: 10px;
+  }
+
+  .hint {
+    display: none;
+  }
+}
+
+/* ─── garage: car cards ─── */
+.cfg-cars {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.cfg-car {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01));
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.cfg-car:hover {
+  border-color: rgba(53, 224, 255, 0.5);
+}
+
+.cfg-car.is-active {
+  border-color: var(--cfg-accent);
+  background: linear-gradient(135deg, rgba(53, 224, 255, 0.16), rgba(53, 224, 255, 0.03));
+  cursor: default;
+}
+
+.cfg-car.is-loading {
+  border-style: dashed;
+  border-color: rgba(53, 224, 255, 0.6);
+  cursor: progress;
+}
+
+.cfg-car-make {
+  font: 10px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.cfg-car-model {
+  font-size: 15px;
+  font-weight: 650;
+  color: #fff;
+}
+
+.cfg-car-tag {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.cfg-car-credit {
+  margin-top: 4px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.cfg-car-badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font: 9px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cfg-accent);
+}
+
+.cfg-empty {
+  padding-top: 16px;
+  color: rgba(255, 255, 255, 0.5);
 }
