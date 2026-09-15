@@ -5,7 +5,7 @@ import * as THREE from 'three'
  * (optionally hue-rotated); everything else is generated in the shader from
  * car-space position, so it needs no UVs and wraps the atlas-mapped body cleanly.
  */
-export type PaintStyle = 'factory' | 'solid' | 'stripes' | 'two-tone' | 'carbon' | 'camo'
+export type PaintStyle = 'factory' | 'solid' | 'stripes' | 'two-tone' | 'carbon' | 'camo' | 'glow'
 export type Finish = 'factory' | 'gloss' | 'metallic' | 'satin' | 'matte' | 'chrome'
 
 export interface PaintSettings {
@@ -28,7 +28,11 @@ const STYLE_ID: Record<PaintStyle, number> = {
   'two-tone': 3,
   carbon: 4,
   camo: 5,
+  glow: 1, // solid albedo; the light comes from the emissive set in apply()
 }
+
+/** HDR strength of the glow style — enough to clear the lights-only bloom threshold */
+const GLOW_INTENSITY = 1.5
 
 interface FinishParams {
   roughness: number
@@ -172,6 +176,9 @@ export function createPaintMaterial(
     metalnessMap: material.metalnessMap,
     clearcoat: material.clearcoat,
     clearcoatRoughness: material.clearcoatRoughness,
+    emissive: material.emissive.clone(),
+    emissiveIntensity: material.emissiveIntensity,
+    emissiveMap: material.emissiveMap,
   }
 
   const uniforms = {
@@ -214,7 +221,15 @@ export function createPaintMaterial(
       const params = s.finish === 'factory' ? factory : FINISHES[s.finish]
       // custom finishes drop the factory roughness/metal maps so the numbers mean what they say
       const maps = s.finish === 'factory' ? factory : { roughnessMap: null, metalnessMap: null }
-      const needsRecompile = material.roughnessMap !== maps.roughnessMap
+      const glow = s.style === 'glow'
+      const emissiveMap = glow ? null : factory.emissiveMap
+      const needsRecompile = material.roughnessMap !== maps.roughnessMap || material.emissiveMap !== emissiveMap
+      if (glow) material.emissive.set(s.colorA)
+      else material.emissive.copy(factory.emissive)
+      material.emissiveIntensity = glow ? GLOW_INTENSITY : factory.emissiveIntensity
+      material.emissiveMap = emissiveMap
+      // picked up by the lights-only bloom (see collectGlowMeshes)
+      material.userData.glow = glow
       Object.assign(material, {
         roughness: params.roughness,
         metalness: params.metalness,

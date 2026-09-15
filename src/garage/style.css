@@ -495,3 +495,107 @@ body,
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.42);
 }
+
+/* ─── parts editor ─── */
+.cfg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cfg-mini {
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+}
+
+.cfg-mini:hover {
+  border-color: var(--cfg-accent);
+}
+
+.cfg-mini.is-primary {
+  border-color: var(--cfg-accent);
+  background: rgba(53, 224, 255, 0.18);
+  color: #fff;
+}
+
+.cfg-mini.is-danger:hover {
+  border-color: #ff5a6a;
+  color: #ffb3bb;
+}
+
+.cfg-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cfg-part-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid rgba(53, 224, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(53, 224, 255, 0.08);
+  font-size: 11px;
+}
+
+.cfg-part-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cfg-chip-x {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px !important;
+  line-height: 16px;
+}
+
+.cfg-chip-x:hover {
+  background: rgba(255, 90, 106, 0.5);
+}
+
+.cfg-group {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cfg-group:hover {
+  border-color: rgba(255, 176, 32, 0.55); /* matches the focus tint on the car */
+}
+
+.cfg-group-name {
+  min-width: 0;
+  flex: 1;
+  margin-right: 8px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font: 600 13px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: #fff;
+}
+
+.cfg-group-name:hover,
+.cfg-group-name:focus {
+  border-color: rgba(255, 255, 255, 0.18);
+  outline: none;
+}
+
+.cfg-gap {
+  padding-top: 12px;
+}
