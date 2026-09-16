@@ -1,15 +1,17 @@
 import * as THREE from 'three'
-import { createPaintMaterial, type Finish, type PaintMaterial, type PaintStyle } from './paint'
+import { createPaintMaterial, type PaintMaterial } from './paint'
+import type { MaterialId } from './materials'
 import { matches, type CarProfile } from './cars'
 
 export type PartId = 'body' | 'wing' | 'rims' | 'calipers' | 'cage' | 'glass'
 
 export interface PartConfig {
-  style: PaintStyle
+  /** entry from the material library */
+  material: MaterialId
   colorA: string
   colorB: string
+  /** hue shift of the factory texture, degrees (Original only) */
   hue: number
-  finish: Finish
   /** glass only: 0 = factory, 1 = limo */
   tint: number
 }
@@ -20,24 +22,22 @@ export type CarConfig = Record<PartId, PartConfig>
 export interface PartDef {
   id: PartId
   label: string
-  styles: PaintStyle[]
 }
 
 export const PART_DEFS: PartDef[] = [
-  { id: 'body', label: 'Body', styles: ['factory', 'solid', 'stripes', 'two-tone', 'carbon', 'camo'] },
-  { id: 'wing', label: 'Rear wing', styles: ['factory', 'solid', 'carbon'] },
-  { id: 'rims', label: 'Rims', styles: ['factory', 'solid', 'carbon'] },
-  { id: 'calipers', label: 'Brake calipers', styles: ['factory', 'solid'] },
-  { id: 'cage', label: 'Roll cage', styles: ['factory', 'solid'] },
-  { id: 'glass', label: 'Window tint', styles: [] },
+  { id: 'body', label: 'Body' },
+  { id: 'wing', label: 'Rear wing' },
+  { id: 'rims', label: 'Rims' },
+  { id: 'calipers', label: 'Brake calipers' },
+  { id: 'cage', label: 'Roll cage' },
+  { id: 'glass', label: 'Window tint' },
 ]
 
 const part = (p: Partial<PartConfig> = {}): PartConfig => ({
-  style: 'factory',
+  material: 'original',
   colorA: '#e9edf2',
   colorB: '#15171b',
   hue: 0,
-  finish: 'factory',
   tint: 0,
   ...p,
 })
@@ -57,47 +57,53 @@ export const PRESETS: Record<string, Preset> = {
   Factory: {},
   Ice: { body: { hue: 200 }, wing: { hue: 200 } },
   Stealth: {
-    body: { style: 'solid', colorA: '#16181c', finish: 'matte' },
-    wing: { style: 'carbon', colorA: '#30343b', finish: 'gloss' },
-    rims: { style: 'solid', colorA: '#1b1d21', finish: 'satin' },
-    calipers: { style: 'solid', colorA: '#e0202a', finish: 'gloss' },
-    cage: { style: 'solid', colorA: '#111214', finish: 'matte' },
+    body: { material: 'matte', colorA: '#16181c' },
+    wing: { material: 'carbon' },
+    rims: { material: 'gunmetal' },
+    calipers: { material: 'gloss', colorA: '#e0202a' },
+    cage: { material: 'matte', colorA: '#111214' },
     glass: { tint: 0.85 },
   },
   Arctic: {
-    body: { style: 'stripes', colorA: '#eef1f5', colorB: '#0d0f12', finish: 'gloss' },
-    wing: { style: 'carbon', colorA: '#30343b', finish: 'gloss' },
-    rims: { style: 'solid', colorA: '#c9ccd2', finish: 'metallic' },
-    calipers: { style: 'solid', colorA: '#1e6bff', finish: 'gloss' },
+    body: { material: 'stripes', colorA: '#eef1f5', colorB: '#0d0f12' },
+    wing: { material: 'carbon' },
+    rims: { material: 'brushed' },
+    calipers: { material: 'gloss', colorA: '#1e6bff' },
     glass: { tint: 0.4 },
   },
   Heritage: {
-    body: { style: 'stripes', colorA: '#8ec5e6', colorB: '#f36f21', finish: 'gloss' },
-    wing: { style: 'solid', colorA: '#8ec5e6', finish: 'gloss' },
-    rims: { style: 'solid', colorA: '#16181c', finish: 'satin' },
-    calipers: { style: 'solid', colorA: '#f36f21', finish: 'gloss' },
+    body: { material: 'stripes', colorA: '#8ec5e6', colorB: '#f36f21' },
+    wing: { material: 'gloss', colorA: '#8ec5e6' },
+    rims: { material: 'gunmetal' },
+    calipers: { material: 'gloss', colorA: '#f36f21' },
   },
   Carbon: {
-    body: { style: 'carbon', colorA: '#3a3f47', finish: 'gloss' },
-    wing: { style: 'carbon', colorA: '#3a3f47', finish: 'gloss' },
-    rims: { style: 'solid', colorA: '#c9a227', finish: 'metallic' },
-    calipers: { style: 'solid', colorA: '#ffd400', finish: 'gloss' },
+    body: { material: 'carbon' },
+    wing: { material: 'forged-carbon' },
+    rims: { material: 'gold' },
+    calipers: { material: 'gloss', colorA: '#ffd400' },
     glass: { tint: 0.6 },
   },
   Camo: {
-    body: { style: 'camo', colorA: '#5a6648', colorB: '#1d231a', finish: 'matte' },
-    wing: { style: 'solid', colorA: '#1d231a', finish: 'matte' },
-    rims: { style: 'solid', colorA: '#1b1d21', finish: 'matte' },
-    calipers: { style: 'solid', colorA: '#ff5a1f', finish: 'gloss' },
+    body: { material: 'camo', colorA: '#5a6648', colorB: '#1d231a' },
+    wing: { material: 'textured-plastic', colorA: '#1d231a' },
+    rims: { material: 'matte', colorA: '#1b1d21' },
+    calipers: { material: 'gloss', colorA: '#ff5a1f' },
     glass: { tint: 0.7 },
   },
   'Liquid Chrome': {
-    // real chrome reflects ~55% — brighter albedos turn the ceiling light into a bloom blob
-    body: { style: 'solid', colorA: '#b4b8bd', finish: 'chrome' },
-    wing: { style: 'solid', colorA: '#16181c', finish: 'gloss' },
-    rims: { style: 'solid', colorA: '#16181c', finish: 'gloss' },
-    calipers: { style: 'solid', colorA: '#35e0ff', finish: 'gloss' },
+    body: { material: 'chrome' },
+    wing: { material: 'gloss', colorA: '#16181c' },
+    rims: { material: 'gloss', colorA: '#16181c' },
+    calipers: { material: 'gloss', colorA: '#35e0ff' },
     glass: { tint: 0.9 },
+  },
+  Pearl: {
+    body: { material: 'pearl' },
+    wing: { material: 'pearl' },
+    rims: { material: 'brushed' },
+    calipers: { material: 'anodised', colorA: '#8e5cff' },
+    glass: { tint: 0.3 },
   },
 }
 
@@ -109,7 +115,7 @@ export function presetConfig(name: string): CarConfig {
 }
 
 // each car remembers its own paint job
-const storageKey = (carId: string) => `garage.car-config.v2.${carId}`
+const storageKey = (carId: string) => `garage.car-config.v3.${carId}`
 
 function loadSaved(carId: string): CarConfig {
   const config = structuredClone(DEFAULT_CONFIG)
@@ -169,13 +175,9 @@ export function createConfigurator(car: THREE.Object3D, profile: CarProfile): Ca
   function applyPart(id: PartId): void {
     const c = config[id]
     for (const paint of paints.get(id)?.values() ?? []) {
-      if (id === 'glass') {
-        // tinted film: dark solid colour with the alpha pushed up
-        paint.apply(
-          c.tint > 0
-            ? { ...c, style: 'solid', colorA: '#05070a', finish: 'factory', opacity: THREE.MathUtils.lerp(0.35, 0.96, c.tint) }
-            : { ...c, style: 'factory', finish: 'factory', opacity: null },
-        )
+      if (id === 'glass' && c.tint > 0) {
+        // tint film: darken the glass and push its alpha up
+        paint.apply({ ...c, material: 'tinted-glass', colorA: '#05070a', opacity: THREE.MathUtils.lerp(0.35, 0.96, c.tint) })
       } else {
         paint.apply({ ...c, opacity: null })
       }

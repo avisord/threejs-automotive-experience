@@ -1,11 +1,8 @@
 import type * as THREE from 'three'
-import type { PaintStyle } from '../paint'
 import { meshLabel, type GroupEditor, type MaterialGroup } from '../groups'
 import type { Nav, Page } from './panel'
-import { paintControls } from './paint-controls'
+import { materialControls } from './material-controls'
 import { actionButton, el, section, toggle } from './widgets'
-
-const GROUP_STYLES: PaintStyle[] = ['factory', 'solid', 'stripes', 'two-tone', 'carbon', 'camo', 'glow']
 
 export interface PartsState {
   editor(): GroupEditor | undefined
@@ -96,10 +93,8 @@ export function partsPage(state: PartsState): Page {
 
     s.append(
       el('div', 'cfg-label cfg-sub', 'Material'),
-      ...paintControls({
+      ...materialControls({
         settings: group.material,
-        styles: GROUP_STYLES,
-        factoryLabel: 'Original',
         set(patch, structural) {
           editor.setMaterial(group.id, patch)
           if (structural) nav.refresh()

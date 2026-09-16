@@ -1,6 +1,6 @@
 import { PART_DEFS, PRESETS, presetConfig, type CarConfigurator, type PartDef } from '../configurator'
 import type { Nav, Page } from './panel'
-import { paintControls } from './paint-controls'
+import { materialControls } from './material-controls'
 import { actionButton, el, section, slider } from './widgets'
 
 /**
@@ -28,10 +28,9 @@ export function carPage(current: () => CarConfigurator | undefined): Page {
 
     const livery = configurator.profile.livery && (def.id === 'body' || def.id === 'wing')
     s.append(
-      ...paintControls({
+      ...materialControls({
         settings: c,
-        styles: def.styles,
-        factoryLabel: livery ? 'Livery' : 'Factory',
+        originalLabel: livery ? 'Livery' : 'Original',
         set(patch, structural) {
           activePreset = null
           configurator.set(def.id, patch)

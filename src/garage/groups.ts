@@ -1,10 +1,10 @@
 import * as THREE from 'three'
 import { createPaintMaterial, type PaintMaterial } from './paint'
-import type { PaintControlSettings } from './ui/paint-controls'
+import type { MaterialChoice } from './materials'
 import { createHighlighter, type HighlightKind } from './highlight'
 import type { CarProfile } from './cars'
 
-export type GroupMaterial = PaintControlSettings
+export type GroupMaterial = MaterialChoice
 
 export interface MaterialGroup {
   id: string
@@ -21,11 +21,10 @@ interface SavedGroup {
 }
 
 export const DEFAULT_GROUP_MATERIAL: GroupMaterial = {
-  style: 'solid',
+  material: 'gloss',
   colorA: '#35e0ff',
   colorB: '#15171b',
   hue: 0,
-  finish: 'gloss',
 }
 
 // mesh names that say nothing — fall back to the material name for these
