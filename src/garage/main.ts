@@ -1,14 +1,15 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
-import { collectGlowMeshes, createRoom, ROOM } from './room'
+import { DEFAULT_GARAGE, GARAGES, collectGlowMeshes, type GarageDef, type Room } from './garages'
 import { disposeCar, loadCar } from './car'
 import { CARS, DEFAULT_CAR, carTitle } from './cars'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
-import { REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
+import { LOOKS, REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
 import { mountPanel, menuList, type Nav, type Page } from './ui/panel'
 import { carPage } from './ui/car-page'
+import { collectionPage } from './ui/collection-page'
 import { garagePage } from './ui/garage-page'
 import { graphicsPage } from './ui/graphics-page'
 import { displayPage } from './ui/display-page'
@@ -25,7 +26,9 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 app.appendChild(renderer.domElement)
 
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x050608)
+
+/** the car currently in the bay (see showCar) — declared early, the garage reads it */
+let bay: Bay | null = null
 
 // ─── camera: orbit around the car, never from below ─────────────────────────
 const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 100)
@@ -61,11 +64,6 @@ function updateControls(dt: number): boolean {
   return true
 }
 
-// room interior the camera may occupy (walls/ceiling minus a margin)
-const CAMERA_BOX = new THREE.Box3(
-  new THREE.Vector3(-ROOM.w / 2 + 0.6, 0.3, -ROOM.d / 2 + 0.6),
-  new THREE.Vector3(ROOM.w / 2 - 0.6, ROOM.h - 0.45, ROOM.d / 2 - 0.6),
-)
 /** framing fov for the current viewport — set in resize(), widened by fitCameraInRoom() */
 let baseFov = camera.fov
 const orbitPosition = new THREE.Vector3()
@@ -83,8 +81,8 @@ function fitCameraInRoom(): void {
   for (const axis of ['x', 'y', 'z'] as const) {
     const o = offset[axis]
     const t = controls.target[axis]
-    if (o > 0) k = Math.min(k, (CAMERA_BOX.max[axis] - t) / o)
-    else if (o < 0) k = Math.min(k, (CAMERA_BOX.min[axis] - t) / o)
+    if (o > 0) k = Math.min(k, (room.bounds.max[axis] - t) / o)
+    else if (o < 0) k = Math.min(k, (room.bounds.min[axis] - t) / o)
   }
   const fov =
     k < 1 ? Math.min(75, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(baseFov / 2)) / k))) : baseFov
@@ -99,30 +97,53 @@ function restoreOrbitCamera(): void {
   camera.position.copy(orbitPosition)
 }
 
-// ─── garage ────────────────────────────────────────────────────────────────
+// ─── garage: the room and its lighting, swappable (Menu › Garage) ──────────
 RectAreaLightUniformsLib.init()
-const room = createRoom()
-scene.add(room.group)
-scene.add(new THREE.HemisphereLight(0xbfd6ff, 0x0a0b0d, 0.25))
+const GARAGE_KEY = 'garage.venue.v1'
+const garageById = (id: string | null) => GARAGES.find((g) => g.id === id)
+// ?garage=<id> wins, then the last garage used, then the default
+let savedGarage: string | null = null
+try {
+  savedGarage = localStorage.getItem(GARAGE_KEY)
+} catch {
+  // no storage — default garage
+}
+let garageDef: GarageDef =
+  garageById(new URLSearchParams(location.search).get('garage')) ?? garageById(savedGarage) ?? garageById(DEFAULT_GARAGE)!
+let room: Room = garageDef.create()
+/** what scene.environment is drawn from — the render target, not just its texture, has to be freed */
+let environmentTarget: THREE.WebGLRenderTarget | null = null
+installRoom()
 
-// capture the empty garage into an environment map so the car's paint and
-// glass reflect the actual hex ceiling and LED strips
-{
+/** put `room` in the scene and light the car with it */
+function installRoom(): void {
+  scene.add(room.group)
+  scene.background = room.background
+  scene.environmentIntensity = room.environmentIntensity
+  captureEnvironment()
+}
+
+/**
+ * Capture the garage without the car into an environment map, so the paint
+ * and glass reflect this room's actual lights.
+ */
+function captureEnvironment(): void {
   const pmrem = new THREE.PMREMGenerator(renderer)
-  room.reflector.visible = false
-  scene.environment = pmrem.fromScene(scene, 0, 0.1, 60, {
+  const hidden = [room.reflector, ...(bay ? [bay.root, bay.shadow] : [])]
+  for (const o of hidden) o.visible = false
+  // the room must not reflect the previous garage's map while it's captured
+  environmentTarget?.dispose()
+  scene.environment = null
+  environmentTarget = pmrem.fromScene(scene, 0, 0.1, 60, {
     size: 512,
     position: new THREE.Vector3(0, 1.2, 0),
-  }).texture
-  room.reflector.visible = true
+  })
+  scene.environment = environmentTarget.texture
+  for (const o of hidden) o.visible = true
   pmrem.dispose()
 }
-scene.environmentIntensity = 1.0
 
 // ─── post: AO, bloom, grade, vignette, AA ───────────────────────────────────
-/** the car currently in the bay (see showCar) — declared early, the post chain reads it */
-let bay: Bay | null = null
-
 // glowing meshes for lights-only bloom: the room's LEDs plus any car part set to glow
 const post = createPostProcessing(renderer, scene, camera, () => [
   ...collectGlowMeshes(room.group),
@@ -296,12 +317,85 @@ async function showCar(id: string): Promise<void> {
   }
 }
 
-// ─── side panel: Menu › Garage · Car · Settings › Graphics ─────────────────
+// ─── switching garages ──────────────────────────────────────────────────────
+const fade = document.createElement('div')
+fade.className = 'fade'
+app.appendChild(fade) // over the canvas and hud, under the panel (mounted later)
+
+const venue = document.createElement('div')
+venue.className = 'venue'
+venue.innerHTML = '<span class="venue-name"></span><span class="venue-tag"></span>'
+app.appendChild(venue)
+let venueTimer = 0
+/** name the garage for a moment after arriving */
+function announceGarage(def: GarageDef): void {
+  venue.querySelector('.venue-name')!.textContent = def.name
+  venue.querySelector('.venue-tag')!.textContent = def.tag
+  venue.classList.add('is-shown')
+  clearTimeout(venueTimer)
+  venueTimer = window.setTimeout(() => venue.classList.remove('is-shown'), 2600)
+}
+
+const FADE_MS = 240
+let switchingTo: string | null = null
+
+/** fade to black, swap the whole room — geometry, lights, reflections — and fade back in */
+async function showGarage(id: string): Promise<void> {
+  const def = garageById(id)
+  if (!def || def.id === garageDef.id || switchingTo) return
+  switchingTo = def.id
+  panelNav.refresh()
+  fade.classList.add('is-on')
+  await new Promise((resolve) => setTimeout(resolve, FADE_MS))
+
+  scene.remove(room.group)
+  room.dispose()
+  garageDef = def
+  room = def.create()
+  if (bay) room.floorLayers.push(bay.shadow)
+  installRoom()
+  applyQuality() // floor mirror size and texture filtering for the new room
+  post.refreshGlow()
+  adoptGarage(def)
+  // compile the new room's shaders behind the fade, not on the first visible frame
+  await renderer.compileAsync(scene, camera).catch(() => {})
+  invalidate(4)
+  switchingTo = null
+  panelNav.refresh()
+  // uncover once the new room has been drawn
+  requestAnimationFrame(() => requestAnimationFrame(() => fade.classList.remove('is-on')))
+  announceGarage(def)
+  console.info(`[garage] now in ${def.id}`)
+}
+
+/** arriving somewhere new: take on its grade look and remember it */
+function adoptGarage(def: GarageDef): void {
+  // Settings › Graphics fine-tunes the look from here
+  const { contrast, saturation, temperature, split } = LOOKS[def.look]
+  post.set('grade', { look: def.look, contrast, saturation, temperature, split })
+  try {
+    localStorage.setItem(GARAGE_KEY, def.id)
+  } catch {
+    // not remembered — fine
+  }
+}
+// opened by link somewhere other than last time: as if picked. A reload keeps any grade tweaks.
+if (garageDef.id !== savedGarage) adoptGarage(garageDef)
+
+// ─── side panel: Menu › Garage · Collection · Car · Parts · Settings ───────
 /** Menu › Parts: clicks on the car select parts (declared before the panel renders) */
 let picking = false
 const pages: Record<string, Page> = {
-  menu: { title: 'Menu', render: (body, nav) => body.append(menuList(pages, ['garage', 'car', 'parts', 'settings'], nav)) },
+  menu: {
+    title: 'Menu',
+    render: (body, nav) => body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'settings'], nav)),
+  },
   garage: garagePage({
+    current: () => garageDef.id,
+    switching: () => switchingTo,
+    select: (id) => void showGarage(id),
+  }),
+  collection: collectionPage({
     current: () => bay?.id ?? null,
     loading: () => loadingId,
     select: (id) => void showCar(id),
@@ -403,14 +497,28 @@ const garage: {
   camera: THREE.PerspectiveCamera
   controls: OrbitControls
   renderer: THREE.WebGLRenderer
-  room: typeof room
+  /** the current garage's room — replaced on every garage switch */
+  readonly room: Room
+  /** switch garage from the console: garage.showGarage('studio') */
+  showGarage: typeof showGarage
   /** graphics from the console: garage.post.set('bloom', { intensity: 2 }) */
   post: PostProcessing
   /** repaint from the console: garage.configurator.set('body', { style: 'solid', colorA: '#ff0000' }) */
   configurator?: CarConfigurator
   /** redraw after changing things from the console while rendering on demand */
   invalidate: typeof invalidate
-} = { scene, camera, controls, renderer, room, post, invalidate }
+} = {
+  scene,
+  camera,
+  controls,
+  renderer,
+  get room() {
+    return room
+  },
+  showGarage,
+  post,
+  invalidate,
+}
 declare global {
   interface Window {
     garage: typeof garage

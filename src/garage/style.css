@@ -596,6 +596,64 @@ body,
   outline: none;
 }
 
+/* ─── garage picker: light palette strip on each card ─── */
+.cfg-garage-palette {
+  height: 4px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: var(--palette);
+  opacity: 0.85;
+}
+
+.cfg-garage .cfg-car-badge {
+  top: 20px;
+}
+
 .cfg-gap {
   padding-top: 12px;
+}
+
+/* ─── garage switch: fade through black, then name the new place ─── */
+.fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+
+.fade.is-on {
+  opacity: 1;
+}
+
+.venue {
+  position: fixed;
+  top: 40px;
+  left: 16px;
+  display: grid;
+  gap: 6px;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.venue.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+.venue-name {
+  font: 600 22px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  color: #fff;
+}
+
+.venue-tag {
+  font: 11px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
 }

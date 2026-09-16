@@ -1,42 +1,47 @@
-import { CARS } from '../cars'
+import { GARAGES } from '../garages'
 import type { Page } from './panel'
 import { el } from './widgets'
 
 export interface GarageState {
-  /** car currently in the bay */
-  current(): string | null
-  /** car being loaded, if any */
-  loading(): string | null
+  /** garage the car is standing in */
+  current(): string
+  /** garage being switched to, if any */
+  switching(): string | null
   select(id: string): void
 }
 
-/** Menu › Garage — one card per car; picking one swaps the car in the bay */
+/** Menu › Garage — one card per garage; each is a whole scene with its own lighting */
 export function garagePage(state: GarageState): Page {
   return {
     title: 'Garage',
-    hint: `Choose a car · ${CARS.length} in the collection`,
+    hint: `Choose where the car stands · ${GARAGES.length} garages`,
     render(body, nav) {
       const grid = el('div', 'cfg-cars')
-      for (const car of CARS) {
-        const active = state.current() === car.id
-        const loading = state.loading() === car.id
-        const card = el('button', `cfg-car${active ? ' is-active' : ''}${loading ? ' is-loading' : ''}`)
+      for (const garage of GARAGES) {
+        const active = state.current() === garage.id
+        const switching = state.switching() === garage.id
+        const card = el('button', `cfg-car cfg-garage${active ? ' is-active' : ''}${switching ? ' is-loading' : ''}`)
         card.type = 'button'
+        const palette = el('span', 'cfg-garage-palette')
+        palette.style.setProperty('--palette', `linear-gradient(90deg, ${garage.palette.join(', ')})`)
         card.append(
-          el('span', 'cfg-car-make', `${car.make} · ${car.year}`),
-          el('span', 'cfg-car-model', car.model),
-          el('span', 'cfg-car-tag', car.tag),
+          palette,
+          el('span', 'cfg-car-model', garage.name),
+          el('span', 'cfg-car-tag', garage.tag),
+          el('span', 'cfg-car-credit', `${garage.look} grade`),
         )
-        if (active || loading) card.append(el('span', 'cfg-car-badge', loading ? 'Loading…' : 'In the bay'))
-        if (car.credit) card.append(el('span', 'cfg-car-credit', car.credit))
+        if (active || switching) card.append(el('span', 'cfg-car-badge', switching ? 'Opening…' : "You're here"))
         card.addEventListener('click', () => {
-          if (active || loading) return
-          state.select(car.id)
+          if (active || switching) return
+          state.select(garage.id)
           nav.refresh()
         })
         grid.append(card)
       }
-      body.append(grid)
+      body.append(
+        grid,
+        el('p', 'cfg-note cfg-gap', 'Each garage sets its own colour grade look when picked — fine-tune it in Settings › Graphics.'),
+      )
     },
   }
 }
