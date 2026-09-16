@@ -168,6 +168,8 @@ export interface PostProcessing {
   /** set AA, resolution, reflections, textures and AO quality in one go */
   applyPreset(name: QualityPreset): void
   reset(): void
+  /** re-read which meshes glow (lights-only bloom), e.g. after the garage changes */
+  refreshGlow(): void
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
@@ -307,6 +309,9 @@ export function createPostProcessing(
     },
     onChange(listener) {
       listeners.push(listener)
+    },
+    refreshGlow() {
+      if (bloom instanceof SelectiveBloomEffect) bloom.selection.set(glowMeshes())
     },
     get aoView() {
       return aoView
