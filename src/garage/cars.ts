@@ -13,6 +13,13 @@ export interface GlassFix extends PartMatch {
   color?: THREE.ColorRepresentation
 }
 
+/** which meshes are lamps; `auto` is split into front and rear by where they sit on the car */
+export interface LampMatchers {
+  front?: PartMatch
+  rear?: PartMatch
+  auto?: PartMatch
+}
+
 export interface CarProfile {
   id: string
   make: string
@@ -31,6 +38,8 @@ export interface CarProfile {
   glass?: GlassFix[]
   /** which meshes each configurator part repaints; parts left out don't show in the panel */
   parts: Partial<Record<PartId, PartMatch>>
+  /** head and tail light meshes — they glow and carry real lights, see lights.ts */
+  lamps?: LampMatchers
   /** body/wing factory style is a livery rather than plain paint */
   livery?: boolean
   credit?: string
@@ -39,6 +48,10 @@ export interface CarProfile {
 export const CARS: CarProfile[] = [
   {
     id: 'gt3r-roxy',
+    lamps: {
+      front: { node: /^Glass-(HeadlightCover|HeadLightGlass|Headlight|HeadLightChrome)_\d+$/ },
+      rear: { node: /^Glass-(TailLights|TailLightCover|RedLightBar|RainLight)_\d+$/ },
+    },
     make: 'Porsche',
     model: '992 GT3 R',
     year: 2023,
@@ -57,6 +70,10 @@ export const CARS: CarProfile[] = [
   },
   {
     id: 'gt3rs',
+    lamps: {
+      front: { node: /^(headlight_[lr]|DRL|extralight_[12])(_\d+)?$/ },
+      rear: { node: /^(brakelight_[lrm]|taillight_[lr]|DRRDL)(_\d+)?$/ },
+    },
     make: 'Porsche',
     model: '992 GT3 RS',
     year: 2023,
@@ -77,6 +94,7 @@ export const CARS: CarProfile[] = [
   },
   {
     id: '930-turbo',
+    lamps: { auto: { material: /^930_lights$/ } },
     make: 'Porsche',
     model: '911 Turbo (930)',
     year: 1975,
@@ -93,6 +111,7 @@ export const CARS: CarProfile[] = [
   },
   {
     id: 'sls',
+    lamps: { front: { material: /^Lights_Front\./ }, rear: { material: /^Lights_Rear\./ } },
     make: 'Mercedes-Benz',
     model: 'SLS AMG',
     year: 2010,
@@ -113,6 +132,7 @@ export const CARS: CarProfile[] = [
   },
   {
     id: 'amg-one',
+    lamps: { auto: { material: /^amgprojone_(headlight|runninglight|redglass)$/ } },
     make: 'Mercedes-AMG',
     model: 'ONE',
     year: 2022,
@@ -129,6 +149,7 @@ export const CARS: CarProfile[] = [
   },
   {
     id: 'w201',
+    lamps: { front: { material: /^HL_/ }, rear: { material: /^TL_/ } },
     make: 'Mercedes-Benz',
     model: '190E (W201)',
     year: 1982,
@@ -145,6 +166,7 @@ export const CARS: CarProfile[] = [
   },
   {
     id: 'rx7',
+    lamps: { front: { material: /LightA_Material|^light_glass$/ }, rear: { material: /^(red_glass|orange_light)$/ } },
     make: 'Mazda',
     model: 'RX-7 (FD)',
     year: 1993,

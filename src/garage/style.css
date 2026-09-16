@@ -657,3 +657,9 @@ body,
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
 }
+
+.cfg-subsection {
+  padding: 10px 0 0;
+  border: 0;
+  gap: 6px;
+}

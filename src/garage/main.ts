@@ -15,6 +15,8 @@ import { graphicsPage } from './ui/graphics-page'
 import { displayPage } from './ui/display-page'
 import { partsPage } from './ui/parts-page'
 import { createGroupEditor, type GroupEditor } from './groups'
+import { createLampSystem, type LampSystem } from './lights'
+import { lightsPage } from './ui/lights-page'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -260,6 +262,7 @@ interface Bay {
   shadow: THREE.Mesh
   configurator: CarConfigurator
   groups: GroupEditor
+  lamps: LampSystem
 }
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
@@ -281,6 +284,7 @@ async function showCar(id: string): Promise<void> {
     if (bay) {
       scene.remove(bay.root, bay.shadow)
       room.floorLayers.splice(room.floorLayers.indexOf(bay.shadow), 1)
+      bay.lamps.dispose() // put the lenses back before the car is taken apart
       bay.groups.dispose() // overlays first — they share geometry with the car
       disposeCar(bay.root)
       disposeContactShadow(bay.shadow)
@@ -297,10 +301,15 @@ async function showCar(id: string): Promise<void> {
       post.refreshGlow()
     })
     groups.setOverlaysVisible(false) // the Parts page shows them
-    bay = { id: profile.id, root, shadow, configurator, groups }
+    const lamps = createLampSystem(root, profile, () => {
+      invalidate()
+      post.refreshGlow()
+    })
+    bay = { id: profile.id, root, shadow, configurator, groups, lamps }
     post.refreshGlow()
     invalidate(4) // first frames also compile the new car's shaders
     garage.configurator = configurator
+    garage.lamps = lamps
     try {
       localStorage.setItem(CAR_KEY, profile.id)
     } catch {
@@ -388,7 +397,7 @@ let picking = false
 const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
-    render: (body, nav) => body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'settings'], nav)),
+    render: (body, nav) => body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'lights', 'settings'], nav)),
   },
   garage: garagePage({
     current: () => garageDef.id,
@@ -401,6 +410,7 @@ const pages: Record<string, Page> = {
     select: (id) => void showCar(id),
   }),
   car: carPage(() => bay?.configurator),
+  lights: lightsPage(() => bay?.lamps),
   parts: partsPage({
     editor: () => bay?.groups,
     picking: () => picking,
@@ -503,8 +513,10 @@ const garage: {
   showGarage: typeof showGarage
   /** graphics from the console: garage.post.set('bloom', { intensity: 2 }) */
   post: PostProcessing
-  /** repaint from the console: garage.configurator.set('body', { style: 'solid', colorA: '#ff0000' }) */
+  /** repaint from the console: garage.configurator.set('body', { material: 'chrome' }) */
   configurator?: CarConfigurator
+  /** the car's own lights: garage.lamps.set('head', { on: false }) */
+  lamps?: LampSystem
   /** redraw after changing things from the console while rendering on demand */
   invalidate: typeof invalidate
 } = {
