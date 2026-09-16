@@ -21,10 +21,23 @@ export const DEFAULT_LAMPS: LampSettings = {
 
 const BLACK = new THREE.Color(0x000000)
 
-const LAMP_TUNING: Record<LampId, { emissive: number; candela: number; range: number; angle: number }> = {
-  // a headlight is a spot aimed down the bay; a tail light just glows near itself
-  head: { emissive: 2.2, candela: 90, range: 32, angle: 0.5 },
-  tail: { emissive: 1.6, candela: 4, range: 3.2, angle: 0 },
+interface LampTuning {
+  /** HDR strength of the lens glow */
+  emissive: number
+  candela: number
+  range: number
+  angle: number
+  /** where the spot points, relative to the lamp */
+  aim: THREE.Vector3
+}
+
+const LAMP_TUNING: Record<LampId, LampTuning> = {
+  // Both are spots: a headlight throws down the bay, a tail light washes the
+  // ground just behind the car. Point lights would be wrong here — with no
+  // shadow maps they spill straight through the bodywork and paint the floor
+  // beside the car, where nothing should be lit.
+  head: { emissive: 2.2, candela: 90, range: 32, angle: 0.5, aim: new THREE.Vector3(0, -1.1, 14) },
+  tail: { emissive: 1.8, candela: 9, range: 3.6, angle: 0.95, aim: new THREE.Vector3(0, -1.4, -2.2) },
 }
 
 interface LampGroup {
@@ -139,8 +152,9 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
         const x = Math.max(bounds.max.x, -bounds.min.x) * 0.62
         group.positions.push(new THREE.Vector3(x, c.y, c.z), new THREE.Vector3(-x, c.y, c.z))
       }
-      // start at the lens, not in the middle of the cluster
-      const z = id === 'head' ? bounds.max.z : bounds.min.z
+      // sit just outside the lens, so what light there is spills away from the
+      // car instead of through it
+      const z = id === 'head' ? bounds.max.z + 0.04 : bounds.min.z - 0.06
       for (const p of group.positions) p.z = z
     }
   }
@@ -190,33 +204,27 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
     if (!on) return
 
     for (const position of group.positions) {
-      if (id === 'head') {
-        const spot = new THREE.SpotLight(color, tuning.candela * intensity, tuning.range, tuning.angle, 0.55, 2)
-        spot.position.copy(position)
-        spot.target.position.copy(position).add(new THREE.Vector3(0, -1.1, 14)) // aimed down the bay
-        car.add(spot, spot.target)
-        lights.push(spot)
-        if (showBeam) {
-          const length = 10
-          const beam = new THREE.Mesh(
-            // narrower than the light's own cone: the visible core of the beam
-            new THREE.ConeGeometry(Math.tan(tuning.angle * 0.55) * length, length, 28, 1, true),
-            beamMaterial(color),
-          )
-          beam.geometry.translate(0, -length / 2, 0) // tip at the lens
-          beam.rotation.x = -Math.PI / 2 // tip at the lens, opening away down +z
-          beam.position.copy(position)
-          beam.renderOrder = 3
-          beam.raycast = () => {}
-          ;(beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = intensity
-          car.add(beam)
-          beams.push(beam)
-        }
-      } else {
-        const point = new THREE.PointLight(color, tuning.candela * intensity, tuning.range, 2)
-        point.position.copy(position)
-        car.add(point)
-        lights.push(point)
+      const spot = new THREE.SpotLight(color, tuning.candela * intensity, tuning.range, tuning.angle, 0.7, 2)
+      spot.position.copy(position)
+      spot.target.position.copy(position).add(tuning.aim)
+      car.add(spot, spot.target)
+      lights.push(spot)
+
+      if (id === 'head' && showBeam) {
+        const length = 10
+        const beam = new THREE.Mesh(
+          // narrower than the light's own cone: the visible core of the beam
+          new THREE.ConeGeometry(Math.tan(tuning.angle * 0.55) * length, length, 28, 1, true),
+          beamMaterial(color),
+        )
+        beam.geometry.translate(0, -length / 2, 0) // tip at the lens
+        beam.rotation.x = -Math.PI / 2 // tip at the lens, opening away down +z
+        beam.position.copy(position)
+        beam.renderOrder = 3
+        beam.raycast = () => {}
+        ;(beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = intensity
+        car.add(beam)
+        beams.push(beam)
       }
     }
   }
