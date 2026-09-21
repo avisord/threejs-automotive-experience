@@ -5,14 +5,14 @@ import { colorField, el, section, slider, toggle } from './widgets'
 const LABEL: Record<LampId, string> = { head: 'Headlights', tail: 'Tail lights' }
 
 /** Menu › Lights — switch the car's own lights on, colour them, aim the beams */
-export function lightsPage(current: () => LampSystem | undefined): Page {
+export function lightsPage(current: () => LampSystem | undefined, placeholder: () => string = () => 'Loading car…'): Page {
   return {
     title: 'Lights',
     hint: 'Headlights and tail lights',
     render(body, nav) {
       const lamps = current()
       if (!lamps) {
-        body.append(el('p', 'cfg-empty', 'Loading car…'))
+        body.append(el('p', 'cfg-empty', placeholder()))
         return
       }
       if (lamps.present.length === 0) {

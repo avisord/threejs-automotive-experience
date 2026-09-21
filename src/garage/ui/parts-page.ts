@@ -8,6 +8,8 @@ export interface PartsState {
   editor(): GroupEditor | undefined
   picking(): boolean
   setPicking(on: boolean): void
+  /** shown while there's no car to edit: loading, or an empty bay */
+  placeholder(): string
 }
 
 function button(text: string, onClick: () => void, className = 'cfg-mini'): HTMLButtonElement {
@@ -110,7 +112,7 @@ export function partsPage(state: PartsState): Page {
     render(body, nav) {
       const editor = state.editor()
       if (!editor) {
-        body.append(el('p', 'cfg-empty', 'Loading car…'))
+        body.append(el('p', 'cfg-empty', state.placeholder()))
         return
       }
       editor.setOverlaysVisible(true)

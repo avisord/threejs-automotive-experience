@@ -8,7 +8,7 @@ import { actionButton, el, section, slider } from './widgets'
  * re-render the page; pickers and sliders only update the car so the control
  * under the pointer keeps its drag.
  */
-export function carPage(current: () => CarConfigurator | undefined): Page {
+export function carPage(current: () => CarConfigurator | undefined, placeholder: () => string = () => 'Loading car…'): Page {
   let activePreset: string | null = null
   let lastCar: string | null = null
 
@@ -47,7 +47,7 @@ export function carPage(current: () => CarConfigurator | undefined): Page {
     render(body, nav) {
       const configurator = current()
       if (!configurator) {
-        body.append(el('p', 'cfg-empty', 'Loading car…'))
+        body.append(el('p', 'cfg-empty', placeholder()))
         return
       }
       if (configurator.profile.id !== lastCar) {

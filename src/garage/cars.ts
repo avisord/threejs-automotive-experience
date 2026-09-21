@@ -190,6 +190,9 @@ export const CARS: CarProfile[] = [
 
 export const DEFAULT_CAR = CARS[0].id
 
+/** Collection entry for an empty bay — just the garage, no car */
+export const NO_CAR = 'none'
+
 export const carTitle = (c: CarProfile) => `${c.make} ${c.model}`
 
 /** does this mesh fall under `m`? checks the material and the mesh's node chain up to the car root */

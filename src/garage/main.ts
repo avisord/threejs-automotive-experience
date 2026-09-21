@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { DEFAULT_GARAGE, GARAGES, collectGlowMeshes, type GarageDef, type Room } from './garages'
 import { disposeCar, loadCar } from './car'
-import { CARS, DEFAULT_CAR, carTitle } from './cars'
+import { CARS, DEFAULT_CAR, NO_CAR, carTitle } from './cars'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
 import { LOOKS, REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
@@ -293,7 +293,41 @@ let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
 
 /** swap the car in the bay; a newer request supersedes one still loading */
+/** take the car out of the bay and free it */
+function clearBay(): void {
+  if (!bay) return
+  scene.remove(bay.root, bay.shadow)
+  room.floorLayers.splice(room.floorLayers.indexOf(bay.shadow), 1)
+  bay.lamps.dispose() // put the lenses back before the car is taken apart
+  bay.groups.dispose() // overlays first — they share geometry with the car
+  disposeCar(bay.root)
+  disposeContactShadow(bay.shadow)
+  bay = null
+  garage.configurator = undefined
+  garage.lamps = undefined
+}
+
+/** what car-dependent pages show when there's no car to work on */
+const bayPlaceholder = () => (loadingId ? 'Loading car…' : 'No car in the bay — pick one in Collection.')
+
 async function showCar(id: string): Promise<void> {
+  if (id === NO_CAR) {
+    loadingId = null // also abandons a car still loading
+    setPicking(false)
+    clearBay()
+    try {
+      localStorage.setItem(CAR_KEY, NO_CAR)
+    } catch {
+      // not remembered — fine
+    }
+    loader.classList.add('done')
+    traceSceneChanged()
+    post.refreshGlow()
+    invalidate(2)
+    panelNav?.refresh()
+    console.info('[garage] bay emptied')
+    return
+  }
   const profile = CARS.find((c) => c.id === id) ?? CARS[0]
   loadingId = profile.id
   loader.classList.remove('done')
@@ -306,14 +340,7 @@ async function showCar(id: string): Promise<void> {
       disposeCar(root) // the user picked another car meanwhile
       return
     }
-    if (bay) {
-      scene.remove(bay.root, bay.shadow)
-      room.floorLayers.splice(room.floorLayers.indexOf(bay.shadow), 1)
-      bay.lamps.dispose() // put the lenses back before the car is taken apart
-      bay.groups.dispose() // overlays first — they share geometry with the car
-      disposeCar(bay.root)
-      disposeContactShadow(bay.shadow)
-    }
+    clearBay()
     scene.add(root)
     const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3())
     const shadow = bakeContactShadow(renderer, root, { width: size.x + 1.4, depth: size.z + 1.4, height: 0.9 })
@@ -434,16 +461,17 @@ const pages: Record<string, Page> = {
     select: (id) => void showGarage(id),
   }),
   collection: collectionPage({
-    current: () => bay?.id ?? null,
+    current: () => bay?.id ?? (loadingId ? null : NO_CAR),
     loading: () => loadingId,
     select: (id) => void showCar(id),
   }),
-  car: carPage(() => bay?.configurator),
-  lights: lightsPage(() => bay?.lamps),
+  car: carPage(() => bay?.configurator, bayPlaceholder),
+  lights: lightsPage(() => bay?.lamps, bayPlaceholder),
   parts: partsPage({
     editor: () => bay?.groups,
     picking: () => picking,
     setPicking,
+    placeholder: bayPlaceholder,
   }),
   settings: {
     title: 'Settings',
@@ -527,7 +555,7 @@ window.addEventListener('keydown', (e) => {
   panelNav.refresh()
 })
 
-const known = (id: string | null) => (id && CARS.some((c) => c.id === id) ? id : null)
+const known = (id: string | null) => (id && (id === NO_CAR || CARS.some((c) => c.id === id)) ? id : null)
 void showCar(known(requested) ?? known(savedCar) ?? DEFAULT_CAR)
 
 // console handle for poking at the scene: garage.camera.position.set(…), garage.scene, …

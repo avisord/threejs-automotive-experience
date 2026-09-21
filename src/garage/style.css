@@ -663,3 +663,9 @@ body,
   border: 0;
   gap: 6px;
 }
+
+/* ─── collection: the empty-bay card ─── */
+.cfg-car-none {
+  border-style: dashed;
+  background: transparent;
+}
