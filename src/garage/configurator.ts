@@ -148,7 +148,7 @@ export interface CarConfigurator {
  * material across many parts) and drive them from a CarConfig. Each source
  * material inside a part gets its own clone, so factory looks stay distinct.
  */
-export function createConfigurator(car: THREE.Object3D, profile: CarProfile): CarConfigurator {
+export function createConfigurator(car: THREE.Object3D, profile: CarProfile, onChange: () => void = () => {}): CarConfigurator {
   const carSpace = new THREE.Matrix4()
   const paints = new Map<PartId, Map<THREE.Material, PaintMaterial>>()
 
@@ -203,6 +203,7 @@ export function createConfigurator(car: THREE.Object3D, profile: CarProfile): Ca
       Object.assign(config[id], patch)
       applyPart(id)
       save()
+      onChange()
     },
     load(next) {
       for (const id of Object.keys(config) as PartId[]) {
@@ -210,6 +211,7 @@ export function createConfigurator(car: THREE.Object3D, profile: CarProfile): Ca
         applyPart(id)
       }
       save()
+      onChange()
     },
     update() {
       carSpace.copy(car.matrixWorld).invert()

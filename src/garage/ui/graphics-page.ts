@@ -51,6 +51,13 @@ const REFLECTION_LABEL: Record<Reflections, string> = { off: 'Off', low: 'Low', 
 const ANISO_OPTIONS = ['1', '2', '4', '8', '16'] as const
 const ANISO_LABEL = Object.fromEntries(ANISO_OPTIONS.map((v) => [v, `${v}×`])) as Record<(typeof ANISO_OPTIONS)[number], string>
 
+const PT_SAMPLES = ['64', '256', '1024', '4096'] as const
+const PT_SAMPLES_LABEL = Object.fromEntries(PT_SAMPLES.map((v) => [v, v])) as Record<(typeof PT_SAMPLES)[number], string>
+const PT_BOUNCES = ['2', '4', '6', '8'] as const
+const PT_BOUNCES_LABEL = Object.fromEntries(PT_BOUNCES.map((v) => [v, v])) as Record<(typeof PT_BOUNCES)[number], string>
+const PT_RES = ['0.5', '0.75', '1'] as const
+const PT_RES_LABEL: Record<(typeof PT_RES)[number], string> = { '0.5': '50%', '0.75': '75%', '1': '100%' }
+
 const fixed = (digits: number, unit = '') => (v: number) => `${v.toFixed(digits)}${unit}`
 const signed = (digits: number, unit = '') => (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(digits)}${unit}`
 
@@ -120,6 +127,46 @@ export function graphicsPage(post: PostProcessing): Page {
         }),
       )
       body.append(detail)
+
+      // ─── path tracing ───────────────────────────────────────────────────
+      const pt = s.pathTracing
+      const trace = section(
+        'Path tracing',
+        toggle(pt.enabled, 'path tracing', (on) => {
+          post.set('pathTracing', { enabled: on })
+          structural()
+        }),
+      )
+      trace.append(
+        el(
+          'p',
+          'cfg-note',
+          pt.enabled
+            ? 'Once the camera rests, light is traced for real — soft shadows, bounce light, true reflections — and the picture refines until it reaches the sample count. Moving shows the fast renderer again.'
+            : 'Photoreal stills: when the camera rests, trace light paths instead of rasterising. Heavy on the GPU while it refines, free once it’s done.',
+        ),
+      )
+      if (pt.enabled) {
+        trace.append(
+          el('div', 'cfg-label cfg-sub', 'Samples per pixel'),
+          segmented(PT_SAMPLES, PT_SAMPLES_LABEL, String(pt.samples) as (typeof PT_SAMPLES)[number], (v) => {
+            post.set('pathTracing', { samples: Number(v) })
+            structural()
+          }),
+          el('div', 'cfg-label cfg-sub', 'Bounces'),
+          segmented(PT_BOUNCES, PT_BOUNCES_LABEL, String(pt.bounces) as (typeof PT_BOUNCES)[number], (v) => {
+            post.set('pathTracing', { bounces: Number(v) })
+            structural()
+          }),
+          el('div', 'cfg-label cfg-sub', 'Resolution'),
+          segmented(PT_RES, PT_RES_LABEL, String(pt.resolution) as (typeof PT_RES)[number], (v) => {
+            post.set('pathTracing', { resolution: Number(v) })
+            structural()
+          }),
+          el('p', 'cfg-note', 'Paint patterns (stripes, carbon, camo) are traced in their main colour, and headlight beams — a raster effect — fade out as the traced image comes in.'),
+        )
+      }
+      body.append(trace)
 
       // ─── ambient occlusion ──────────────────────────────────────────────
       const ao = section(

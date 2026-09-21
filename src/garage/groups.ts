@@ -63,6 +63,8 @@ export interface GroupEditor {
   /** tint hovered / inspected meshes (selection is tinted automatically) */
   highlight(kind: Exclude<HighlightKind, 'selected'>, meshes: Iterable<THREE.Mesh>): void
   setOverlaysVisible(visible: boolean): void
+  /** whether the Parts page is showing its overlays */
+  readonly overlaysVisible: boolean
   /** meshes that can be picked (everything visible on the car) */
   readonly pickable: THREE.Mesh[]
   dispose(): void
@@ -72,7 +74,8 @@ export function createGroupEditor(
   root: THREE.Object3D,
   profile: CarProfile,
   carSpace: THREE.Matrix4,
-  onChange: () => void,
+  /** `materials` is true when what the car is made of changed, false for overlays and selection */
+  onChange: (materials: boolean) => void,
 ): GroupEditor {
   const byName = new Map<string, THREE.Mesh>()
   const pickable: THREE.Mesh[] = []
@@ -84,6 +87,7 @@ export function createGroupEditor(
   })
 
   const highlighter = createHighlighter()
+  let overlaysVisible = true
   const groups: MaterialGroup[] = []
   const selection = new Set<THREE.Mesh>()
   /** what a grouped mesh wore before joining — restored when it leaves */
@@ -110,7 +114,7 @@ export function createGroupEditor(
 
   function changed(): void {
     save()
-    onChange()
+    onChange(true)
   }
 
   function groupOf(mesh: THREE.Mesh): MaterialGroup | undefined {
@@ -201,7 +205,7 @@ export function createGroupEditor(
         else selection.add(m)
       }
       syncSelection()
-      onChange()
+      onChange(false)
     },
     groupSelection() {
       if (selection.size === 0) return null
@@ -249,11 +253,15 @@ export function createGroupEditor(
     },
     highlight(kind, meshes) {
       highlighter.set(kind, meshes)
-      onChange()
+      onChange(false)
     },
     setOverlaysVisible(visible) {
+      overlaysVisible = visible
       highlighter.setVisible(visible)
-      onChange()
+      onChange(false)
+    },
+    get overlaysVisible() {
+      return overlaysVisible
     },
     dispose() {
       highlighter.dispose()

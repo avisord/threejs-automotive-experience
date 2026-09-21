@@ -17,6 +17,7 @@ import { partsPage } from './ui/parts-page'
 import { createGroupEditor, type GroupEditor } from './groups'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
+import { createPathTracer, type PathTracer } from './pathtrace'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -34,6 +35,15 @@ const scene = new THREE.Scene()
 
 /** the car currently in the bay (see showCar) — declared early, the garage reads it */
 let bay: Bay | null = null
+
+// path tracing state (see the path tracing section) — declared early, resize() reads it
+/** how long the camera must rest before tracing starts */
+const TRACE_DELAY = 350
+let tracer: PathTracer | null = null
+let tracedShown = false
+let tracerCameraStale = true
+let lastActivity = 0
+let traceTimer = 0
 
 // ─── camera: orbit around the car, never from below ─────────────────────────
 const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 100)
@@ -221,6 +231,7 @@ function resize(): void {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * post.settings.quality.renderScale)
   post.setSize(w, h) // also sizes the renderer
   room.resize(w, h, renderer.getPixelRatio())
+  tracerCameraStale = true
   invalidate()
 }
 window.addEventListener('resize', resize)
@@ -257,7 +268,14 @@ let fpsWindowStart = performance.now()
 function tickFps(now: number): void {
   const elapsed = now - fpsWindowStart
   if (elapsed < 500) return
-  fpsEl.textContent = framesDrawn === 0 ? 'idle' : `${Math.round((framesDrawn * 1000) / elapsed)} fps`
+  const target = post.settings.pathTracing.samples
+  if (tracer && tracedShown) {
+    fpsEl.textContent = tracer.status === 'done' ? `traced · ${target} spp` : `tracing · ${tracer.samples}/${target} spp`
+  } else if (tracer && tracer.status === 'building' && now - lastActivity > TRACE_DELAY) {
+    fpsEl.textContent = 'tracing · preparing'
+  } else {
+    fpsEl.textContent = framesDrawn === 0 ? 'idle' : `${Math.round((framesDrawn * 1000) / elapsed)} fps`
+  }
   framesDrawn = 0
   fpsWindowStart = now
 }
@@ -301,18 +319,21 @@ async function showCar(id: string): Promise<void> {
     const shadow = bakeContactShadow(renderer, root, { width: size.x + 1.4, depth: size.z + 1.4, height: 0.9 })
     scene.add(shadow)
     room.floorLayers.push(shadow)
-    const configurator = createConfigurator(root, profile)
+    const configurator = createConfigurator(root, profile, traceSceneChanged)
     applyAnisotropy(root)
-    const groups = createGroupEditor(root, profile, configurator.carSpace, () => {
+    const groups = createGroupEditor(root, profile, configurator.carSpace, (materials) => {
       invalidate()
       post.refreshGlow()
+      if (materials) traceSceneChanged()
     })
     groups.setOverlaysVisible(false) // the Parts page shows them
     const lamps = createLampSystem(root, profile, () => {
       invalidate()
       post.refreshGlow()
+      traceSceneChanged()
     })
     bay = { id: profile.id, root, shadow, configurator, groups, lamps }
+    traceSceneChanged()
     post.refreshGlow()
     invalidate(4) // first frames also compile the new car's shaders
     garage.configurator = configurator
@@ -372,6 +393,7 @@ async function showGarage(id: string): Promise<void> {
   installRoom()
   applyQuality() // floor mirror size and texture filtering for the new room
   post.refreshGlow()
+  traceSceneChanged()
   adoptGarage(def)
   // compile the new room's shaders behind the fade, not on the first visible frame
   await renderer.compileAsync(scene, camera).catch(() => {})
@@ -548,6 +570,7 @@ window.garage = garage
 // ─── settings that live outside the composer ────────────────────────────────
 post.onChange((sections) => {
   if (sections.includes('quality')) applyQuality()
+  if (sections.includes('pathTracing')) syncTracer()
   if (sections.includes('display')) {
     resize() // field of view
     fpsEl.hidden = !post.settings.display.showFps
@@ -559,6 +582,78 @@ post.onChange((sections) => {
 for (const type of ['input', 'change', 'click']) app.addEventListener(type, () => invalidate())
 window.addEventListener('keydown', () => invalidate())
 applyQuality()
+
+// ─── path tracing (Settings › Graphics) ──────────────────────────────────────
+
+/** the camera moved (or is about to): back to raster, and trace again once it rests */
+function noteActivity(): void {
+  lastActivity = performance.now()
+  tracerCameraStale = true
+  clearTimeout(traceTimer)
+  // on-demand drawing would otherwise never wake up to start tracing
+  if (tracer) traceTimer = window.setTimeout(() => invalidate(), TRACE_DELAY + 30)
+}
+
+/** something the tracer baked changed: drop the stale image and rebuild when resting */
+function traceSceneChanged(): void {
+  if (!tracer) return
+  tracer.invalidate()
+  if (tracedShown) hideTraced()
+  noteActivity()
+}
+
+function hideTraced(): void {
+  post.showPathTraced(null, 0)
+  tracedShown = false
+  invalidate()
+}
+
+/** tracing runs while the camera rests — but not while picking parts, which needs the overlays */
+function tracerWanted(now: number): boolean {
+  return tracer !== null && now - lastActivity > TRACE_DELAY && !picking && !bay?.groups.overlaysVisible
+}
+
+function traceStep(): void {
+  const t = tracer!
+  // the camera is at the pose being drawn now (fitCameraInRoom), which is what the tracer must see
+  if (tracerCameraStale) {
+    t.cameraChanged()
+    tracerCameraStale = false
+  }
+  t.step()
+  const texture = t.texture
+  // fade in over the first few samples, the first ones are noise
+  post.showPathTraced(texture, Math.min(1, t.samples / 6))
+  tracedShown = texture !== null
+}
+
+function syncTracer(): void {
+  const s = post.settings.pathTracing
+  if (s.enabled && !tracer) {
+    tracer = createPathTracer(renderer, {
+      scene,
+      camera,
+      // the baked contact shadow is a raster stand-in for what tracing does for real
+      hidden: () => (bay ? [bay.shadow] : []),
+      // the floor surface is see-through only to let the raster mirror show
+      opaque: () => room.floorLayers.slice(0, 1),
+      onReady: () => {
+        tracerCameraStale = true
+        invalidate(2)
+      },
+    })
+    noteActivity()
+  } else if (!s.enabled && tracer) {
+    tracer.dispose()
+    tracer = null
+    if (tracedShown) hideTraced()
+  }
+  tracer?.setOptions(s)
+  invalidate()
+}
+renderer.domElement.addEventListener('pointerdown', () => tracer && noteActivity())
+renderer.domElement.addEventListener('wheel', () => tracer && noteActivity(), { passive: true })
+syncTracer()
 
 // ─── frame loop ─────────────────────────────────────────────────────────────
 const timer = new THREE.Timer()
@@ -579,12 +674,19 @@ function frame(timestamp: number): void {
 
   timer.update(timestamp)
   const dt = Math.min(timer.getDelta(), 0.05)
-  if (updateControls(dt)) invalidate() // includes damping settling after a drag
+  if (updateControls(dt)) {
+    invalidate() // includes damping settling after a drag
+    noteActivity()
+  }
+  const tracing = tracerWanted(timestamp)
+  if (tracing && tracer!.status === 'tracing') invalidate(1) // keep sampling until it's done
+  if (!tracing && tracedShown) hideTraced()
   if (onDemand && dirtyFrames === 0) return
   dirtyFrames = Math.max(0, dirtyFrames - 1)
 
   bay?.configurator.update()
   fitCameraInRoom()
+  if (tracing) traceStep()
   post.render(dt)
   restoreOrbitCamera()
   framesDrawn++

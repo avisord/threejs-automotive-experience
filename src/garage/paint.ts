@@ -241,6 +241,9 @@ export function createPaintMaterial(
       material.emissiveMap = emissiveMap
       // picked up by the lights-only bloom (see collectGlowMeshes)
       material.userData.glow = glow
+      // the path tracer can't run the pattern shader: it gets the main colour
+      // instead (null = the material's own colour and texture already are it)
+      material.userData.albedo = original ? null : new THREE.Color(s.colorA)
 
       // see-through materials (glass) blend; everything else draws solid
       const alpha = s.opacity ?? (original ? null : (surface.opacity ?? null))

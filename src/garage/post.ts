@@ -4,6 +4,7 @@ import {
   BloomEffect,
   EffectComposer,
   EffectPass,
+  Pass,
   RenderPass,
   SelectiveBloomEffect,
   SMAAEffect,
@@ -53,9 +54,64 @@ export interface GraphicsSettings {
     fov: number
     showFps: boolean
   }
+  /** progressive path tracing once the camera rests — see pathtrace.ts */
+  pathTracing: {
+    enabled: boolean
+    bounces: number
+    /** samples per pixel to stop at */
+    samples: number
+    /** traced buffer size relative to the canvas */
+    resolution: number
+  }
 }
 
 export type GraphicsSection = keyof GraphicsSettings
+
+/**
+ * Lays the path-traced image over the rasterised frame, straight after the
+ * render pass — so everything after it (bloom, grade, tone mapping, vignette)
+ * treats both the same, and the raster frame's depth still serves the
+ * selective bloom. `weight` fades the traced image in over its first samples.
+ */
+class PathTraceBlendPass extends Pass {
+  private readonly material: THREE.ShaderMaterial
+
+  constructor() {
+    super('PathTraceBlendPass')
+    this.needsSwap = false
+    this.material = new THREE.ShaderMaterial({
+      uniforms: { tMap: { value: null }, uWeight: { value: 0 } },
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = position.xy * 0.5 + 0.5;
+          gl_Position = vec4( position.xy, 1.0, 1.0 );
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tMap;
+        uniform float uWeight;
+        varying vec2 vUv;
+        void main() {
+          gl_FragColor = vec4( texture2D( tMap, vUv ).rgb, uWeight );
+        }`,
+    })
+    this.fullscreenMaterial = this.material
+  }
+
+  show(texture: THREE.Texture | null, weight: number): void {
+    this.material.uniforms.tMap.value = texture
+    this.material.uniforms.uWeight.value = texture ? weight : 0
+    this.enabled = texture !== null && weight > 0
+  }
+
+  render(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget | null): void {
+    renderer.setRenderTarget(this.renderToScreen ? null : inputBuffer)
+    renderer.render(this.scene, this.camera)
+  }
+}
 
 export const REFLECTION_SCALE: Record<Reflections, number> = { off: 0, low: 0.25, medium: 0.5, high: 1 }
 
@@ -136,6 +192,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
   display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 42, showFps: true },
+  pathTracing: { enabled: false, bounces: 5, samples: 256, resolution: 0.75 },
 }
 
 function pick(look: Look) {
@@ -170,6 +227,8 @@ export interface PostProcessing {
   reset(): void
   /** re-read which meshes glow (lights-only bloom): a part set to glow, or a new garage */
   refreshGlow(): void
+  /** overlay the path-traced image (null = raster only) */
+  showPathTraced(texture: THREE.Texture | null, weight: number): void
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
@@ -195,6 +254,10 @@ export function createPostProcessing(
   const settings = loadSaved()
   const composer = new EffectComposer(renderer, { multisampling: settings.aa.msaa, frameBufferType: THREE.HalfFloatType })
   composer.addPass(new RenderPass(scene, camera))
+  const blend = new PathTraceBlendPass()
+  blend.enabled = false
+  composer.addPass(blend)
+  let traced = false // screen-space AO on top of a path-traced image would darken it twice
 
   const ao = new N8AOPostPass(scene, camera, window.innerWidth, window.innerHeight)
   ao.configuration.gammaCorrection = false // the effect pass after it handles output colour
@@ -256,7 +319,7 @@ export function createPostProcessing(
 
     if (composer.multisampling !== s.aa.msaa) composer.multisampling = s.aa.msaa // reallocates the frame buffers
 
-    ao.enabled = s.ao.enabled
+    ao.enabled = s.ao.enabled && !traced
     if (s.ao.quality !== aoQuality) {
       aoQuality = s.ao.quality
       ao.setQualityMode(s.ao.quality) // recompiles — only on change
@@ -309,6 +372,14 @@ export function createPostProcessing(
     },
     onChange(listener) {
       listeners.push(listener)
+    },
+    showPathTraced(texture, weight) {
+      blend.show(texture, weight)
+      const nowTraced = texture !== null && weight > 0.5
+      if (nowTraced !== traced) {
+        traced = nowTraced
+        ao.enabled = settings.ao.enabled && !traced
+      }
     },
     refreshGlow() {
       if (bloom instanceof SelectiveBloomEffect) bloom.selection.set(glowMeshes())
