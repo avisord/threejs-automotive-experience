@@ -24,6 +24,9 @@ const app = document.querySelector<HTMLDivElement>('#app')!
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
+// only the car's lamps cast shadows, and each bakes its map once (see lights.ts)
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFShadowMap
 // tone mapping lives in the post chain (Menu › Settings › Graphics), see post.ts
 app.appendChild(renderer.domElement)
 
@@ -119,6 +122,10 @@ installRoom()
 
 /** put `room` in the scene and light the car with it */
 function installRoom(): void {
+  // floors and walls catch the car's shadow from its own head and tail lights
+  room.group.traverse((obj) => {
+    if ((obj as THREE.Mesh).isMesh) obj.receiveShadow = true
+  })
   scene.add(room.group)
   scene.background = room.background
   scene.environmentIntensity = room.environmentIntensity

@@ -45,6 +45,13 @@ export async function loadCar(profile: CarProfile, onProgress?: (fraction: numbe
     mesh.geometry.dispose()
   }
   bakeSkinnedMeshes(car)
+  // the body blocks its own lamps' light (glass lets it through)
+  car.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material
+    mesh.castShadow = !material.transparent
+  })
 
   if (profile.yaw) car.rotation.y = profile.yaw
   if (profile.length) {

@@ -195,6 +195,7 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
     const group = groups[id]
 
     for (const mesh of group.meshes) {
+      mesh.castShadow = false // the lamp can't be in its own way
       const material = lensMaterial(mesh)
       material.emissive.copy(on ? color : BLACK)
       material.emissiveIntensity = on ? tuning.emissive * intensity : 0
@@ -207,6 +208,17 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
       const spot = new THREE.SpotLight(color, tuning.candela * intensity, tuning.range, tuning.angle, 0.7, 2)
       spot.position.copy(position)
       spot.target.position.copy(position).add(tuning.aim)
+      // the bodywork stops the light: no glow through the bonnet or bumper,
+      // and the car's silhouette cut into the pool. Car and lamp don't move,
+      // so the map is drawn once when the light is made, not every frame.
+      spot.castShadow = true
+      spot.shadow.mapSize.set(1024, 1024)
+      spot.shadow.camera.near = 0.05
+      spot.shadow.camera.far = tuning.range
+      spot.shadow.bias = -0.0005
+      spot.shadow.normalBias = 0.02
+      spot.shadow.autoUpdate = false
+      spot.shadow.needsUpdate = true
       car.add(spot, spot.target)
       lights.push(spot)
 
