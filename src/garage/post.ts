@@ -60,8 +60,10 @@ export interface GraphicsSettings {
     bounces: number
     /** samples per pixel to stop at */
     samples: number
-    /** traced buffer size relative to the canvas */
+    /** traced buffer size relative to the canvas, in CSS pixels */
     resolution: number
+    /** clean up early samples (fades out as the image converges) */
+    denoise: boolean
   }
 }
 
@@ -192,7 +194,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
   display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 42, showFps: true },
-  pathTracing: { enabled: false, bounces: 5, samples: 256, resolution: 0.75 },
+  pathTracing: { enabled: false, bounces: 4, samples: 256, resolution: 0.75, denoise: true },
 }
 
 function pick(look: Look) {

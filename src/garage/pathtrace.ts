@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { WebGLPathTracer } from 'three-gpu-pathtracer'
+import { DenoiseMaterial, WebGLPathTracer } from 'three-gpu-pathtracer'
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
@@ -12,9 +13,16 @@ export interface PathTraceOptions {
   bounces: number
   /** stop once this many samples per pixel are in */
   samples: number
-  /** path-traced buffer size relative to the canvas */
+  /** traced buffer size relative to the canvas in CSS pixels (not device pixels) */
   resolution: number
+  /** smooth early samples with an edge-aware blur that fades out as the image converges */
+  denoise: boolean
 }
+
+/** samples by which the denoiser has faded out completely */
+const DENOISE_END = 192
+/** GPU time to hand over per batch — short enough that a camera move never waits long */
+const BATCH_MS = 30
 
 export interface PathTracer {
   readonly status: PathTraceStatus
@@ -28,6 +36,8 @@ export interface PathTracer {
   cameraChanged(): void
   /** do the next unit of work (start a build, or one sample); true while there's more to do */
   step(): boolean
+  /** the underlying three-gpu-pathtracer, for tuning from the console */
+  readonly engine: WebGLPathTracer
   dispose(): void
 }
 
@@ -65,8 +75,57 @@ export function createPathTracer(renderer: THREE.WebGLRenderer, host: PathTraceS
   pt.renderDelay = 0
   pt.fadeDuration = 0
   pt.filterGlossyFactor = 0.5 // tames fireflies from glossy paint seen off diffuse walls
-  pt.tiles.set(2, 2)
+  // small tiles keep each submission short, so a camera move is never stuck
+  // behind a long queue of path tracing work (see step())
+  pt.tiles.set(3, 3)
   const worker = new ParallelMeshBVHWorker()
+
+  const gl = renderer.getContext() as WebGL2RenderingContext
+  /** batches handed to the GPU and not yet finished, oldest first */
+  const inFlight: { fence: WebGLSync; tiles: number }[] = []
+  /** estimated GPU time per tile, ms (smoothed) */
+  let msPerTile = 20
+  let lastDrainAt = 0
+  let resolution = 0.75
+  let denoise = true
+
+  const denoiser = new FullScreenQuad(new DenoiseMaterial({ sigma: 5, threshold: 0.03, kSigma: 1 }))
+  const denoised = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false })
+  let denoisedAt = -1
+
+  /** retire finished batches, learning from them how long a tile takes */
+  function retire(): void {
+    while (inFlight.length > 0) {
+      const oldest = inFlight[0]
+      if (gl.getSyncParameter(oldest.fence, gl.SYNC_STATUS) !== gl.SIGNALED) return
+      gl.deleteSync(oldest.fence)
+      inFlight.shift()
+      const now = performance.now()
+      // with a batch always queued behind this one, the time between drains is GPU time
+      if (lastDrainAt > 0 && now - lastDrainAt < 1000) {
+        msPerTile = THREE.MathUtils.lerp(msPerTile, (now - lastDrainAt) / oldest.tiles, 0.3)
+      }
+      lastDrainAt = now
+    }
+  }
+
+  function denoisedTexture(): THREE.Texture {
+    const source = pt.target
+    const k = Math.min(1, pt.samples / DENOISE_END)
+    if (denoisedAt !== pt.samples) {
+      if (denoised.width !== source.width || denoised.height !== source.height) denoised.setSize(source.width, source.height)
+      const m = denoiser.material as DenoiseMaterial
+      m.map = source.texture
+      m.sigma = THREE.MathUtils.lerp(5, 1.5, k)
+      m.threshold = THREE.MathUtils.lerp(0.18, 0.03, k) // early noise on bright paint is big in HDR
+      const previous = renderer.getRenderTarget()
+      renderer.setRenderTarget(denoised)
+      denoiser.render(renderer)
+      renderer.setRenderTarget(previous)
+      denoisedAt = pt.samples
+    }
+    return denoised.texture
+  }
   pt.setBVHWorker(worker)
 
   let status: PathTraceStatus = 'building'
@@ -256,12 +315,15 @@ export function createPathTracer(renderer: THREE.WebGLRenderer, host: PathTraceS
     get samples() {
       return built ? Math.floor(pt.samples) : 0
     },
+    engine: pt,
     get texture() {
-      return built && pt.samples >= 1 ? pt.target.texture : null
+      if (!built || pt.samples < 1) return null
+      return denoise && pt.samples < DENOISE_END ? denoisedTexture() : pt.target.texture
     },
     setOptions(o) {
       pt.bounces = o.bounces
-      pt.renderScale = o.resolution
+      resolution = o.resolution
+      denoise = o.denoise
       target = o.samples
       if (built) pt.reset()
       if (status === 'done') status = 'tracing'
@@ -283,10 +345,27 @@ export function createPathTracer(renderer: THREE.WebGLRenderer, host: PathTraceS
         return false
       }
       status = 'tracing'
-      pt.renderSample()
+      // Pace the work to the GPU. WebGL queues whatever it's given, and a
+      // backlog of path tracing sits in front of every raster frame — a camera
+      // drag would stutter for seconds. Keep at most two ~30 ms batches in
+      // flight: one running, one queued so the GPU never idles, and a camera
+      // move waits for at most that much.
+      retire()
+      if (inFlight.length >= 2) return true
+      if (inFlight.length === 0) lastDrainAt = 0 // nothing queued: the next gap isn't GPU time
+      const tiles = THREE.MathUtils.clamp(Math.round(BATCH_MS / msPerTile), 1, 18)
+      // trace at CSS-pixel resolution: on a 2x display, device pixels would be 4x the work for a noisy image
+      pt.renderScale = resolution / renderer.getPixelRatio()
+      for (let i = 0; i < tiles && pt.samples < target; i++) pt.renderSample()
+      inFlight.push({ fence: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)!, tiles })
+      gl.flush()
       return true
     },
     dispose() {
+      for (const f of inFlight) gl.deleteSync(f.fence)
+      denoiser.dispose()
+      ;(denoiser.material as THREE.Material).dispose()
+      denoised.dispose()
       pt.dispose()
       worker.dispose()
       for (const g of mergedGeometries) g.dispose()

@@ -548,6 +548,8 @@ const garage: {
   lamps?: LampSystem
   /** redraw after changing things from the console while rendering on demand */
   invalidate: typeof invalidate
+  /** the path tracer while it's switched on (Settings › Graphics) */
+  readonly tracer: PathTracer | null
 } = {
   scene,
   camera,
@@ -559,6 +561,9 @@ const garage: {
   showGarage,
   post,
   invalidate,
+  get tracer() {
+    return tracer
+  },
 }
 declare global {
   interface Window {

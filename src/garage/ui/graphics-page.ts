@@ -163,6 +163,11 @@ export function graphicsPage(post: PostProcessing): Page {
             post.set('pathTracing', { resolution: Number(v) })
             structural()
           }),
+          el('div', 'cfg-label cfg-sub', 'Denoise'),
+          segmented(['on', 'off'] as const, { on: 'On', off: 'Off' }, pt.denoise ? 'on' : 'off', (v) => {
+            post.set('pathTracing', { denoise: v === 'on' })
+            structural()
+          }),
           el('p', 'cfg-note', 'Paint patterns (stripes, carbon, camo) are traced in their main colour, and headlight beams — a raster effect — fade out as the traced image comes in.'),
         )
       }
