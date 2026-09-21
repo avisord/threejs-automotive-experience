@@ -17,7 +17,7 @@ import { partsPage } from './ui/parts-page'
 import { createGroupEditor, type GroupEditor } from './groups'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
-import { createPathTracer, type PathTracer } from './pathtrace'
+import type { PathTracer } from './pathtrace'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -627,9 +627,32 @@ function traceStep(): void {
   tracedShown = texture !== null
 }
 
+let tracerLoading = false
 function syncTracer(): void {
   const s = post.settings.pathTracing
   if (s.enabled && !tracer) {
+    // the path tracer is a big download most sessions never need — fetch it on first use
+    if (!tracerLoading) {
+      tracerLoading = true
+      void import('./pathtrace').then(({ createPathTracer }) => {
+        tracerLoading = false
+        if (!post.settings.pathTracing.enabled || tracer) return
+        startTracer(createPathTracer)
+        syncTracer()
+      })
+    }
+    return
+  } else if (!s.enabled && tracer) {
+    tracer.dispose()
+    tracer = null
+    if (tracedShown) hideTraced()
+  }
+  tracer?.setOptions(s)
+  invalidate()
+}
+
+function startTracer(createPathTracer: typeof import('./pathtrace').createPathTracer): void {
+  {
     tracer = createPathTracer(renderer, {
       scene,
       camera,
@@ -643,13 +666,7 @@ function syncTracer(): void {
       },
     })
     noteActivity()
-  } else if (!s.enabled && tracer) {
-    tracer.dispose()
-    tracer = null
-    if (tracedShown) hideTraced()
   }
-  tracer?.setOptions(s)
-  invalidate()
 }
 renderer.domElement.addEventListener('pointerdown', () => tracer && noteActivity())
 renderer.domElement.addEventListener('wheel', () => tracer && noteActivity(), { passive: true })
