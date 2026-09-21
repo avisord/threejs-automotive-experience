@@ -1,0 +1,141 @@
+# tstshaders — three.js playgrounds
+
+Two independent Vite pages (multi-page build, see `vite.config.ts`):
+
+- **`index.html` → `src/main.ts`** — "ball pit": physics balls with procedural surfaces
+  (`balls.ts`, `materials.ts`, `physics.ts`, `drag.ts`), scene presets in `src/scenes/`,
+  composable environment modules in `src/modules/`. Older, mostly finished.
+- **`garage.html` → `src/garage/main.ts`** — the active project: a futuristic car
+  showroom. Orbit a car inside a selectable garage, repaint it, group and re-material
+  its parts, switch its lights on, tune post-processing, optionally path trace stills.
+
+Stack: TypeScript, Vite 8, three r185, `postprocessing` (pmndrs) + `n8ao`,
+`three-gpu-pathtracer` + `three-mesh-bvh` (lazy-loaded). pnpm.
+
+```sh
+pnpm dev      # vite, port 3000 (vite.config.ts) → /garage.html
+pnpm build    # tsc && vite build — run before every commit
+npx tsc --noEmit
+```
+
+## Working with the user
+
+- The user writes Hinglish; answer in Hinglish, keep code/comments/commits in English.
+- **Commits: conventional (`feat:`, `fix:`, `perf:`, `chore:`), and no AI/Claude
+  references or `Co-Authored-By` trailers** (user's global rule). PR bodies too.
+- Work on feature branches, never commit to `main`; open PRs with `gh`. Branches have
+  been stacked on each other when features built on unmerged work — say so in the PR
+  and retarget to `main` once the base merges. Ask before pushing / opening a PR unless
+  asked; local commits are fine.
+- The user also edits the repo (e.g. `vite.config.ts` port, PR #4 garages). Check
+  `git status` / `git log origin/main` before starting; merge `main` into long-lived
+  branches rather than rebasing pushed history.
+- Verify visually (see Testing) before claiming a rendering change works.
+
+## Garage architecture (`src/garage/`)
+
+`main.ts` wires everything; it's long and order-sensitive — module-level `let`s that are
+read by functions called during init (`bay`, path-tracing state) are declared near the
+top on purpose. Moving them below their first use is a TDZ crash at load.
+
+| File | Role |
+|---|---|
+| `cars.ts` | `CARS`: one `CarProfile` per car — file, `yaw`, target `length`, meshes to `hide`, `glass` fixes, configurator `parts` matchers, `lamps` matchers, credit. `NO_CAR` = empty bay. |
+| `car.ts` | `loadCar()`: GLTF + meshopt, hide meshes, fix Sketchfab BLEND materials (cut-out vs real glass), **bake static skinned meshes to plain meshes**, set `castShadow`, scale/rotate, ground and centre (nose → +z). `disposeCar()` frees geometry/materials/textures/skeletons. |
+| `materials.ts` | Material library: ~23 entries (paint, metal, glass, trim, light), each = shader pattern + PBR params (incl. iridescence, sheen, opacity, emissive). `MaterialChoice` is what parts/groups store. |
+| `paint.ts` | `createPaintMaterial()`: clones a part's material into a MeshPhysicalMaterial with an `onBeforeCompile` hook that generates stripes/two-tone/carbon/camo in **car space** (no UVs) and applies a library entry. Snapshots the factory values so "Original" restores them. Sets `userData.glow` (bloom) and `userData.albedo` (path tracer). |
+| `configurator.ts` | Per-car part paint (body, wing, rims, calipers, cage, glass tint), presets, saved per car (`garage.car-config.v3.<id>`). |
+| `groups.ts` + `highlight.ts` | Parts editor: user picks meshes, groups them, one material per group (per-source clones keep normal maps/cut-outs). See-through overlay copies for hover/selection/focus. Saved per car by mesh name. |
+| `lights.ts` | Head/tail lamps: lens emissive clones + real **spot** lights (tails aim back/down) with one-shot baked shadow maps, optional beam cone shader. Per car. |
+| `contact-shadow.ts` | Baked soft ground shadow per car (depth from below + blur). |
+| `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
+| `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
+| `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
+| `pathtrace.ts` | Wrapper around three-gpu-pathtracer: builds the scene through proxies (see gotchas), paces GPU work with fence syncs, denoises early samples. |
+| `ui/` | Side panel shell (`panel.ts`: page stack + breadcrumb + `leave()` hook), widgets, and pages: Garage, Collection, Car, Parts, Lights, Settings › Graphics / Display. `material-controls.ts` is the shared material picker. |
+
+Rendering model:
+- **On-demand rendering** is the default: frames are drawn only after `invalidate(n)`
+  (camera moved, setting changed, panel interaction, car/garage load). Anything that
+  changes the picture outside those paths must call `invalidate()` (console:
+  `garage.invalidate()`). Hidden tabs cancel the rAF loop entirely.
+- Camera: OrbitControls, never below 84° polar, clamped inside `room.bounds` with FOV
+  compensation (dolly-zoom) and a view offset so the car sits beside the panel.
+- Environment map is captured from the room itself (PMREM) whenever a garage is
+  installed, so the car reflects the real lights.
+- Path tracing runs only when the camera has rested ~350 ms and not while picking parts;
+  anything that changes geometry/materials/lights must call `traceSceneChanged()`.
+
+Console handle `window.garage`: `scene, camera, controls, renderer, room, post,
+configurator, lamps, tracer, invalidate, showGarage`.
+
+## Adding a car
+
+1. Optimise the export (keep names — the configurator matches on them):
+   ```sh
+   npx @gltf-transform/cli@4 optimize in.glb public/models/<name>.glb --compress meshopt \
+     --texture-compress webp --texture-size 2048 \
+     --join false --flatten false --simplify false --instance false --palette false
+   ```
+   FBX-only sources: `npx fbx2gltf` (npm package ships an FBX2glTF binary) first.
+2. Inspect materials/nodes of the **optimised** file (dedup renames/merges materials).
+3. Add a `CarProfile`: find front (+z) from headlight/taillight positions, set `yaw`,
+   `length` if the scale is off, `hide` shadow planes / motion-blur wheel doubles /
+   damage variants / inner glass layers, `glass` fixes for windows exported OPAQUE,
+   `parts` and `lamps` matchers.
+4. Check in the browser: every part matched (console warns otherwise), windows
+   see-through, lamps detected (four spot lights: two head, two tail), texture and
+   geometry counts back to baseline after switching away.
+
+Licences: Roxy (toddeppe), AMG ONE (VTX), 930 (Lionsharp Studios) are CC-BY-4.0 and
+credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence info.
+
+## Gotchas learned the hard way
+
+- `gltf-transform optimize` runs **palette** by default: it folds untextured materials
+  (body paint, glass) into one and loses their names. Always `--palette false`.
+- GLTFLoader sanitises node names (drops `.`, spaces → `_`) and suffixes duplicates
+  (`hub_lf`, `hub_lf_1`) — write regexes against loaded names, not file names.
+- Sketchfab exports mark body/interior BLEND just because textures have alpha → render
+  as alpha-tested opaque, keep only real glass transparent (`car.ts`).
+- The GT3 RS rigs 179 rigid parts to bones: skinning cost a bone texture each and made
+  raycasts ~150 ms. They're baked to plain meshes at load.
+- three-gpu-pathtracer copies vertex data in its **source array type**: meshopt
+  quantized (normalized Int16) attributes become room-sized garbage. `pathtrace.ts`
+  hands it float copies. It also ignores `InstancedMesh` (merged first),
+  `MeshBasicMaterial` glow (→ emissive proxies), `onBeforeCompile` patterns (→ main
+  colour) and can't read a PMREM environment (a stand-in scene with no env is used).
+- WebGL queues unbounded work: path tracing without pacing put the GPU ~2.7 s behind
+  and froze camera drags. Keep batches small and track them with `fenceSync`.
+- No shadow maps existed before the lamps; point lights leaked through bodywork onto
+  the floor. Lamps are spots with baked (`shadow.autoUpdate = false`) shadow maps.
+- `PCFSoftShadowMap` is deprecated in r185 — use `PCFShadowMap`.
+- The floor mirror (`Reflector`) re-renders the scene; objects lying on the floor must be
+  in `room.floorLayers` so they're hidden during the mirror pass.
+- `THREE.Clock` is deprecated — the loop uses `THREE.Timer`.
+
+## Testing / verification
+
+There's no test suite; changes are verified by driving the page in headless Chromium on
+the real GPU and looking at screenshots:
+
+- Chromium: `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`, launched via
+  `playwright-core` (install it in the session scratchpad, not the repo) with
+  `--ignore-gpu-blocklist --enable-gpu --use-angle=vulkan --enable-features=Vulkan`
+  (renderer string should be the RX 7600 / RADV, not SwiftShader).
+- Run a dev server on a spare port (`pnpm exec vite --port 5190 --strictPort`) and stop it
+  afterwards. Wait for `.loader.done` and `window.garage.configurator` before measuring.
+- Useful levers: `?car=<id>`, `localStorage` keys `garage.venue.v1` (garage),
+  `garage.car.v1`, `garage.graphics.v1`; `renderer.info` for leaks and draw counts;
+  `/sys/class/drm/card1/device/gpu_busy_percent` for GPU load (it's a smoothed value).
+- Note: setting the garage via localStorage skips its grade look — pick it through the
+  UI when judging colour.
+
+## Branch / PR state (2026-09-21)
+
+Merged to `main`: PR #1 (garage), #2 (graphics settings), #4 (selectable garages, the
+user's). Open stack: #3 `feat/material-groups` (parts editor) → #5
+`feat/material-library` (material library, lights, lamp shadows) → local-only
+`feat/path-tracing` → local-only `feat/empty-bay` (this file). Also local-only:
+`feat/light-wall-garage` (new "Light Wall" garage, branched from `main`).
+The user's local `main` may still hold two pre-rewrite commits — `origin/main` is the truth.
