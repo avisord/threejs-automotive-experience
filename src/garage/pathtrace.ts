@@ -145,27 +145,39 @@ export function createPathTracer(renderer: THREE.WebGLRenderer, host: PathTraceS
    * quantized attributes (normalized Int16 positions and the like) come out
    * clamped and then get read back as raw integers — garbage triangles the
    * size of the room. Give it plain float copies instead (cached per geometry).
+   *
+   * It also reads vertex colours as RGBA and multiplies albedo — alpha
+   * included — by them, so an RGB colour attribute makes the surface fully
+   * transparent. Those get an opaque alpha in the copy.
    */
   function floatGeometry(g: THREE.BufferGeometry): THREE.BufferGeometry {
     const attrs = Object.entries(g.attributes).filter(([name]) => TRACED_ATTRIBUTES.includes(name))
-    const quantized = attrs.some(
-      ([, a]) => (a as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute || a.normalized || !(a.array instanceof Float32Array),
+    const rgbColor = (name: string, a: { itemSize: number }) => name === 'color' && a.itemSize === 3
+    const needsCopy = attrs.some(
+      ([name, a]) =>
+        (a as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute ||
+        a.normalized ||
+        !(a.array instanceof Float32Array) ||
+        rgbColor(name, a),
     )
-    if (!quantized) return g
+    if (!needsCopy) return g
     let f = floatGeometries.get(g)
     if (f) return f
     f = new THREE.BufferGeometry()
     if (g.index) f.setIndex(g.index)
     for (const [name, a] of attrs) {
       const n = a.itemSize
-      const out = new Float32Array(a.count * n)
+      const rgb = rgbColor(name, a)
+      const m = rgb ? 4 : n
+      const out = new Float32Array(a.count * m)
       for (let i = 0; i < a.count; i++) {
-        out[i * n] = a.getX(i)
-        if (n > 1) out[i * n + 1] = a.getY(i)
-        if (n > 2) out[i * n + 2] = a.getZ(i)
-        if (n > 3) out[i * n + 3] = a.getW(i)
+        out[i * m] = a.getX(i)
+        if (n > 1) out[i * m + 1] = a.getY(i)
+        if (n > 2) out[i * m + 2] = a.getZ(i)
+        if (n > 3) out[i * m + 3] = a.getW(i)
+        if (rgb) out[i * m + 3] = 1
       }
-      f.setAttribute(name, new THREE.BufferAttribute(out, n))
+      f.setAttribute(name, new THREE.BufferAttribute(out, m))
     }
     for (const group of g.groups) f.addGroup(group.start, group.count, group.materialIndex)
     floatGeometries.set(g, f)
@@ -221,10 +233,25 @@ export function createPathTracer(renderer: THREE.WebGLRenderer, host: PathTraceS
       let merged = instanceProxies.get(im)
       if (!merged) {
         const m = new THREE.Matrix4()
+        const tint = new THREE.Color()
         const parts: THREE.BufferGeometry[] = []
         for (let i = 0; i < im.count; i++) {
           im.getMatrixAt(i, m)
-          parts.push(im.geometry.clone().applyMatrix4(m))
+          const part = im.geometry.clone().applyMatrix4(m)
+          // per-instance colours (a meadow, a forest) would be lost in the merge: bake them into vertex colours
+          if (im.instanceColor) {
+            im.getColorAt(i, tint)
+            const n = part.attributes.position.count
+            const base = part.attributes.color
+            const colors = new Float32Array(n * 3)
+            for (let v = 0; v < n; v++) {
+              colors[v * 3] = (base ? base.getX(v) : 1) * tint.r
+              colors[v * 3 + 1] = (base ? base.getY(v) : 1) * tint.g
+              colors[v * 3 + 2] = (base ? base.getZ(v) : 1) * tint.b
+            }
+            part.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+          }
+          parts.push(part)
         }
         merged = new THREE.Mesh(mergeGeometries(parts) ?? new THREE.BufferGeometry(), im.material)
         for (const g of parts) g.dispose()
