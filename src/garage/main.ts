@@ -18,6 +18,10 @@ import { createGroupEditor, type GroupEditor } from './groups'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
 import type { PathTracer } from './pathtrace'
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
+import { DEFAULT_CAR_SIZE, type CameraPose } from './camera-moves'
+import type { Stage } from './director'
+import { videoPage } from './ui/video-page'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -35,6 +39,11 @@ const scene = new THREE.Scene()
 
 /** the car currently in the bay (see showCar) — declared early, the garage reads it */
 let bay: Bay | null = null
+/**
+ * Set while a video preview or export has the view (see the video section):
+ * the frame fills the window, or is rendered at `size`. Declared early, resize() reads it.
+ */
+let directing: { size: { width: number; height: number } | null } | null = null
 
 // path tracing state (see the path tracing section) — declared early, resize() reads it
 /** how long the camera must rest before tracing starts */
@@ -204,6 +213,7 @@ const PANEL_INSET = 328
 const SHEET_INSET = 0.45
 
 function resize(): void {
+  if (directing) return layoutForVideo(directing.size)
   const w = window.innerWidth
   const h = window.innerHeight
   // Shift the projection centre into the area the panel leaves free, so the
@@ -235,6 +245,22 @@ function resize(): void {
   invalidate()
 }
 window.addEventListener('resize', resize)
+
+/** a plain centred lens over the whole frame: the window (preview) or the video size (export) */
+function layoutForVideo(size: { width: number; height: number } | null): void {
+  const w = size?.width ?? window.innerWidth
+  const h = size?.height ?? window.innerHeight
+  baseFov = post.settings.display.fov
+  camera.fov = baseFov
+  camera.aspect = w / h
+  camera.clearViewOffset()
+  camera.updateProjectionMatrix()
+  // an export renders exactly its pixel size, whatever the display's pixel ratio
+  renderer.setPixelRatio(size ? 1 : Math.min(window.devicePixelRatio, 2) * post.settings.quality.renderScale)
+  post.setSize(w, h)
+  room.resize(w, h, renderer.getPixelRatio())
+  invalidate()
+}
 
 /** resolution, floor mirror and texture filtering — the settings outside the composer */
 function applyQuality(): void {
@@ -288,6 +314,8 @@ interface Bay {
   configurator: CarConfigurator
   groups: GroupEditor
   lamps: LampSystem
+  /** width, height, length — what camera moves frame */
+  size: THREE.Vector3
 }
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
@@ -359,7 +387,7 @@ async function showCar(id: string): Promise<void> {
       post.refreshGlow()
       traceSceneChanged()
     })
-    bay = { id: profile.id, root, shadow, configurator, groups, lamps }
+    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size }
     traceSceneChanged()
     post.refreshGlow()
     invalidate(4) // first frames also compile the new car's shaders
@@ -411,7 +439,17 @@ async function showGarage(id: string): Promise<void> {
   panelNav.refresh()
   fade.classList.add('is-on')
   await new Promise((resolve) => setTimeout(resolve, FADE_MS))
+  await swapRoom(def)
+  switchingTo = null
+  panelNav.refresh()
+  // uncover once the new room has been drawn
+  requestAnimationFrame(() => requestAnimationFrame(() => fade.classList.remove('is-on')))
+  announceGarage(def)
+  console.info(`[garage] now in ${def.id}`)
+}
 
+/** replace the room — geometry, lights, reflections, grade look — ready to draw when it resolves */
+async function swapRoom(def: GarageDef): Promise<void> {
   scene.remove(room.group)
   room.dispose()
   garageDef = def
@@ -422,15 +460,9 @@ async function showGarage(id: string): Promise<void> {
   post.refreshGlow()
   traceSceneChanged()
   adoptGarage(def)
-  // compile the new room's shaders behind the fade, not on the first visible frame
+  // compile the new room's shaders now (behind the fade), not on the first visible frame
   await renderer.compileAsync(scene, camera).catch(() => {})
   invalidate(4)
-  switchingTo = null
-  panelNav.refresh()
-  // uncover once the new room has been drawn
-  requestAnimationFrame(() => requestAnimationFrame(() => fade.classList.remove('is-on')))
-  announceGarage(def)
-  console.info(`[garage] now in ${def.id}`)
 }
 
 /** arriving somewhere new: take on its grade look and remember it */
@@ -447,13 +479,108 @@ function adoptGarage(def: GarageDef): void {
 // opened by link somewhere other than last time: as if picked. A reload keeps any grade tweaks.
 if (garageDef.id !== savedGarage) adoptGarage(garageDef)
 
+// ─── video: camera moves played back or exported (Menu › Video) ────────────
+const fadeQuad = new FullScreenQuad(new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthTest: false }))
+
+const sightRay = new THREE.Raycaster()
+const sightBox = new THREE.Box3()
+const sightSize = new THREE.Vector3()
+/**
+ * Room geometry between the car and the camera (a pendant over the car, a
+ * pillar) would fill the frame: pull the camera in front of it and widen the
+ * lens to keep the framing, the same dolly-zoom fitCameraInRoom() does at the walls.
+ */
+function clearLineOfSight(target: THREE.Vector3): void {
+  offset.subVectors(camera.position, target)
+  const distance = offset.length()
+  sightRay.set(target, offset.divideScalar(distance))
+  sightRay.far = distance
+  const skip = new Set<THREE.Object3D>([room.reflector, ...room.floorLayers])
+  const hit = sightRay.intersectObject(room.group, true).find((h) => {
+    if (skip.has(h.object) || !h.object.visible) return false
+    // cords and strips are too thin to hide anything — pulling in for them would just pop the framing
+    const g = (h.object as THREE.Mesh).geometry
+    if (!g.boundingBox) g.computeBoundingBox()
+    sightBox.copy(g.boundingBox!).getSize(sightSize)
+    return Math.min(sightSize.x, sightSize.y, sightSize.z) > 0.05 || Math.max(sightSize.x, sightSize.y, sightSize.z) < 0.3
+  })
+  if (!hit) return
+  const pulled = Math.max(0.5, hit.distance - 0.2)
+  camera.position.copy(target).addScaledVector(offset, pulled)
+  const k = pulled / distance
+  camera.fov = Math.min(75, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / k)))
+  camera.updateProjectionMatrix()
+}
+
+/** what preview and export borrow from the app; they give it back as it was */
+const videoStage: Stage = (() => {
+  let saved: { position: THREE.Vector3; target: THREE.Vector3; garage: string; grade: typeof post.settings.grade } | null = null
+  return {
+    canvas: renderer.domElement,
+    begin(size) {
+      saved = {
+        position: camera.position.clone(),
+        target: controls.target.clone(),
+        garage: garageDef.id,
+        grade: { ...post.settings.grade },
+      }
+      setPicking(false)
+      if (tracedShown) hideTraced()
+      directing = { size }
+      app.classList.add('is-directing')
+      resize()
+    },
+    async end() {
+      if (saved && saved.garage !== garageDef.id) await swapRoom(garageById(saved.garage)!)
+      if (saved) {
+        post.set('grade', saved.grade) // the garages visited set their own looks
+        camera.position.copy(saved.position)
+        controls.target.copy(saved.target)
+        controls.update()
+      }
+      saved = null
+      directing = null
+      app.classList.remove('is-directing')
+      resize()
+      noteActivity()
+    },
+    framing() {
+      return { size: bay?.size ?? DEFAULT_CAR_SIZE, fov: baseFov, aspect: camera.aspect }
+    },
+    async setGarage(id) {
+      const def = garageById(id)
+      if (!def || def.id === garageDef.id) return false
+      await swapRoom(def)
+      return true
+    },
+    draw(pose: CameraPose, dt, black) {
+      camera.position.copy(pose.position)
+      controls.target.copy(pose.target)
+      camera.lookAt(pose.target)
+      bay?.configurator.update()
+      fitCameraInRoom() // moves only along the view ray, so the look direction holds
+      clearLineOfSight(pose.target)
+      post.render(dt)
+      if (black > 0.001) {
+        ;(fadeQuad.material as THREE.MeshBasicMaterial).opacity = black
+        const autoClear = renderer.autoClear
+        renderer.autoClear = false
+        renderer.setRenderTarget(null)
+        fadeQuad.render(renderer)
+        renderer.autoClear = autoClear
+      }
+    },
+  }
+})()
+
 // ─── side panel: Menu › Garage · Collection · Car · Parts · Settings ───────
 /** Menu › Parts: clicks on the car select parts (declared before the panel renders) */
 let picking = false
 const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
-    render: (body, nav) => body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'lights', 'settings'], nav)),
+    render: (body, nav) =>
+      body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'lights', 'video', 'settings'], nav)),
   },
   garage: garagePage({
     current: () => garageDef.id,
@@ -478,6 +605,7 @@ const pages: Record<string, Page> = {
     hint: 'Graphics, display',
     render: (body, nav) => body.append(menuList(pages, ['graphics', 'display'], nav)),
   },
+  video: videoPage(app, () => videoStage, () => garageDef.id),
   graphics: graphicsPage(post),
   display: displayPage(post),
 }
@@ -643,7 +771,7 @@ function hideTraced(): void {
 
 /** tracing runs while the camera rests — but not while picking parts, which needs the overlays */
 function tracerWanted(now: number): boolean {
-  return tracer !== null && now - lastActivity > TRACE_DELAY && !picking && !bay?.groups.overlaysVisible
+  return tracer !== null && now - lastActivity > TRACE_DELAY && !picking && !bay?.groups.overlaysVisible && !directing
 }
 
 function traceStep(): void {
@@ -712,6 +840,7 @@ let lastFrameAt = 0
 
 function frame(timestamp: number): void {
   rafId = requestAnimationFrame(frame)
+  if (directing) return // the director draws its own frames
   tickFps(timestamp)
   const { fpsCap, onDemand } = post.settings.display
   if (fpsCap > 0) {

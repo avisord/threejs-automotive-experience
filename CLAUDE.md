@@ -7,10 +7,12 @@ Two independent Vite pages (multi-page build, see `vite.config.ts`):
   composable environment modules in `src/modules/`. Older, mostly finished.
 - **`garage.html` → `src/garage/main.ts`** — the active project: a futuristic car
   showroom. Orbit a car inside a selectable garage, repaint it, group and re-material
-  its parts, switch its lights on, tune post-processing, optionally path trace stills.
+  its parts, switch its lights on, tune post-processing, optionally path trace stills,
+  and export MP4 videos from a shot list of camera moves across garages.
 
 Stack: TypeScript, Vite 8, three r185, `postprocessing` (pmndrs) + `n8ao`,
-`three-gpu-pathtracer` + `three-mesh-bvh` (lazy-loaded). pnpm.
+`three-gpu-pathtracer` + `three-mesh-bvh` (lazy-loaded), `mediabunny` (MP4 muxing over
+WebCodecs, lazy-loaded on export). pnpm.
 
 ```sh
 pnpm dev      # vite, port 3000 (vite.config.ts) → /garage.html
@@ -52,7 +54,9 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
 | `pathtrace.ts` | Wrapper around three-gpu-pathtracer: builds the scene through proxies (see gotchas), paces GPU work with fence syncs, denoises early samples. |
-| `ui/` | Side panel shell (`panel.ts`: page stack + breadcrumb + `leave()` hook), widgets, and pages: Garage, Collection, Car, Parts, Lights, Settings › Graphics / Display. `material-controls.ts` is the shared material picker. |
+| `camera-moves.ts` | `CAMERA_MOVES`: parametric moves (turntable, hero sweep, push in, flyover, side track, detail reveal, top-down) — `pose(u, framing)` in car space, framed from the car's size, lens and aspect. |
+| `director.ts` | Reel model (shots = move + garage + length, fade/cut, resolution, fps), `preview()` live in the window and `exportVideo()`: fixed-timestep render → `CanvasSource` (captured in the same task as the draw) → MP4. Talks to the app only through a `Stage` (implemented in `main.ts`: takes the view, swaps garages without the UI fade, restores camera/garage/grade after). |
+| `ui/` | Side panel shell (`panel.ts`: page stack + breadcrumb + `leave()` hook), widgets, and pages: Garage, Collection, Car, Parts, Lights, Video, Settings › Graphics / Display. `material-controls.ts` is the shared material picker. |
 
 Rendering model:
 - **On-demand rendering** is the default: frames are drawn only after `invalidate(n)`
@@ -63,6 +67,10 @@ Rendering model:
   compensation (dolly-zoom) and a view offset so the car sits beside the panel.
 - Environment map is captured from the room itself (PMREM) whenever a garage is
   installed, so the car reflects the real lights.
+- While a video preview/export runs (`directing` in `main.ts`) the app's frame loop draws
+  nothing, the panel/HUD hide, the lens is a plain centred one (no panel view offset) and
+  an export renders at the video size with pixel ratio 1. The director also pulls the
+  camera in front of room geometry blocking the car (`clearLineOfSight`, e.g. hangar pendants).
 - Path tracing runs only when the camera has rested ~350 ms and not while picking parts;
   anything that changes geometry/materials/lights must call `traceSceneChanged()`.
 
@@ -126,16 +134,24 @@ the real GPU and looking at screenshots:
 - Run a dev server on a spare port (`pnpm exec vite --port 5190 --strictPort`) and stop it
   afterwards. Wait for `.loader.done` and `window.garage.configurator` before measuring.
 - Useful levers: `?car=<id>`, `localStorage` keys `garage.venue.v1` (garage),
-  `garage.car.v1`, `garage.graphics.v1`; `renderer.info` for leaks and draw counts;
+  `garage.car.v1`, `garage.graphics.v1`, `garage.reel.v1` (video shot list),
+  `garage.panel-path.v1` (open panel page); `renderer.info` for leaks and draw counts;
   `/sys/class/drm/card1/device/gpu_busy_percent` for GPU load (it's a smoothed value).
 - Note: setting the garage via localStorage skips its grade look — pick it through the
   UI when judging colour.
+- Video: click "Export MP4" with `acceptDownloads`, save the download, and tile frames with
+  `ffmpeg -i out.mp4 -vf "select='not(mod(n\,20))',scale=384:-1,tile=6x4" -frames:v 1 tiles.png`.
+  Headless Chromium encodes H.264; 1080p60 takes ~2 s of export per second of video on the RX 7600.
+- Path tracing cost (measured 2026-09-23): ~140 ms per sample at 1200×675, 4 bounces with
+  the GT3 RS (empty bay ~60 ms), linear in pixels; BVH is already SAH. Realtime isn't
+  reachable with three-gpu-pathtracer — only lower res/bounces, or temporal reprojection.
 
-## Branch / PR state (2026-09-21)
+## Branch / PR state (2026-09-23)
 
 Merged to `main`: PR #1 (garage), #2 (graphics settings), #4 (selectable garages, the
 user's). Open stack: #3 `feat/material-groups` (parts editor) → #5
-`feat/material-library` (material library, lights, lamp shadows) → local-only
-`feat/path-tracing` → local-only `feat/empty-bay` (this file). Also local-only:
+`feat/material-library` (material library, lights, lamp shadows) → `feat/path-tracing`
+→ `feat/empty-bay` (both pushed, no PR yet) → local-only `feat/video-export`
+(camera moves + MP4 export). Path tracing stays as it is for now (user's call). Also:
 `feat/light-wall-garage` (new "Light Wall" garage, branched from `main`).
 The user's local `main` may still hold two pre-rewrite commits — `origin/main` is the truth.
