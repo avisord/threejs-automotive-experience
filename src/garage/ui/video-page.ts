@@ -1,5 +1,6 @@
 import { CAMERA_MOVES, moveById } from '../camera-moves'
 import {
+  QUALITIES,
   RESOLUTIONS,
   exportVideo,
   formatTime,
@@ -9,6 +10,8 @@ import {
   type Reel,
   type Resolution,
   type Stage,
+  type VideoQuality,
+  videoBitrate,
 } from '../director'
 import { GARAGES } from '../garages'
 import type { Nav, Page } from './panel'
@@ -16,6 +19,7 @@ import { el, section, segmented, slider } from './widgets'
 
 const REEL_KEY = 'garage.reel.v1'
 const RES_LABEL: Record<Resolution, string> = { '720': '720p', '1080': '1080p', '1440': '1440p', '2160': '4K' }
+const QUALITY_LABEL: Record<VideoQuality, string> = { standard: 'Standard', high: 'High', 'very-high': 'Very high', max: 'Max' }
 
 function loadReel(garage: string): Reel {
   const fallback: Reel = {
@@ -23,12 +27,14 @@ function loadReel(garage: string): Reel {
     transition: 'fade',
     resolution: '1080',
     fps: 60,
+    quality: 'high',
   }
   try {
     const saved = JSON.parse(localStorage.getItem(REEL_KEY) ?? 'null') as Reel | null
     if (!saved || !Array.isArray(saved.shots)) return fallback
     // drop shots whose move or garage no longer exists
     saved.shots = saved.shots.filter((s) => moveById(s.move) && GARAGES.some((g) => g.id === s.garage))
+    if (!QUALITIES.includes(saved.quality)) saved.quality = fallback.quality // saved before quality existed
     return { ...fallback, ...saved }
   } catch {
     return fallback
@@ -224,7 +230,19 @@ export function videoPage(app: HTMLElement, stage: () => Stage, currentGarage: (
           change()
         }),
       )
-      const summary = () => `${r.shots.length} shot${r.shots.length === 1 ? '' : 's'} · ${formatTime(reelDuration(r))}`
+      out.append(
+        el('div', 'cfg-label cfg-sub', 'Quality'),
+        segmented(QUALITIES, QUALITY_LABEL, r.quality, (q) => {
+          r.quality = q
+          change()
+        }),
+      )
+      const summary = () => {
+        const bitrate = videoBitrate(r)
+        const mb = (bitrate * reelDuration(r)) / 8 / 1e6
+        const size = mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.round(mb)} MB`
+        return `${r.shots.length} shot${r.shots.length === 1 ? '' : 's'} · ${formatTime(reelDuration(r))} · ${Math.round(bitrate / 1e6)} Mbps · up to ~${size}`
+      }
       const totalEl = el('p', 'cfg-note cfg-gap', summary())
       out.append(totalEl)
       const go = el('div', 'cfg-actions cfg-gap')

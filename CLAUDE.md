@@ -55,7 +55,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
 | `pathtrace.ts` | Wrapper around three-gpu-pathtracer: builds the scene through proxies (see gotchas), paces GPU work with fence syncs, denoises early samples. |
 | `camera-moves.ts` | `CAMERA_MOVES`: parametric moves (turntable, hero sweep, push in, flyover, side track, detail reveal, top-down) — `pose(u, framing)` in car space, framed from the car's size, lens and aspect. |
-| `director.ts` | Reel model (shots = move + garage + length, fade/cut, resolution, fps), `preview()` live in the window and `exportVideo()`: fixed-timestep render → `CanvasSource` (captured in the same task as the draw) → MP4. Talks to the app only through a `Stage` (implemented in `main.ts`: takes the view, swaps garages without the UI fade, restores camera/garage/grade after). |
+| `director.ts` | Reel model (shots = move + garage + length, fade/cut, resolution, fps, quality), `preview()` live in the window and `exportVideo()`: fixed-timestep render → `CanvasSource` (captured in the same task as the draw) → MP4. Talks to the app only through a `Stage` (implemented in `main.ts`: takes the view, swaps garages without the UI fade, restores camera/garage/grade after). |
 | `ui/` | Side panel shell (`panel.ts`: page stack + breadcrumb + `leave()` hook), widgets, and pages: Garage, Collection, Car, Parts, Lights, Video, Settings › Graphics / Display. `material-controls.ts` is the shared material picker. |
 
 Rendering model:
@@ -139,6 +139,9 @@ the real GPU and looking at screenshots:
   `/sys/class/drm/card1/device/gpu_busy_percent` for GPU load (it's a smoothed value).
 - Note: setting the garage via localStorage skips its grade look — pick it through the
   UI when judging colour.
+- Video bitrate is set explicitly from bits per pixel per frame × fps (`videoBitrate`):
+  mediabunny's own `Quality('high')` ignores frame rate and gave ~6 Mbps at 1080p60 — visibly
+  blocky on renders. Presets: standard 0.08 / high 0.15 / very high 0.25 / max 0.4 bpp.
 - Video: click "Export MP4" with `acceptDownloads`, save the download, and tile frames with
   `ffmpeg -i out.mp4 -vf "select='not(mod(n\,20))',scale=384:-1,tile=6x4" -frames:v 1 tiles.png`.
   Headless Chromium encodes H.264; 1080p60 takes ~2 s of export per second of video on the RX 7600.

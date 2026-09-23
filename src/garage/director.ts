@@ -13,11 +13,34 @@ export type Transition = 'cut' | 'fade'
 export const RESOLUTIONS = ['720', '1080', '1440', '2160'] as const
 export type Resolution = (typeof RESOLUTIONS)[number]
 
+export const QUALITIES = ['standard', 'high', 'very-high', 'max'] as const
+export type VideoQuality = (typeof QUALITIES)[number]
+
 export interface Reel {
   shots: Shot[]
   transition: Transition
   resolution: Resolution
   fps: 30 | 60
+  quality: VideoQuality
+}
+
+/**
+ * H.264 bits per pixel per frame. Renders are hard on an encoder — smooth
+ * gradients, glossy reflections, fine livery text, the whole frame moving —
+ * so even "standard" is well above what generic presets give (mediabunny's
+ * "high" came out at ~6 Mbps for 1080p60, visibly blocky).
+ */
+const BITS_PER_PIXEL: Record<VideoQuality, number> = { standard: 0.08, high: 0.15, 'very-high': 0.25, max: 0.4 }
+/** newer codecs get the same picture from fewer bits */
+const CODEC_EFFICIENCY: Record<string, number> = { avc: 1, hevc: 0.65, vp9: 0.65, av1: 0.5 }
+/** hardware H.264 encoders top out around here (level 5.2 allows 240 Mbps for High) */
+const MAX_BITRATE = 150_000_000
+
+/** target bitrate, bits per second */
+export function videoBitrate(reel: Reel, codec = 'avc'): number {
+  const { width, height } = frameSize(reel.resolution)
+  const bits = width * height * reel.fps * BITS_PER_PIXEL[reel.quality] * (CODEC_EFFICIENCY[codec] ?? 1)
+  return Math.min(MAX_BITRATE, Math.round(bits))
 }
 
 /** 16:9 frame size for a resolution */
@@ -137,12 +160,25 @@ export async function exportVideo(
   // the encoder is a sizeable module most sessions never need
   const mb = await import('mediabunny')
   const size = frameSize(reel.resolution)
-  const codec = await mb.getFirstEncodableVideoCodec(['avc', 'hevc', 'vp9', 'av1'], { ...size, quality: mb.QUALITY_HIGH })
+  const codecs = ['avc', 'hevc', 'vp9', 'av1'] as const
+  let codec: (typeof codecs)[number] | null = null
+  for (const c of codecs) {
+    const quality = new mb.Quality({ bitrate: videoBitrate(reel, c) })
+    if (await mb.canEncodeVideo(c, { ...size, quality, frameRate: reel.fps })) {
+      codec = c
+      break
+    }
+  }
   if (!codec) throw new Error(`this browser can't encode ${size.width}×${size.height} video`)
+  const bitrate = videoBitrate(reel, codec)
 
   const target = new mb.BufferTarget()
   const output = new mb.Output({ format: new mb.Mp4OutputFormat({ fastStart: 'in-memory' }), target })
-  const source = new mb.CanvasSource(stage.canvas, { codec, quality: mb.QUALITY_HIGH, keyFrameInterval: 2 })
+  const source = new mb.CanvasSource(stage.canvas, {
+    codec,
+    quality: new mb.Quality({ bitrate, bitrateMode: 'variable' }),
+    keyFrameInterval: 2,
+  })
   output.addVideoTrack(source, { frameRate: reel.fps })
 
   const total = reelDuration(reel)
@@ -164,7 +200,7 @@ export async function exportVideo(
       // captured straight after drawing, in the same task — the drawing buffer is still intact
       await source.add(t, dt)
       if (performance.now() - yieldedAt > 60) {
-        onProgress({ done: i / frames, label: `frame ${i + 1} / ${frames} · ${codec.toUpperCase()}` })
+        onProgress({ done: i / frames, label: `frame ${i + 1} / ${frames} · ${codec.toUpperCase()} ${Math.round(bitrate / 1e6)} Mbps` })
         await yieldToPage() // let the progress repaint and a cancel click land
         yieldedAt = performance.now()
       }
