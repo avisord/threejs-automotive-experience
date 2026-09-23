@@ -545,7 +545,8 @@ const videoStage: Stage = (() => {
       noteActivity()
     },
     framing() {
-      return { size: bay?.size ?? DEFAULT_CAR_SIZE, fov: baseFov, aspect: camera.aspect }
+      // not baseFov: draw() sets that to each pose's own lens
+      return { size: bay?.size ?? DEFAULT_CAR_SIZE, fov: post.settings.display.fov, aspect: camera.aspect }
     },
     async setGarage(id) {
       const def = garageById(id)
@@ -554,9 +555,11 @@ const videoStage: Stage = (() => {
       return true
     },
     draw(pose: CameraPose, dt, black) {
+      baseFov = pose.fov ?? post.settings.display.fov // the room clamps widen from this lens
       camera.position.copy(pose.position)
       controls.target.copy(pose.target)
       camera.lookAt(pose.target)
+      if (pose.roll) camera.rotateZ(pose.roll)
       bay?.configurator.update()
       fitCameraInRoom() // moves only along the view ray, so the look direction holds
       clearLineOfSight(pose.target)

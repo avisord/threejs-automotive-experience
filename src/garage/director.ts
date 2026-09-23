@@ -102,7 +102,10 @@ function poseAt(reel: Reel, stage: Stage, t: number) {
   const at = shotAt(reel, t)
   const shot = reel.shots[at.index]
   const move = moveById(shot.move) ?? CAMERA_MOVES[0]
-  move.pose(at.u, stage.framing(), pose)
+  // moves that don't set a lens or roll get the plain framing lens, level
+  pose.fov = undefined
+  pose.roll = 0
+  move.pose(at.u, stage.framing(), pose, at.u * shot.duration)
   return { shot, black: at.black }
 }
 
