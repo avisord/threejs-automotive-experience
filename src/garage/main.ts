@@ -55,7 +55,8 @@ let lastActivity = 0
 let traceTimer = 0
 
 // ─── camera: orbit around the car, never from below ─────────────────────────
-const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 100)
+// far enough for open-air garages that paint a whole landscape (see garages/fuji.ts)
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 3000)
 camera.position.set(4.4, 2.5, 5.6) // front-left, from above
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, 0.6, 0)
@@ -149,6 +150,14 @@ function installRoom(): void {
   scene.background = room.background
   scene.environmentIntensity = room.environmentIntensity
   captureEnvironment()
+  // a sky still loading: capture again once it's in, if this room is still up
+  const installed = room
+  installed.ready?.then(() => {
+    if (room !== installed) return
+    captureEnvironment()
+    traceSceneChanged()
+    invalidate(4)
+  })
 }
 
 /**
@@ -162,7 +171,7 @@ function captureEnvironment(): void {
   // the room must not reflect the previous garage's map while it's captured
   environmentTarget?.dispose()
   scene.environment = null
-  environmentTarget = pmrem.fromScene(scene, 0, 0.1, 60, {
+  environmentTarget = pmrem.fromScene(scene, 0, 0.1, 3000, {
     size: 512,
     position: new THREE.Vector3(0, 1.2, 0),
   })
@@ -460,6 +469,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   post.refreshGlow()
   traceSceneChanged()
   adoptGarage(def)
+  await room.ready // a video must not show the room before its sky is in
   // compile the new room's shaders now (behind the fade), not on the first visible frame
   await renderer.compileAsync(scene, camera).catch(() => {})
   invalidate(4)

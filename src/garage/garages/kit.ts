@@ -41,6 +41,11 @@ export interface Room {
   setReflectionScale(scale: number): void
   /** free every geometry, material, texture and render target the room made */
   dispose(): void
+  /**
+   * Resolves once assets the room loads in the background (a sky HDR) are in.
+   * The room is usable before; the app re-captures its environment map then.
+   */
+  ready?: Promise<void>
 }
 
 /**
@@ -311,6 +316,7 @@ export interface RoomOptions {
   bounds: [min: [number, number, number], max: [number, number, number]]
   background: THREE.ColorRepresentation
   environmentIntensity: number
+  ready?: Promise<void>
 }
 
 export function assembleRoom(group: THREE.Group, floor: Floor, opts: RoomOptions): Room {
@@ -324,6 +330,7 @@ export function assembleRoom(group: THREE.Group, floor: Floor, opts: RoomOptions
     resize: floor.resize,
     setReflectionScale: floor.setReflectionScale,
     dispose: () => disposeTree(group),
+    ready: opts.ready,
   }
 }
 

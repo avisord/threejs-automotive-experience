@@ -121,10 +121,17 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - The floor mirror (`Reflector`) re-renders the scene; objects lying on the floor must be
   in `room.floorLayers` so they're hidden during the mirror pass.
 - `THREE.Clock` is deprecated — the loop uses `THREE.Timer`.
-- Open-air garages (`fuji.ts`) paint the world on a panorama sphere: keep it inside the
-  environment capture's 60 m far plane (radius 48) so the car and the lake reflect it. The
-  lake is a plain glossy plane that reflects that env map — no second Reflector pass. Sphere
-  uv: azimuth fraction 0.75 = straight behind the car (-z); `scale.x = -1` un-mirrors it.
+- Open-air garages: `garages/landscape.ts` builds the world (HDR sky dome, 3D Fuji,
+  terrain, instanced meadow and forest, all from fixed seeds so videos are repeatable).
+  The camera far plane and the PMREM capture's far plane are 3000 m for it. The sky is a
+  Poly Haven CC0 HDRI (`public/hdri/`) cropped to its top half and loaded async — the room
+  exposes `ready` so the env map is re-captured once it's in, and video exports wait for it.
+  Dome uv column u faces (cos 2πu, ·, sin 2πu) after `scale.x = -1`; rotating by φ maps
+  angle a → a − φ. Far meshes set `raycast = () => {}` so `clearLineOfSight` stays cheap.
+- three-gpu-pathtracer reads vertex colours as RGBA and multiplies albedo **alpha** by
+  them: an RGB colour attribute made terrain/grass fully transparent in traces.
+  `pathtrace.ts` pads them to RGBA (alpha 1), and bakes `instanceColor` when merging
+  instanced meshes. Its texture array resizes every map to 1024².
 
 ## Testing / verification
 
