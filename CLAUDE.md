@@ -50,7 +50,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `groups.ts` + `highlight.ts` | Parts editor: user picks meshes, groups them, one material per group (per-source clones keep normal maps/cut-outs). See-through overlay copies for hover/selection/focus. Saved per car by mesh name. |
 | `lights.ts` | Head/tail lamps: lens emissive clones + real **spot** lights (tails aim back/down) with one-shot baked shadow maps, optional beam cone shader. Per car. |
 | `contact-shadow.ts` | Baked soft ground shadow per car (depth from below + blur). |
-| `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
+| `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
 | `pathtrace.ts` | Wrapper around three-gpu-pathtracer: builds the scene through proxies (see gotchas), paces GPU work with fence syncs, denoises early samples. |
@@ -121,6 +121,10 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - The floor mirror (`Reflector`) re-renders the scene; objects lying on the floor must be
   in `room.floorLayers` so they're hidden during the mirror pass.
 - `THREE.Clock` is deprecated — the loop uses `THREE.Timer`.
+- Open-air garages (`fuji.ts`) paint the world on a panorama sphere: keep it inside the
+  environment capture's 60 m far plane (radius 48) so the car and the lake reflect it. The
+  lake is a plain glossy plane that reflects that env map — no second Reflector pass. Sphere
+  uv: azimuth fraction 0.75 = straight behind the car (-z); `scale.x = -1` un-mirrors it.
 
 ## Testing / verification
 
