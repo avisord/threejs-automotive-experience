@@ -8,14 +8,15 @@ import { fbm, lerp, noise, ridged, smoothstep } from './landform'
  * layout from here, so it all agrees.
  *
  *   pavilion on a lawn terrace
- *   → the land falls away behind it (a bank, then a long slope)
- *   → a winding rural road across the valley (~380 m)
+ *   → the land falls away behind it (a steep bank, then a long gentle slope)
+ *   → a winding rural road across the valley (~480 m)
  *   → rolling ground, farms and a village, down to
- *   → the lake (~0.95–2.55 km), then its forested far shore (~3 km)
+ *   → the lake (~0.95–3.05 km), then its wooded far shore (~3.2 km)
  *   → foothill ranges (5–12 km) → Mount Fuji (~17 km)
  *
- * The pavilion stands ~100 m above the lake, a few metres from the edge of
- * its terrace: from a building on flat ground a lake two kilometres off is a
+ * The pavilion stands ~50 m above the lake, a few metres from the edge of
+ * its terrace, the land below falling away steeply and then gently across the
+ * valley: from a building on flat ground a lake two kilometres off is a
  * hairline; from the lip of a terrace it's a band.
  */
 
@@ -27,9 +28,9 @@ export const EYE = 1.3
 export const SITE = {
   /** z where the lawn behind the pavilion ends and the land falls away toward the lake */
   terraceEdge: -16,
-  road: { z: -380, sway: 45, extent: 2500, width: 7 },
-  lakeLevel: GROUND - 100,
-  lake: { x: 0, z: -1750, rx: 1900, rz: 800 },
+  road: { z: -480, sway: 45, extent: 2500, width: 7 },
+  lakeLevel: GROUND - 50,
+  lake: { x: 0, z: -2000, rx: 2000, rz: 1050 },
   /** real-scale terrain reaches this far; beyond, far layers are distance-compressed */
   realRadius: 3300,
   /**
@@ -86,28 +87,45 @@ export function mapFar(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
 // ─── the valley ─────────────────────────────────────────────────────────────
 
 /**
+ * The eye the valley is designed for: the orbit camera a few metres behind
+ * the car, looking past it toward the mountain. It sees the land beyond the
+ * back glass only above the floor's edge — about 4.5° below the horizon — so
+ * the whole view has to fit in that band: the far shore within ~1°, the lake
+ * from ~1° to 3°, the near shore's fields, village and road from 3° to 4.8°.
+ * Nearer the glass the band widens and the slope below the pavilion (its
+ * shrubs and trees) comes into view as well.
+ */
+const VIEW_EYE = { y: 1.5, z: 8 }
+
+/** depression below the design eye's horizon for ground `d` metres behind the pavilion, degrees */
+function depression(d: number): number {
+  const drop = smoothstep(d, -SITE.terraceEdge, 160) // the steep bank under the pavilion
+  const shore = smoothstep(d, 160, LAKE_NEAR) // then gently across the valley to the water
+  return lerp(lerp(10, 4.8, drop), 3.0, shore)
+}
+const THREE_DEG = Math.PI / 180
+/** the lake's near shore, straight out */
+const LAKE_NEAR = -SITE.lake.z - SITE.lake.rz
+
+/**
  * The fall of the land toward the lake, by distance behind the pavilion.
  *
- * Shaped by what the eye inside must see: past the terrace edge, only ground
- * seen less than ~6.8° below the eye is visible (the edge hides the rest).
- * For the road, the valley and the lake all to show, every farther point
- * has to appear a little higher in the view than the nearer ones — so the
- * profile is given as a depression angle that eases from 6.7° at the edge to
- * 5° a little over a kilometre out, and the height follows from it: the road
- * and the farmland get a band of the view, and the lake shows from where its
- * surface rises above 5° (its near shore sits behind a low bluff, as a lake
- * seen over a rise does). A convex slope — the natural first guess — put the
- * valley floor above the line of sight to the lake and hid it.
+ * Shaped by what the eye inside must see (VIEW_EYE): every farther point has
+ * to appear a little higher in the view than the nearer ones, or a rise hides
+ * the land behind it — so the profile is given as a depression angle that
+ * eases from 10° under the terrace to 3° at the lake's near shore, and the
+ * height follows from it. Past the shore the ground stays just above the
+ * water: the far shore's hills are added on top (heightAt). A convex slope
+ * — the natural first guess — puts the valley floor above the line of sight
+ * to the lake and hides it.
  */
 function fall(z: number): number {
   if (z >= SITE.terraceEdge) return 0
   const d = -z
-  const deg = THREE_DEG * lerp(6.7, 5.0, smoothstep(d, -SITE.terraceEdge, 1100))
-  const sightline = EYE - d * Math.tan(deg) - 1.2 // a little below the line of sight: seen as ground, not grazed
-  const bank = smoothstep(d, -SITE.terraceEdge, -SITE.terraceEdge + 30) // ease off the terrace
-  return Math.min(0, (sightline - GROUND) * bank)
+  const sightline = VIEW_EYE.y - (d + VIEW_EYE.z) * Math.tan(depression(Math.min(d, LAKE_NEAR)) * THREE_DEG) - 0.4
+  const bank = smoothstep(d, -SITE.terraceEdge, -SITE.terraceEdge + 12) // ease off the terrace
+  return Math.min(0, (Math.max(sightline, SITE.lakeLevel + 1.5) - GROUND) * bank)
 }
-const THREE_DEG = Math.PI / 180
 
 /** the road's centre line, winding across the valley */
 export function roadZ(x: number): number {
@@ -161,7 +179,7 @@ export function heightAt(x: number, z: number): number {
   h += smoothstep(r, 250, 900) * 38 * smoothstep(hills, 0.45, 0.8) * (1 - lakeness) * Math.min(1, aside)
   // the valley's flanks, the far shore and the rise behind — different heights, ragged crests
   h += flank(x) * (80 + 150 * ridged(x / 700, z / 700, 4))
-  h += farShore(z) * (60 + 110 * ridged(x / 600 + 2, z / 600, 4)) * (1 - flank(x) * 0.5)
+  h += farShore(z) * (25 + 65 * ridged(x / 600 + 2, z / 600, 4)) * (1 - flank(x) * 0.5)
   h += behind(z) * (35 + 55 * fbm(x / 500, z / 500))
   // The lake basin. Depth precision at a kilometre or two is metres, so land
   // near the water keeps clear of its level — above it outside the shore,

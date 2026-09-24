@@ -125,7 +125,9 @@ function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.Instanced
 /** the lake: open water with long, slow ripples and a real (low-resolution) reflection */
 function createLake(opts: LandscapeOptions, hide: () => THREE.Object3D[]): WaterSurface {
   const { lake, lakeLevel } = SITE
-  const lakeWater = createWater(new THREE.PlaneGeometry(lake.rx * 2.7, lake.rz * 2.9), {
+  // an ellipse a little larger than the shore: its edge stays under the land, inside the terrain's reach
+  const surface = new THREE.CircleGeometry(1, 96).scale(lake.rx * 1.3, lake.rz * 1.3, 1)
+  const lakeWater = createWater(surface, {
     sunDirection: opts.sunDirection,
     hideWhileReflecting: hide,
     scale: 22, // waves tens of metres long, not a pool's ripples
