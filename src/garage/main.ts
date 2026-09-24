@@ -18,6 +18,7 @@ import { createGroupEditor, type GroupEditor } from './groups'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
 import type { PathTracer } from './pathtrace'
+import type { SunPosition } from './garages/sky'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { DEFAULT_CAR_SIZE, type CameraPose } from './camera-moves'
 import type { Stage } from './director'
@@ -138,6 +139,16 @@ let garageDef: GarageDef =
 let room: Room = garageDef.create()
 /** what scene.environment is drawn from — the render target, not just its texture, has to be freed */
 let environmentTarget: THREE.WebGLRenderTarget | null = null
+/** open-air rooms: the sky-lit environment map their outdoor meshes use (see captureEnvironment) */
+let outdoorTarget: THREE.WebGLRenderTarget | null = null
+const SUN_KEY = 'garage.sun.v1'
+/** sun positions picked per garage */
+let savedSuns: Record<string, SunPosition> = {}
+try {
+  savedSuns = JSON.parse(localStorage.getItem(SUN_KEY) ?? '{}') as Record<string, SunPosition>
+} catch {
+  // defaults
+}
 installRoom()
 
 /** put `room` in the scene and light the car with it */
@@ -149,6 +160,8 @@ function installRoom(): void {
   scene.add(room.group)
   scene.background = room.background
   scene.environmentIntensity = room.environmentIntensity
+  const sun = savedSuns[garageDef.id]
+  if (room.sun && sun) room.sun.set(sun)
   captureEnvironment()
   // a sky still loading: capture again once it's in, if this room is still up
   const installed = room
@@ -168,6 +181,7 @@ function captureEnvironment(): void {
   const pmrem = new THREE.PMREMGenerator(renderer)
   const hidden = [room.reflector, ...(bay ? [bay.root, bay.shadow] : [])]
   for (const o of hidden) o.visible = false
+  room.outdoor?.beforeCapture?.()
   // the room must not reflect the previous garage's map while it's captured
   environmentTarget?.dispose()
   scene.environment = null
@@ -176,8 +190,46 @@ function captureEnvironment(): void {
     position: new THREE.Vector3(0, 1.2, 0),
   })
   scene.environment = environmentTarget.texture
+  // Open-air rooms: the interior capture sees a roof overhead, so the land
+  // outside would be lit by concrete instead of sky. It gets its own map,
+  // captured out in the open.
+  outdoorTarget?.dispose()
+  outdoorTarget = null
+  if (room.outdoor) {
+    outdoorTarget = pmrem.fromScene(scene, 0, 0.1, 3000, { size: 256, position: room.outdoor.probe })
+    const map = outdoorTarget.texture
+    room.outdoor.root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh
+      if (!mesh.isMesh) return
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const standard = m as THREE.MeshStandardMaterial
+        if (standard.isMeshStandardMaterial) standard.envMap = map
+      }
+    })
+  }
+  room.outdoor?.afterCapture?.()
   for (const o of hidden) o.visible = true
   pmrem.dispose()
+}
+
+let recaptureTimer = 0
+/** move the sun of an open-air room; the environment catches up once the slider rests */
+function setSun(sun: SunPosition): void {
+  if (!room.sun) return
+  room.sun.set(sun)
+  savedSuns[garageDef.id] = sun
+  try {
+    localStorage.setItem(SUN_KEY, JSON.stringify(savedSuns))
+  } catch {
+    // not remembered — fine
+  }
+  invalidate(2)
+  clearTimeout(recaptureTimer)
+  recaptureTimer = window.setTimeout(() => {
+    captureEnvironment()
+    traceSceneChanged()
+    invalidate(3)
+  }, 180)
 }
 
 // ─── post: AO, bloom, grade, vignette, AA ───────────────────────────────────
@@ -186,6 +238,7 @@ const post = createPostProcessing(renderer, scene, camera, () => [
   ...collectGlowMeshes(room.group),
   ...(bay ? collectGlowMeshes(bay.root) : []),
 ])
+post.setAtmosphere(room.atmosphere ?? null) // later rooms: swapRoom
 
 /**
  * Frames still to draw. In on-demand mode (the default) nothing is drawn
@@ -352,6 +405,7 @@ async function showCar(id: string): Promise<void> {
     loadingId = null // also abandons a car still loading
     setPicking(false)
     clearBay()
+    room.shadowsChanged?.()
     try {
       localStorage.setItem(CAR_KEY, NO_CAR)
     } catch {
@@ -397,6 +451,7 @@ async function showCar(id: string): Promise<void> {
       traceSceneChanged()
     })
     bay = { id: profile.id, root, shadow, configurator, groups, lamps, size }
+    room.shadowsChanged?.()
     traceSceneChanged()
     post.refreshGlow()
     invalidate(4) // first frames also compile the new car's shaders
@@ -465,6 +520,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   room = def.create()
   if (bay) room.floorLayers.push(bay.shadow)
   installRoom()
+  post.setAtmosphere(room.atmosphere ?? null)
   applyQuality() // floor mirror size and texture filtering for the new room
   post.refreshGlow()
   traceSceneChanged()
@@ -600,6 +656,8 @@ const pages: Record<string, Page> = {
     current: () => garageDef.id,
     switching: () => switchingTo,
     select: (id) => void showGarage(id),
+    sun: () => room.sun?.get() ?? null,
+    setSun,
   }),
   collection: collectionPage({
     current: () => bay?.id ?? (loadingId ? null : NO_CAR),
@@ -710,6 +768,8 @@ const garage: {
   readonly room: Room
   /** switch garage from the console: garage.showGarage('studio') */
   showGarage: typeof showGarage
+  /** move an open-air garage's sun: garage.setSun({ azimuth: -110, elevation: 8 }) */
+  setSun: typeof setSun
   /** graphics from the console: garage.post.set('bloom', { intensity: 2 }) */
   post: PostProcessing
   /** repaint from the console: garage.configurator.set('body', { material: 'chrome' }) */
@@ -729,6 +789,7 @@ const garage: {
     return room
   },
   showGarage,
+  setSun,
   post,
   invalidate,
   get tracer() {

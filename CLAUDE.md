@@ -12,7 +12,8 @@ Two independent Vite pages (multi-page build, see `vite.config.ts`):
 
 Stack: TypeScript, Vite 8, three r185, `postprocessing` (pmndrs) + `n8ao`,
 `three-gpu-pathtracer` + `three-mesh-bvh` (lazy-loaded), `mediabunny` (MP4 muxing over
-WebCodecs, lazy-loaded on export). pnpm.
+WebCodecs, lazy-loaded on export), `@dgreenheck/ez-tree` (procedural trees, MIT,
+lazy-loaded by the Fuji garage). pnpm.
 
 ```sh
 pnpm dev      # vite, port 3000 (vite.config.ts) → /garage.html
@@ -53,6 +54,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
+| `atmosphere-effect.ts` | Open-air rooms' air, first in the effect pass: aerial perspective (exponential height fog from depth, forward scattering toward the sun) and volumetric sun shafts (ray-marches the sun's `sampler2DShadow` map; a dust box makes beams read under a roof). Params come from `room.atmosphere`; Settings › Graphics › Atmosphere. |
 | `pathtrace.ts` | Wrapper around three-gpu-pathtracer: builds the scene through proxies (see gotchas), paces GPU work with fence syncs, denoises early samples. |
 | `camera-moves.ts` | `CAMERA_MOVES`: 15 parametric moves (turntable, hero sweep, push in, flyover, side track, detail reveal, top-down, dolly zoom, spiral rise, dutch orbit, ground skim, wheel orbit, headlight slide, crane down, handheld hero hold) — `pose(u, framing, out, seconds)` in car space, framed from the car's size, lens and aspect; a pose may set its own `fov` (lens) and `roll` (dutch angle). |
 | `director.ts` | Reel model (shots = move + garage + length, fade/cut, resolution, fps, quality), `preview()` live in the window and `exportVideo()`: fixed-timestep render → `CanvasSource` (captured in the same task as the draw) → MP4. Talks to the app only through a `Stage` (implemented in `main.ts`: takes the view, swaps garages without the UI fade, restores camera/garage/grade after). |
@@ -75,7 +77,7 @@ Rendering model:
   anything that changes geometry/materials/lights must call `traceSceneChanged()`.
 
 Console handle `window.garage`: `scene, camera, controls, renderer, room, post,
-configurator, lamps, tracer, invalidate, showGarage`.
+configurator, lamps, tracer, invalidate, showGarage, setSun`.
 
 ## Adding a car
 
@@ -121,13 +123,31 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - The floor mirror (`Reflector`) re-renders the scene; objects lying on the floor must be
   in `room.floorLayers` so they're hidden during the mirror pass.
 - `THREE.Clock` is deprecated — the loop uses `THREE.Timer`.
-- Open-air garages: `garages/landscape.ts` builds the world (HDR sky dome, 3D Fuji,
-  terrain, instanced meadow and forest, all from fixed seeds so videos are repeatable).
-  The camera far plane and the PMREM capture's far plane are 3000 m for it. The sky is a
-  Poly Haven CC0 HDRI (`public/hdri/`) cropped to its top half and loaded async — the room
-  exposes `ready` so the env map is re-captured once it's in, and video exports wait for it.
-  Dome uv column u faces (cos 2πu, ·, sin 2πu) after `scale.x = -1`; rotating by φ maps
-  angle a → a − φ. Far meshes set `raycast = () => {}` so `clearLineOfSight` stays cheap.
+- Open-air garages: `garages/landscape.ts` builds the world (sky, 3D Fuji, terrain,
+  instanced meadow, `trees.ts` forest — all from fixed seeds so videos are repeatable).
+  The camera far plane and the PMREM capture's far plane are 3000 m for it. Optional
+  `Room` hooks: `ready` (async assets; env re-captured after, video exports wait),
+  `outdoor` (meshes get a second env map captured from an open-air `probe` — the interior
+  capture sees the roof, which lit the far land like concrete), `sun` (get/set; main saves
+  it per garage in `garage.sun.v1` and re-captures the env 180 ms after the last move),
+  `atmosphere`, `shadowsChanged` (car loaded/removed → re-render the sun's shadow map,
+  which has `autoUpdate = false` so mirror passes don't re-render it every frame).
+  Far meshes set `raycast = () => {}` so `clearLineOfSight` stays cheap.
+- Sky (`garages/sky.ts`): three's analytic `Sky` (Preetham) with a gain uniform patched in
+  (the stock shader has no exposure), clouds off. The sun disc is hidden during env
+  captures (its spike smears in the PMREM prefilter). The HDRI photo sky was dropped: its
+  sun can't move. The path tracer gets a uniform sky-colour stand-in (`userData.pathTrace`).
+- Trees (`garages/trees.ts`): ez-tree grows 3 near + 3 light variants (pine presets),
+  instanced; Poly Haven 2k Japanese cedar bark replaces its 1k bark; its needle atlas is
+  kept (straight alpha, `alphaToCoverage`, a lower alphaTest for far crowns — otherwise
+  mipmapped alpha thins far trees to bare sticks). Import only the package entry (its
+  `exports` hides `src/`); it bundles all its textures inline (~4 MB), hence lazy.
+  ~29 near trees ≈ 0.6 M tris + ~490 far ≈ 4.5 M; far forests are left out of both mirror
+  passes (Fuji default view ~20 ms on the RX 7600, Hex Bay ~13 ms).
+- `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
+  or foliage comes out pale.
+- `kit.disposeTree` disposes lights too: a shadow-casting light's map is a render target
+  (2 textures) that leaked on every visit before.
 - Photographed surfaces: `kit.SURFACES` + `pbrMaps()` load 2k Poly Haven (CC0) colour /
   normal / roughness maps from `public/textures/<name>/` (WebP, AO baked into colour —
   bake with `blend` on **planar** `gbrp`; on packed `rgb24` it silently turns the result
@@ -158,7 +178,7 @@ the real GPU and looking at screenshots:
   afterwards. Wait for `.loader.done` and `window.garage.configurator` before measuring.
 - Useful levers: `?car=<id>`, `localStorage` keys `garage.venue.v1` (garage),
   `garage.car.v1`, `garage.graphics.v1`, `garage.reel.v1` (video shot list),
-  `garage.panel-path.v1` (open panel page); `renderer.info` for leaks and draw counts;
+  `garage.panel-path.v1` (open panel page), `garage.sun.v1` (sun per open-air garage); `renderer.info` for leaks and draw counts;
   `/sys/class/drm/card1/device/gpu_busy_percent` for GPU load (it's a smoothed value).
 - Note: setting the garage via localStorage skips its grade look — pick it through the
   UI when judging colour.

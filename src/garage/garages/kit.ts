@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
+import type { AtmosphereParams } from '../atmosphere-effect'
 import type { GradeLook } from '../post'
+import type { SunPosition } from './sky'
 
 /**
  * A garage: the room around the car and everything that lights it. Swapping
@@ -48,6 +50,27 @@ export interface Room {
   ready?: Promise<void>
   /** advance anything that moves on its own (water ripples); called for every frame drawn */
   update?(dt: number): void
+  /**
+   * Open-air rooms: meshes lit by the open sky. The room's own environment
+   * map is captured from inside (under a roof, for a pavilion) — the land
+   * outside gets a second one, captured from `probe` out in the open.
+   */
+  outdoor?: {
+    root: THREE.Object3D
+    probe: THREE.Vector3
+    /** around environment captures: hide what mustn't be in them (a sun disc's spike smears in the prefilter) */
+    beforeCapture?(): void
+    afterCapture?(): void
+  }
+  /** a sun the user can move (Menu › Garage); the app re-captures the environment after a move */
+  sun?: {
+    get(): SunPosition
+    set(sun: SunPosition): void
+  }
+  /** the room's air, for the atmosphere effect (haze, light shafts) */
+  atmosphere?: AtmosphereParams
+  /** something that casts the sun's shadow changed (a car arrived or left): re-render its shadow map */
+  shadowsChanged?(): void
 }
 
 /**
@@ -156,6 +179,8 @@ export const SURFACES = {
   concreteFloor: { dir: 'concrete-floor', tile: 3 },
   /** cast concrete panels with seams and pores — Poly Haven "Concrete" */
   concretePanels: { dir: 'concrete-panels', tile: 4 },
+  /** fibrous Japanese cedar (sugi) bark, 1 × 2 m — Poly Haven "Japanese Cedar Bark" */
+  cedarBark: { dir: 'japanese-cedar-bark', tile: 1 },
 } as const
 
 export interface PbrMaps {
@@ -407,6 +432,12 @@ function disposeTree(root: THREE.Object3D): void {
     if (obj instanceof Reflector) {
       obj.dispose() // render target and material, not the geometry
       obj.geometry.dispose()
+      return
+    }
+    // a shadow-casting light owns its shadow map's render target (colour + depth textures)
+    const light = obj as THREE.Light
+    if (light.isLight) {
+      light.dispose()
       return
     }
     const mesh = obj as THREE.Mesh

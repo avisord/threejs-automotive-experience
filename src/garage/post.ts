@@ -16,6 +16,7 @@ import {
 } from 'postprocessing'
 import { N8AOPostPass } from 'n8ao'
 import { GradeEffect } from './grade-effect'
+import { AtmosphereEffect, type AtmosphereParams } from './atmosphere-effect'
 
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 export type ToneMapper = 'agx' | 'aces' | 'neutral'
@@ -54,6 +55,8 @@ export interface GraphicsSettings {
     fov: number
     showFps: boolean
   }
+  /** haze and light shafts in open-air garages — see atmosphere-effect.ts */
+  atmosphere: { enabled: boolean; strength: number }
   /** progressive path tracing once the camera rests — see pathtrace.ts */
   pathTracing: {
     enabled: boolean
@@ -194,6 +197,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
   display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 42, showFps: true },
+  atmosphere: { enabled: true, strength: 1 },
   pathTracing: { enabled: false, bounces: 4, samples: 256, resolution: 0.75, denoise: true },
 }
 
@@ -231,6 +235,8 @@ export interface PostProcessing {
   refreshGlow(): void
   /** overlay the path-traced image (null = raster only) */
   showPathTraced(texture: THREE.Texture | null, weight: number): void
+  /** the current garage's air (open-air garages), or null for none */
+  setAtmosphere(params: AtmosphereParams | null): void
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
@@ -274,6 +280,8 @@ export function createPostProcessing(
   let bloom: BloomEffect | null = null
   let grade: GradeEffect | null = null
   let vignette: VignetteEffect | null = null
+  let atmosphere: AtmosphereEffect | null = null
+  let atmosphereParams: AtmosphereParams | null = null
   let structureKey = ''
 
   function rebuildEffects(): void {
@@ -285,7 +293,13 @@ export function createPostProcessing(
     smaaPass = null
     const s = settings
     const effects: Effect[] = []
-    bloom = grade = vignette = null
+    bloom = grade = vignette = atmosphere = null
+    // the air goes first: haze and shafts are part of the scene's light, graded and tone mapped with it
+    if (s.atmosphere.enabled && atmosphereParams) {
+      atmosphere = new AtmosphereEffect(camera)
+      atmosphere.setParams(atmosphereParams)
+      effects.push(atmosphere)
+    }
     if (s.bloom.enabled) {
       const options = { mipmapBlur: true, blendFunction: BlendFunction.ADD, luminanceSmoothing: 0.1 }
       if (s.bloom.lightsOnly) {
@@ -313,7 +327,15 @@ export function createPostProcessing(
 
   function apply(): void {
     const s = settings
-    const key = [s.bloom.enabled, s.bloom.lightsOnly, s.grade.enabled, s.grade.toneMapper, s.vignette.enabled, s.aa.smaa].join()
+    const key = [
+      s.bloom.enabled,
+      s.bloom.lightsOnly,
+      s.grade.enabled,
+      s.grade.toneMapper,
+      s.vignette.enabled,
+      s.aa.smaa,
+      s.atmosphere.enabled && atmosphereParams !== null,
+    ].join()
     if (key !== structureKey) {
       structureKey = key
       rebuildEffects()
@@ -342,6 +364,10 @@ export function createPostProcessing(
     if (vignette) {
       vignette.darkness = s.vignette.darkness
       vignette.offset = s.vignette.offset
+    }
+    if (atmosphere) {
+      atmosphere.setParams(atmosphereParams)
+      atmosphere.strength = s.atmosphere.strength
     }
   }
 
@@ -374,6 +400,10 @@ export function createPostProcessing(
     },
     onChange(listener) {
       listeners.push(listener)
+    },
+    setAtmosphere(params) {
+      atmosphereParams = params
+      apply()
     },
     showPathTraced(texture, weight) {
       blend.show(texture, weight)

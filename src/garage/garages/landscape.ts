@@ -1,43 +1,35 @@
 import * as THREE from 'three'
-import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { createSky } from './sky'
+import { createForest } from './trees'
 
 /**
- * An open-air world for a garage to stand in: a photographed clear sky
- * (HDR, it lights the car through the environment map too), a 3D Mount
- * Fuji, rolling grassland out to distant ranges, grass around the building
- * and stands of conifers for scale.
+ * An open-air world for a garage to stand in: an analytic clear sky for any
+ * sun position (sky.ts), a 3D Mount Fuji, rolling grassland out to distant
+ * ranges, grass around the building and conifer forests (trees.ts).
+ *
+ * Distance haze isn't painted in: the atmosphere post effect adds it from
+ * depth, so it follows the sun and the view.
  *
  * Everything is placed from a fixed seed, so every load — and every frame of
  * an exported video — sees the same landscape.
  */
 
-/**
- * Poly Haven "Drakensberg Solitary Mountain (Pure Sky)", CC0, 4k, cropped to
- * the top 1088 of its 2048 rows (the ground half is never seen). In the file
- * the sun sits at 0.600 of the width, 33.6° up.
- */
-const SKY = { url: '/hdri/drakensberg-puresky-top.hdr', rows: 1088, fullRows: 2048, sunU: 0.6, sunElevation: 33.6 }
-const SKY_RADIUS = 2000
-/** the photographed sky is dim next to our lights; lift it to daylight */
-const SKY_GAIN = 1.3
-/** far air: the colour distant land fades toward */
-const HAZE = new THREE.Color(0xa7bdd8)
-
 export interface LandscapeOptions {
   /** ground level around the building */
   groundY: number
-  /** where the sun should be: azimuth in degrees from +z (the car's nose) toward +x (the car's left) */
-  sunAzimuth: number
-  /** true where no grass may grow (under the building, in a pool) */
+  /** true where no grass or tree may grow (under the building, in a pool) */
   keepClear(x: number, z: number): boolean
 }
 
 export interface Landscape {
   group: THREE.Group
-  /** unit vector toward the sun, for the directional light */
-  sunDirection: THREE.Vector3
-  /** resolves once the sky HDR is in (never rejects — a failed sky just stays a flat colour) */
+  /** everything lit by the open sky (the room captures an outdoor environment map for it) */
+  outdoor: THREE.Object3D
+  sky: ReturnType<typeof createSky>
+  /** far detail (distant forests) to leave out of mirror passes — filled once the trees are in */
+  farDetail: THREE.Object3D[]
+  /** resolves once the trees and their textures are in (never rejects) */
   ready: Promise<void>
 }
 
@@ -148,40 +140,6 @@ function polarGrid(
   return g
 }
 
-// ─── the sky ──────────────────────────────────────────────────────────────
-
-function createSky(sunAzimuth: number): { dome: THREE.Mesh; sunDirection: THREE.Vector3; ready: Promise<void> } {
-  const material = new THREE.MeshBasicMaterial({ color: HAZE, side: THREE.BackSide, depthWrite: false })
-  const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(SKY_RADIUS, 128, 40, 0, Math.PI * 2, 0, (Math.PI * SKY.rows) / SKY.fullRows),
-    material,
-  )
-  dome.name = 'sky'
-  // Seen from inside, un-mirror the photo; the dome's uv column u then faces
-  // (cos 2πu, ·, sin 2πu). Turn it so the photo's sun lands at `sunAzimuth`.
-  dome.scale.x = -1
-  const photoAngle = SKY.sunU * Math.PI * 2
-  const wantAngle = Math.atan2(Math.cos(THREE.MathUtils.degToRad(sunAzimuth)), Math.sin(THREE.MathUtils.degToRad(sunAzimuth)))
-  dome.rotation.y = photoAngle - wantAngle // rotating by φ turns that angle into (angle − φ)
-  noRaycast(dome)
-  const e = THREE.MathUtils.degToRad(SKY.sunElevation)
-  const sunDirection = new THREE.Vector3(Math.cos(wantAngle) * Math.cos(e), Math.sin(e), Math.sin(wantAngle) * Math.cos(e))
-
-  const ready = new HDRLoader()
-    .setDataType(THREE.HalfFloatType)
-    .loadAsync(SKY.url)
-    .then((texture) => {
-      texture.generateMipmaps = true // the dome is seen far below its 4k resolution
-      texture.minFilter = THREE.LinearMipmapLinearFilter
-      texture.anisotropy = 8
-      material.map = texture
-      material.color.setScalar(SKY_GAIN)
-      material.needsUpdate = true
-    })
-    .catch((err: unknown) => console.error('[garage] sky failed to load', err))
-  return { dome, sunDirection, ready }
-}
-
 // ─── Mount Fuji ───────────────────────────────────────────────────────────
 
 /**
@@ -196,7 +154,6 @@ function createFuji(): THREE.Mesh {
   const scree = new THREE.Color(0x5e4c4a)
   const forest = new THREE.Color(0x1f3320)
   const snowWhite = new THREE.Color(0xf4f6fa)
-  const tmp = new THREE.Color()
   const geometry = polarGrid(
     R,
     120,
@@ -222,14 +179,12 @@ function createFuji(): THREE.Mesh {
       c.copy(rock).lerp(scree, fbm(x / 25, z / 25, 2))
       c.lerp(forest, smoothstep(t, 0.42, 0.62))
       c.lerp(snowWhite, snow)
-      // seen through ~1 km of clear air: a blue veil, lighter at the foot
-      c.lerp(tmp.copy(HAZE), 0.16 + 0.2 * smoothstep(t, 0.5, 1))
       return h
     },
   )
   const fuji = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, emissive: HAZE, emissiveIntensity: 0.04 }),
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }),
   )
   fuji.name = 'fuji'
   fuji.position.copy(FUJI.at)
@@ -242,7 +197,7 @@ function createFuji(): THREE.Mesh {
 const TERRAIN = { radius: 1500, flat: 40 }
 
 /** ground height at a point — flat round the building, rolling further out, ranges on the horizon */
-function terrainHeight(x: number, z: number, groundY: number): number {
+export function terrainHeight(x: number, z: number, groundY: number): number {
   const r = Math.hypot(x, z)
   let h = groundY
   h += smoothstep(r, TERRAIN.flat, 180) * 8 * (fbm(x / 120, z / 120) - 0.38)
@@ -296,8 +251,7 @@ function createTerrain(groundY: number): THREE.Mesh {
       const r = t * TERRAIN.radius
       c.copy(lush).lerp(dry, smoothstep(fbm(x / 45, z / 45), 0.45, 0.75))
       c.lerp(deep, smoothstep(fbm(x / 14 + 5, z / 14), 0.55, 0.8) * 0.7)
-      c.lerp(range, smoothstep(h - groundY, 15, 60)) // high ground reads as far blue ridges
-      c.lerp(HAZE, smoothstep(r, 90, 1400) * 0.8)
+      c.lerp(range, smoothstep(h - groundY, 15, 60) * smoothstep(r, 400, 900)) // rock and scrub on the far ridges
       return h
     },
     1 / 3, // grass detail repeats every 3 m
@@ -372,66 +326,9 @@ function createMeadow(groundY: number, keepClear: LandscapeOptions['keepClear'])
     const height = 0.3 + rand() * 0.45
     s.set(0.8 + rand() * 0.5, height, 0.8 + rand() * 0.5)
     mesh.setMatrixAt(n, m.compose(p, q, s))
-    c.setHSL(0.2 + rand() * 0.07, 0.45 + rand() * 0.25, 0.28 + rand() * 0.14)
+    c.setHSL(0.2 + rand() * 0.06, 0.5 + rand() * 0.25, 0.26 + rand() * 0.1, THREE.SRGBColorSpace) // matched to the terrain's greens
     mesh.setColorAt(n, c)
     n++
-  }
-  mesh.computeBoundingSphere()
-  noRaycast(mesh)
-  return mesh
-}
-
-/** a conifer: short trunk under two stacked cones, 1 unit tall */
-function conifer(): THREE.BufferGeometry {
-  const parts = [
-    new THREE.CylinderGeometry(0.03, 0.04, 0.2, 6).translate(0, 0.1, 0),
-    new THREE.ConeGeometry(0.22, 0.55, 9).translate(0, 0.45, 0),
-    new THREE.ConeGeometry(0.16, 0.45, 9).translate(0, 0.78, 0),
-  ]
-  const colors = [0.35, 1, 1.1]
-  for (const [i, g] of parts.entries()) {
-    g.deleteAttribute('uv')
-    const k = colors[i]
-    g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(g.attributes.position.count * 3).fill(k), 3))
-  }
-  const tree = mergeGeometries(parts)!
-  for (const g of parts) g.dispose()
-  return tree
-}
-
-function createForest(groundY: number): THREE.InstancedMesh {
-  const rand = seeded(5)
-  const trees: { x: number; z: number; h: number }[] = []
-  for (let cluster = 0; cluster < 46; cluster++) {
-    const r = 180 + rand() ** 0.8 * 560
-    const a = rand() * Math.PI * 2
-    // keep the view to Fuji (straight behind, -z) open
-    if (Math.abs(Math.atan2(Math.cos(a), -Math.sin(a))) < 0.6) continue
-    const cx = Math.cos(a) * r
-    const cz = Math.sin(a) * r
-    const n = 8 + Math.floor(rand() * 22)
-    for (let i = 0; i < n; i++) {
-      const spread = 6 + rand() * 18
-      trees.push({ x: cx + (rand() - 0.5) * spread * 2, z: cz + (rand() - 0.5) * spread * 2, h: 7 + rand() * 9 })
-    }
-  }
-  const mesh = new THREE.InstancedMesh(
-    conifer(),
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
-    trees.length,
-  )
-  mesh.name = 'forest'
-  const m = new THREE.Matrix4()
-  const q = new THREE.Quaternion()
-  const c = new THREE.Color()
-  const base = new THREE.Color()
-  for (const [i, t] of trees.entries()) {
-    const y = terrainHeight(t.x, t.z, groundY) - 0.3
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI * 2)
-    mesh.setMatrixAt(i, m.compose(new THREE.Vector3(t.x, y, t.z), q, new THREE.Vector3(t.h * 0.9, t.h, t.h * 0.9)))
-    base.setHSL(0.27 + rand() * 0.06, 0.4 + rand() * 0.2, 0.13 + rand() * 0.06)
-    c.copy(base).lerp(HAZE, smoothstep(Math.hypot(t.x, t.z), 60, 900) * 0.7)
-    mesh.setColorAt(i, c)
   }
   mesh.computeBoundingSphere()
   noRaycast(mesh)
@@ -441,7 +338,24 @@ function createForest(groundY: number): THREE.InstancedMesh {
 export function createLandscape(opts: LandscapeOptions): Landscape {
   const group = new THREE.Group()
   group.name = 'landscape'
-  const sky = createSky(opts.sunAzimuth)
-  group.add(sky.dome, createFuji(), createTerrain(opts.groundY), createMeadow(opts.groundY, opts.keepClear), createForest(opts.groundY))
-  return { group, sunDirection: sky.sunDirection, ready: sky.ready }
+  const sky = createSky()
+  const outdoor = new THREE.Group()
+  outdoor.name = 'outdoor'
+  outdoor.add(createFuji(), createTerrain(opts.groundY), createMeadow(opts.groundY, opts.keepClear))
+  group.add(sky.mesh, outdoor)
+  // straight behind the car the view opens onto the mountain: no trees there
+  const towardFuji = (x: number, z: number) => z < -20 && Math.abs(Math.atan2(x, -z)) < 0.42
+  const farDetail: THREE.Object3D[] = []
+  const ready = createForest({
+    seed: 5,
+    heightAt: (x, z) => terrainHeight(x, z, opts.groundY),
+    keepClear: (x, z) => opts.keepClear(x, z) || towardFuji(x, z) || Math.hypot(x, z) < 44,
+  })
+    .then(async (forest) => {
+      outdoor.add(forest.group)
+      farDetail.push(...forest.far)
+      await forest.ready
+    })
+    .catch((err: unknown) => console.error('[garage] forest failed', err))
+  return { group, outdoor, sky, farDetail, ready }
 }

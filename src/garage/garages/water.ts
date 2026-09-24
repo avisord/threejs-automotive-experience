@@ -121,6 +121,8 @@ export interface WaterSurface {
   resize(width: number, height: number, pixelRatio: number): void
   /** mirror resolution relative to the canvas; 0 = no mirror (a dark glossy stand-in) */
   setReflectionScale(scale: number): void
+  /** where the glint comes from */
+  setSunDirection(direction: THREE.Vector3): void
 }
 
 export function createWater(
@@ -170,6 +172,9 @@ export function createWater(
     mesh,
     update(dt) {
       uniforms.uTime.value += dt
+    },
+    setSunDirection(direction) {
+      uniforms.uSunDir.value.copy(direction).normalize()
     },
     resize(width, height, pixelRatio) {
       Object.assign(viewport, { width, height, pixelRatio })

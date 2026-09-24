@@ -271,6 +271,22 @@ export function graphicsPage(post: PostProcessing): Page {
       }
       body.append(vignette)
 
+      // ─── atmosphere ─────────────────────────────────────────────────────
+      const air = section(
+        'Atmosphere',
+        toggle(s.atmosphere.enabled, 'atmosphere', (on) => {
+          post.set('atmosphere', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.atmosphere.enabled) {
+        air.append(
+          slider('Strength', s.atmosphere.strength, { min: 0, max: 3, step: 0.05 }, fixed(2), (v) => post.set('atmosphere', { strength: v })),
+        )
+      }
+      air.append(el('p', 'cfg-note', 'Open-air garages: distance haze, and sunlight shafts through the air where the sun gets in.'))
+      body.append(air)
+
       body.append(
         actionButton('Reset graphics', () => {
           post.reset()
