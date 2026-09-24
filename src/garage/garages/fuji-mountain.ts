@@ -5,8 +5,8 @@ import { outdoorMaterial } from './terrain'
 
 /**
  * Mount Fuji at its real proportions, as seen from ~17 km: rising ~2,950 m
- * above the lake, its cone ~7 km in radius where it clears the foothills — a
- * steep concave summit cone (~34° under the rim) easing into long skirts, a
+ * above the lake, its skirts reaching out ~15 km — a steep concave summit
+ * cone (~31° under the rim) easing into long, broad skirts (profile()), a
  * crater on top, snow on the upper part reaching down the gullies, bare dark
  * volcanic slopes below, then a forest belt. Built in real metres and mapped
  * into the site's distance compression vertex by vertex (site.mapFar), so
@@ -17,14 +17,26 @@ const FUJI = {
   distance: 17000,
   /** summit above the lake */
   height: 2950,
-  /** radius of the modelled cone; beyond it the skirts are below the foothills */
-  radius: 7000,
-  /** the crater's rim, as a fraction of the radius (~800 m across: the top reads flat, not a point) */
-  crater: 0.06,
+  /** radius of the modelled skirts: the real mountain's reach down to the lakes' level */
+  radius: 15000,
+  /** the crater's rim, metres from the centre (~800 m across: the top reads flat, not a point) */
+  crater: 420,
+}
+
+/**
+ * Height above the lake at a distance from the crater rim — the real
+ * mountain's concave profile, fitted to its north side (above Kawaguchiko,
+ * ~830 m): steep under the rim (~31°), ~1,600 m at 3 km, ~700 m at 7 km, then
+ * long skirts — with the foothills in front hiding their lower part, the visible
+ * mountain is ~5× as wide as it is tall, as in photographs from the lakes. A cone with one exponent was either a spike or a
+ * dome; this is a steep curve plus a nearly straight one.
+ */
+function profile(u: number): number {
+  return 0.45 * (1 - u) ** 6 + 0.55 * (1 - u) ** 1.4
 }
 
 export function createFujiMountain(): THREE.Mesh {
-  const { height: H, radius: R, crater } = FUJI
+  const { height: H, radius: R } = FUJI
   const snow = new THREE.Color().setHex(0xf2f4f8, THREE.SRGBColorSpace)
   const oldSnow = new THREE.Color().setHex(0xd4d8de, THREE.SRGBColorSpace)
   const scoria = new THREE.Color().setHex(0x40302c, THREE.SRGBColorSpace)
@@ -33,18 +45,21 @@ export function createFujiMountain(): THREE.Mesh {
   const plain = new THREE.Color().setHex(0x4a6234, THREE.SRGBColorSpace)
   const geometry = polarGrid(
     R,
-    260,
+    320,
     960,
-    (t) => t ** 1.3, // rings bunch toward the summit, where the detail is
-    (x, z, t, a, c) => {
+    (t) => t ** 1.6, // rings bunch toward the summit, where the detail is
+    (x, z, tR, a, c) => {
+      // the detail below was designed on a 7 km cone: t is distance in units of 7 km
+      const t = (tR * R) / 7000
+      const crater = FUJI.crater / 7000
       // gullies wander a little as they run down, and aren't evenly spaced: warp the angle
       const w = a + 0.22 * (fbm(Math.cos(a) * 2 + t * 2.5, Math.sin(a) * 2 - t * 1.5, 3) - 0.5) + 0.05 * Math.sin(a * 3 + t * 6)
       const ca = Math.cos(w)
       const sa = Math.sin(w)
       // the profile: a broad, slightly uneven rim, a steep concave upper cone, broad skirts
-      const u = Math.max(0, (t - crater) / (1 - crater))
+      const u = Math.max(0, (tR * R - FUJI.crater) / (R - FUJI.crater))
       const rim = H + 25 * (noise(ca * 9 + 3, sa * 9) - 0.5) + 30 * smoothstep(Math.sin(a - 2.2), 0.7, 1) // the highest point on one side
-      let h = t < crater ? rim - 110 * (1 - (t / crater) ** 3) : H * (1 - u) ** 1.55 + (rim - H) * (1 - smoothstep(u, 0, 0.04))
+      let h = t < crater ? rim - 110 * (1 - (t / crater) ** 3) : H * profile(u) + (rim - H) * (1 - smoothstep(u, 0, 0.02))
       // a slight asymmetry — no mountain is a lathe-turned cone
       h *= 1 + 0.035 * Math.sin(a + 0.8) * smoothstep(t, 0.1, 0.6)
       // erosion at three scales, all as raised spines between broader channels (ridged noise):
@@ -60,6 +75,10 @@ export function createFujiMountain(): THREE.Mesh {
       h += 26 * (ribs - 0.5) * smoothstep(t, crater, crater + 0.04) * (1 - smoothstep(t, 0.45, 0.7))
       // lumps and old lava flows on the lower flanks
       h += smoothstep(t, 0.35, 1) * 120 * (fbm(x / 1500, z / 1500) - 0.5)
+      // the skirts toward the pavilion run under the lake's far shore and the foothills in front:
+      // sink them there rather than have them rise out of the near land
+      const fromPavilion = Math.hypot(x, z - FUJI.distance)
+      h = h * smoothstep(fromPavilion, 5000, 9000) - 80 * (1 - smoothstep(fromPavilion, 5000, 9000))
 
       // Snow. The line sits higher on some sides than others; the channels hold it far down in
       // long fingers while the spines between shed it, and it thins out patchily over a few

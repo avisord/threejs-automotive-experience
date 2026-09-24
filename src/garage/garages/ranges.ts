@@ -27,12 +27,12 @@ const RANGES: Range[] = [
   // wooded hills just beyond the lake's far shore
   { real: 4600, depth: 1400, span: [-85, 85], peak: 240, seed: 1 },
   // the first real foothills
-  { real: 6800, depth: 2000, span: [-75, 80], peak: 520, seed: 2 },
+  { real: 6800, depth: 2000, span: [-75, 80], peak: 800, seed: 2 },
   // the ranges in front of Fuji's foot, broken where the mountain rises behind
-  { real: 9200, depth: 2200, span: [-65, 60], peak: 820, seed: 3 },
+  { real: 9200, depth: 2200, span: [-65, 60], peak: 1350, seed: 3 },
   // higher ridges flanking Fuji, where its skirts don't stand in front of them
-  { real: 12500, depth: 2600, span: [-72, -24], peak: 1150, seed: 5 },
-  { real: 12500, depth: 2600, span: [22, 70], peak: 1050, seed: 6 },
+  { real: 12500, depth: 2600, span: [-72, -22], peak: 1550, seed: 5 },
+  { real: 12500, depth: 2600, span: [20, 70], peak: 1450, seed: 6 },
   // the high ranges far off to either side (the Misaka and Southern Alps side): pale, almost sky
   { real: 26000, depth: 4000, span: [-85, -16], peak: 2300, seed: 7 },
   { real: 27000, depth: 4000, span: [15, 85], peak: 2100, seed: 8 },
