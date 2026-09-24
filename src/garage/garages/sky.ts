@@ -32,6 +32,13 @@ export function sunLight(elevation: number): { color: THREE.Color; intensity: nu
   return { color, intensity }
 }
 
+/**
+ * How strongly the open sky (the outdoor environment map) lights the land.
+ * On a clear day the sun outshines the sky several times over; at full
+ * strength the sky's fill flattened sunlit and shaded ground into one.
+ */
+export const OUTDOOR_SKY_LIGHT = 0.55
+
 /** analytic daylight scale → our scene's lighting level (the shader is written for ~0.5 exposure) */
 const SKY_GAIN = 0.55
 

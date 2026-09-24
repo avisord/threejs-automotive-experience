@@ -1,7 +1,15 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { createSky } from './sky'
+import { receiveFarShadow } from './far-shadow'
+import { OUTDOOR_SKY_LIGHT, createSky } from './sky'
 import { createForest } from './trees'
+
+/** a landscape material: sky fill toned down, far shadows read in */
+function outdoorMaterial<M extends THREE.MeshStandardMaterial>(material: M): M {
+  material.envMapIntensity = OUTDOOR_SKY_LIGHT
+  receiveFarShadow(material)
+  return material
+}
 
 /**
  * An open-air world for a garage to stand in: an analytic clear sky for any
@@ -184,9 +192,10 @@ function createFuji(): THREE.Mesh {
   )
   const fuji = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }),
+    outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })),
   )
   fuji.name = 'fuji'
+  fuji.castShadow = true // its own shaded flank, in the far shadow map
   fuji.position.copy(FUJI.at)
   noRaycast(fuji)
   return fuji
@@ -250,7 +259,8 @@ function createTerrain(groundY: number): THREE.Mesh {
       const h = terrainHeight(x, z, groundY)
       const r = t * TERRAIN.radius
       c.copy(lush).lerp(dry, smoothstep(fbm(x / 45, z / 45), 0.45, 0.75))
-      c.lerp(deep, smoothstep(fbm(x / 14 + 5, z / 14), 0.55, 0.8) * 0.7)
+      // lusher patches — kept faint: strong dark blotches read as shadows that aren't there
+      c.lerp(deep, smoothstep(fbm(x / 14 + 5, z / 14), 0.55, 0.8) * 0.25)
       c.lerp(range, smoothstep(h - groundY, 15, 60) * smoothstep(r, 400, 900)) // rock and scrub on the far ridges
       return h
     },
@@ -258,9 +268,10 @@ function createTerrain(groundY: number): THREE.Mesh {
   )
   const terrain = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ vertexColors: true, map: grassDetailTexture(), roughness: 1 }),
+    outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, map: grassDetailTexture(), roughness: 1 })),
   )
   terrain.name = 'terrain'
+  terrain.castShadow = true // hills shade the ground behind them
   noRaycast(terrain)
   return terrain
 }
@@ -303,7 +314,7 @@ function createMeadow(groundY: number, keepClear: LandscapeOptions['keepClear'])
   const OUTER = TERRAIN.flat - 2
   const mesh = new THREE.InstancedMesh(
     grassClump(),
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide }),
+    outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })),
     COUNT,
   )
   mesh.name = 'meadow'
@@ -326,7 +337,7 @@ function createMeadow(groundY: number, keepClear: LandscapeOptions['keepClear'])
     const height = 0.3 + rand() * 0.45
     s.set(0.8 + rand() * 0.5, height, 0.8 + rand() * 0.5)
     mesh.setMatrixAt(n, m.compose(p, q, s))
-    c.setHSL(0.2 + rand() * 0.06, 0.5 + rand() * 0.25, 0.26 + rand() * 0.1, THREE.SRGBColorSpace) // matched to the terrain's greens
+    c.setHSL(0.24 + rand() * 0.04, 0.45 + rand() * 0.2, 0.25 + rand() * 0.08, THREE.SRGBColorSpace) // matched to the terrain's greens
     mesh.setColorAt(n, c)
     n++
   }

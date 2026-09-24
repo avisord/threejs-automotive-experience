@@ -1,5 +1,7 @@
 import * as THREE from 'three'
+import { receiveFarShadow } from './far-shadow'
 import { SURFACES, pbrMaps } from './kit'
+import { OUTDOOR_SKY_LIGHT } from './sky'
 
 /**
  * Realistic conifers for an open-air garage: real branching structure from
@@ -130,15 +132,20 @@ export async function createForest(
   for (const v of [...nearVariants, ...farVariants]) if (v.leafMap && v.leafMap !== leafMap) v.leafMap.dispose()
 
   const bark = pbrMaps(SURFACES.cedarBark, [2, 1])
-  const barkMaterial = new THREE.MeshStandardMaterial({ ...bark.maps, color: 0xffffff, roughness: 1 })
-  const crown = (alphaTest: number) =>
-    new THREE.MeshStandardMaterial({
+  const barkMaterial = new THREE.MeshStandardMaterial({ ...bark.maps, color: 0xffffff, roughness: 1, envMapIntensity: OUTDOOR_SKY_LIGHT })
+  receiveFarShadow(barkMaterial)
+  const crown = (alphaTest: number) => {
+    const material = new THREE.MeshStandardMaterial({
       map: leafMap,
       alphaTest,
       alphaToCoverage: true, // with MSAA: needle edges resolve smoothly instead of popping on and off
       side: THREE.DoubleSide,
       roughness: 0.85,
+      envMapIntensity: OUTDOOR_SKY_LIGHT,
     })
+    receiveFarShadow(material) // crowns shade their own lower branches, and each other
+    return material
+  }
   const leafMaterial = crown(0.35)
   // far crowns: a lower threshold keeps the needles' mipmapped (fainter) alpha from thinning them out
   const farLeafMaterial = crown(0.18)
@@ -184,8 +191,9 @@ export async function createForest(
     })
     return planted
   }
+  // every tree casts into the far (landscape) shadow map; its near map only reaches the pavilion's surroundings
   plant(nearVariants, near, true, leafMaterial)
-  const farMeshes = plant(farVariants, far, false, farLeafMaterial)
+  const farMeshes = plant(farVariants, far, true, farLeafMaterial)
 
   const budget = (vs: Variant[], n: number) => Math.round((vs.reduce((s, v) => s + v.triangles, 0) / vs.length) * n)
   console.info(

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { SURFACES, assembleRoom, box, boxUV, createFloor, glowMaterial, pbrMaps, type GarageDef, type Room } from './kit'
 import type { AtmosphereParams } from '../atmosphere-effect'
+import { aimFarShadow, createFarShadowLight } from './far-shadow'
 import { createLandscape } from './landscape'
 import { sunDirection, sunLight, type SunPosition } from './sky'
 import { createWater } from './water'
@@ -188,6 +189,9 @@ function createFujiPavilion(): Room {
   sun.shadow.normalBias = 0.03
   sun.shadow.autoUpdate = false
   group.add(sun) // aims at the origin by default
+  // …and the whole landscape's shadows, coarser (far-shadow.ts) — must come right after the sun
+  const farShadow = createFarShadowLight()
+  group.add(farShadow)
   const fill = new THREE.HemisphereLight(0xbcd2f0, 0x5a6a3c, 0.45)
   group.add(fill)
   // the pavilion's structure casts the sun's shadow; glass and light strips don't
@@ -222,9 +226,11 @@ function createFujiPavilion(): Room {
     landscape.sky.setSun(dir)
     sun.position.copy(dir).multiplyScalar(150)
     sun.color.copy(light.color)
-    sun.intensity = light.intensity
+    // a clear day's sun outshines the sky several times over — that contrast is what reads as sunlight
+    sun.intensity = light.intensity * 1.7
     sun.shadow.needsUpdate = true
-    fill.intensity = 0.15 + 0.3 * day
+    aimFarShadow(farShadow, dir)
+    fill.intensity = 0.08 + 0.14 * day
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
     skyLight.intensity = 1 + 3 * day
     water.setSunDirection(dir)
@@ -243,6 +249,7 @@ function createFujiPavilion(): Room {
     environmentIntensity: 1,
     ready: Promise.all([landscape.ready, floorMaps.ready, panelMaps.ready]).then(() => {
       sun.shadow.needsUpdate = true // the trees are in: they cast too
+      farShadow.shadow.needsUpdate = true
       floor.floorLayers.push(...landscape.farDetail) // and the deck's mirror can skip the far ones
     }),
   })

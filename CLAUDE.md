@@ -144,6 +144,14 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   `exports` hides `src/`); it bundles all its textures inline (~4 MB), hence lazy.
   ~29 near trees ≈ 0.6 M tris + ~490 far ≈ 4.5 M; far forests are left out of both mirror
   passes (Fuji default view ~20 ms on the RX 7600, Hex Bay ~13 ms).
+- Far shadows (`garages/far-shadow.ts`): the sun's map only covers ±45 m, so beyond it
+  sunlit and shaded land looked the same. A second directional light with intensity 0
+  and a 3.2 km, 4096² shadow map (re-rendered on sun moves / when trees arrive) casts for
+  terrain, Fuji and every tree; landscape materials get `receiveFarShadow()`, which reads
+  `directionalShadowMap[1]` after `lights_fragment_end` where the near map doesn't reach.
+  It must be the second shadow-casting directional light added (the sun is index 0).
+  Outdoor materials use `envMapIntensity = OUTDOOR_SKY_LIGHT` (0.55) and the sun is
+  ×1.7 of `sunLight()` — at a 1:1.5 sun:sky ratio shadows didn't read at all.
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too: a shadow-casting light's map is a render target
