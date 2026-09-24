@@ -95,8 +95,12 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
   // the sky already carries its own atmosphere, so it gets none added
   if ( !sky ) {
     float h0 = max( uCameraPosition.y - uGroundY, 0.0 );
-    float k = uFalloff * rd.y;
-    float integral = abs( k ) > 1e-4 ? ( 1.0 - exp( -k * dist ) ) / k : dist;
+    // ∫ exp(-falloff·rd.y·s) ds over the ray = dist · (1 − e^−x) / x, x = falloff·rd.y·dist. Near x = 0
+    // the series stands in for the division. (Switching to plain dist at a fixed |falloff·rd.y|
+    // put a step in the haze at one elevation angle — ~7° with a 1.2 km scale height — that cut
+    // across the mountain as a hard line.)
+    float x = uFalloff * rd.y * dist;
+    float integral = dist * ( abs( x ) > 1e-3 ? ( 1.0 - exp( -x ) ) / x : 1.0 - 0.5 * x + x * x / 6.0 );
     float opticalDepth = uDensity * exp( -uFalloff * h0 ) * integral * uStrength;
     float transmittance = exp( -opticalDepth );
     // the air's own glow, brighter toward the sun (forward scattering) — kept modest: at 0.7+ and full
