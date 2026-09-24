@@ -137,20 +137,80 @@ function pebbleGeometry(seed: number): THREE.BufferGeometry {
   return g
 }
 
+/** how deep the pebble bed's relief is, metres (the height map's black to white) */
+const RELIEF = 0.045
+
 /**
- * The photographed pebbles are dark and wet-looking: brighten them to sun-dried
- * river stone (the albedo is scaled past 1 — the photo's mean is only ~0.08) and
- * lift the dark gaps between stones, so the pad reads pale, not as a black bed.
+ * River pebbles with depth. The photographed stones are dark and wet-looking:
+ * brighten them to sun-dried stone (albedo scaled past 1 — the photo's mean is
+ * ~0.08) and lift the gaps between them. And make them stand up: parallax
+ * occlusion mapping through the Poly Haven height map — each pixel marches the
+ * view ray down into the bed and takes its colour, normal and roughness from
+ * the stone it hits, so pebbles occlude each other and shift with the camera,
+ * and the gaps between them darken. No extra geometry; the cost is a handful of
+ * texture reads on the pad's and track's own pixels, and it fades out past
+ * ~30 m (the far track is plain texture).
  */
-function dryPebbles(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+function dryPebbles(material: THREE.MeshStandardMaterial, heightMap: THREE.Texture): THREE.MeshStandardMaterial {
   material.color.setRGB(2.1, 2.0, 1.85)
+  const tile = SURFACES.riverPebbles.tile
   material.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <map_fragment>',
-      '#include <map_fragment>\n\tdiffuseColor.rgb = pow( diffuseColor.rgb, vec3( 0.75 ) ) * 0.78;',
-    )
+    shader.uniforms.uHeight = { value: heightMap }
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uHeight;\nfloat pomHeight = 1.0;')
+      .replace(
+        'void main() {',
+        `void main() {
+        vec2 pomUv = vMapUv;
+        {
+          float fade = 1.0 - smoothstep( 12.0, 30.0, length( vViewPosition ) );
+          if ( fade > 0.0 ) {
+            // tangent frame from screen derivatives (the pad is flat, the track is draped: this serves both)
+            vec3 N = normalize( vNormal );
+            vec3 q0 = dFdx( -vViewPosition );
+            vec3 q1 = dFdy( -vViewPosition );
+            vec2 st0 = dFdx( vMapUv );
+            vec2 st1 = dFdy( vMapUv );
+            vec3 q1perp = cross( q1, N );
+            vec3 q0perp = cross( N, q0 );
+            vec3 T = normalize( q1perp * st0.x + q0perp * st1.x );
+            vec3 B = normalize( q1perp * st0.y + q0perp * st1.y );
+            vec3 V = normalize( vViewPosition );
+            vec3 Vt = vec3( dot( V, T ), dot( V, B ), max( dot( V, N ), 0.12 ) );
+            // steep parallax: more layers at grazing angles
+            float layers = mix( 28.0, 10.0, Vt.z );
+            float layer = 1.0 / layers;
+            vec2 shift = Vt.xy / Vt.z * ( ${(RELIEF / tile).toFixed(4)} ) * layer;
+            vec2 uv = vMapUv;
+            float depth = 0.0;
+            float bed = 1.0 - textureGrad( uHeight, uv, st0, st1 ).r;
+            for ( int i = 0; i < 32; i ++ ) {
+              if ( depth >= bed || float( i ) >= layers ) break;
+              uv -= shift;
+              bed = 1.0 - textureGrad( uHeight, uv, st0, st1 ).r;
+              depth += layer;
+            }
+            // interpolate between the last two steps for a smooth surface
+            vec2 prev = uv + shift;
+            float after = bed - depth;
+            float before = ( 1.0 - textureGrad( uHeight, prev, st0, st1 ).r ) - depth + layer;
+            uv = mix( uv, prev, clamp( after / ( after - before ), 0.0, 1.0 ) );
+            pomUv = mix( vMapUv, uv, fade );
+            pomHeight = mix( 1.0, textureGrad( uHeight, uv, st0, st1 ).r, fade );
+          }
+        }
+        #define vMapUv pomUv
+        #define vNormalMapUv pomUv
+        #define vRoughnessMapUv pomUv`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        // dry stone: brighter, the dark gaps lifted — and the deep gaps between stones in shade
+        diffuseColor.rgb = pow( diffuseColor.rgb, vec3( 0.75 ) ) * 0.8 * mix( 0.55, 1.05, smoothstep( 0.1, 0.6, pomHeight ) );`,
+      )
   }
-  material.customProgramCacheKey = () => 'dry-pebbles'
+  material.customProgramCacheKey = () => 'dry-pebbles-pom'
   return material
 }
 
@@ -169,7 +229,23 @@ function createFujiMeadow(): Room {
 
   const maps = pbrMaps(SURFACES.riverPebbles)
   // ─── the pad ─────────────────────────────────────────────────────────────
-  const gravel = dryPebbles(new THREE.MeshStandardMaterial({ ...maps.maps, roughness: 1, normalScale: new THREE.Vector2(0.5, 0.5) }))
+  // the stones' height, for the parallax (dryPebbles)
+  const heightMap = new THREE.Texture()
+  const heightReady = new Promise<void>((resolve) =>
+    new THREE.TextureLoader().load(
+      '/textures/river-pebbles/height.webp',
+      (loaded) => {
+        heightMap.image = loaded.image
+        heightMap.needsUpdate = true
+        resolve()
+      },
+      undefined,
+      () => resolve(), // never hold the garage up on it
+    ),
+  )
+  heightMap.wrapS = heightMap.wrapT = THREE.RepeatWrapping
+  heightMap.anisotropy = 8
+  const gravel = dryPebbles(new THREE.MeshStandardMaterial({ ...maps.maps, roughness: 1, normalScale: new THREE.Vector2(0.9, 0.9) }), heightMap)
   const pad = new THREE.Mesh(padGeometry(), gravel)
   pad.receiveShadow = true
   pad.name = 'pebble-pad'
@@ -180,11 +256,11 @@ function createFujiMeadow(): Room {
     ...maps.maps,
     vertexColors: true,
     roughness: 1,
-    normalScale: new THREE.Vector2(0.5, 0.5),
+    normalScale: new THREE.Vector2(0.9, 0.9),
     polygonOffset: true, // it lies on the terrain: win the depth test where they meet
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
-  }))
+  }), heightMap)
   const track = new THREE.Mesh(trackGeometry(line), trackMaterial)
   track.receiveShadow = true
   track.name = 'pebble-track'
@@ -268,8 +344,11 @@ function createFujiMeadow(): Room {
     resize: world.resize,
     setReflectionScale: world.setReflectionScale,
     update: world.update,
-    ready: Promise.all([world.ready, maps.ready]).then(() => {}),
-    dispose: () => disposeTree(group),
+    ready: Promise.all([world.ready, maps.ready, heightReady]).then(() => {}),
+    dispose: () => {
+      disposeTree(group)
+      heightMap.dispose() // only in the pebbles' shader uniforms: disposeTree can't see it
+    },
     ...world.hooks,
   }
 }

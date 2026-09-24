@@ -177,6 +177,9 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   car stands on a Poly Haven "Dry River Pebbles" pad with edging stones, and a pebble ribbon
   (CatmullRom course, draped on `heightAt`, wound to face up, polygonOffset) runs to the road;
   `keepClear` keeps grass/trees off both. No floor mirror: an invisible stand-in Reflector.
+  The pebbles (`dryPebbles`) use parallax occlusion mapping from `river-pebbles/height.webp`
+  (tangent frame from screen derivatives, so it works on the draped track too; `#define
+  vMapUv pomUv` redirects every map lookup; fades out 12–30 m). ~+0.5 ms at 1080p.
 - Vegetation (Fuji): `vegetation-layout.ts` plans every tree/shrub up front (`VEGETATION`
   tunables: cluster count/radius/density, lone trees, shrubs, clearings, size log-normal,
   veterans, crown width, lean, LOD bands/caps) — clustered Gaussian stands weighted by
