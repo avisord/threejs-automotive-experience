@@ -11,7 +11,7 @@ import { outdoorMaterial } from './terrain'
  * instanced; what sells a town is how many there are and how they cluster.
  */
 
-interface House {
+export interface House {
   x: number
   z: number
   w: number
@@ -24,8 +24,9 @@ interface House {
 
 /** town centres: [x, z, radius, how many houses to try] — near shore, far shore, the shores to the sides */
 const CENTRES: [number, number, number, number][] = [
-  [-700, -1000, 520, 520],
-  [350, -960, 420, 380],
+  [-700, -1000, 520, 900],
+  [-150, -930, 380, 700],
+  [350, -960, 420, 650],
   [1350, -1180, 380, 220],
   [-1600, -1450, 380, 160],
   [-500, -2950, 700, 420],
@@ -215,7 +216,7 @@ function gableRoof(): THREE.BufferGeometry {
   return g
 }
 
-export function createTown(): { group: THREE.Group; setEvening(amount: number): void } {
+export function createTown(): { group: THREE.Group; houses: House[]; setEvening(amount: number): void } {
   const houses = placeHouses()
   const facade = facadeMaterial()
   // matte tiles: sun glints on roofs a pixel or two across made the towns sparkle as the camera moved
@@ -273,6 +274,7 @@ export function createTown(): { group: THREE.Group; setEvening(amount: number): 
   console.info(`[garage] town: ${houses.length} buildings`)
   return {
     group,
+    houses,
     setEvening(amount) {
       facade.evening.value = amount
     },

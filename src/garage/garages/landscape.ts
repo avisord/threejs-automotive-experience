@@ -8,6 +8,7 @@ import { createRoadside } from './roadside'
 import { SITE, forestDensity, heightAt, roomBelowView } from './site'
 import { createSky } from './sky'
 import { createTerrain, outdoorMaterial } from './terrain'
+import { createGreenery } from './greenery'
 import { createTown } from './town'
 import { createForest } from './trees'
 import { createWater, type WaterSurface } from './water'
@@ -176,9 +177,10 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
   const roadside = createRoadside()
   const canopy = createCanopy()
   const town = createTown()
-  outdoor.add(createTerrain(), canopy, town.group, createFujiMountain(), createRanges(), roadside.group, meadow)
+  const greenery = createGreenery(town.houses)
+  outdoor.add(createTerrain(), canopy, town.group, greenery, createFujiMountain(), createRanges(), roadside.group, meadow)
 
-  const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town.group]
+  const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town.group, greenery]
   // the lake can't show anything near the pavilion: skip it all in its mirror pass
   const nearDetail: THREE.Object3D[] = [meadow, roadside.group]
   const lake = createLake(opts, () => [...nearDetail, ...opts.hideFromLake()])

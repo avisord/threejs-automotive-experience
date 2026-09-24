@@ -100,7 +100,7 @@ function sample(rand: () => number, opts: ForestOptions, target: number, inner: 
 }
 
 /** a far tree, 1 unit tall: a cone on a stub of trunk, or a rounded broadleaf crown */
-function farTreeGeometry(conifer: boolean): THREE.BufferGeometry {
+export function farTreeGeometry(conifer: boolean): THREE.BufferGeometry {
   const trunk = new THREE.CylinderGeometry(0.025, 0.035, 0.25, 5).translate(0, 0.125, 0)
   const crown = conifer
     ? new THREE.ConeGeometry(0.24, 0.85, 7).translate(0, 0.57, 0)

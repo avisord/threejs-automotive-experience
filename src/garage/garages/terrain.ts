@@ -44,6 +44,20 @@ const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace
 /** field colours: young rice, deep greens, stubble, bare earth, vegetable rows */
 const CROPS = [0x7a9a3c, 0x456d28, 0xb3a45e, 0x7a6146, 0x93a84a, 0x5b7a30, 0xc2b36e, 0x8c7a52].map(srgb)
 
+/** width of a field across the valley's grain, metres */
+export const PARCEL = 55
+
+/** how much of a point is farmland, 0–1: the valley floor in patches, away from the pavilion */
+export function farmland(x: number, z: number): number {
+  const r = Math.hypot(x, z)
+  return smoothstep(r, 140, 260) * (1 - smoothstep(r, 2600, 3000)) * smoothstep(fbm(x / 350 - 5, z / 350 + 9, 2), 0.38, 0.5)
+}
+
+/** field coordinates: fields run along the valley (v), turned a little, PARCEL wide across it (u) */
+export function parcelSpace(x: number, z: number): { u: number; v: number } {
+  return { u: x * 0.956 + z * 0.292, v: -x * 0.292 + z * 0.956 }
+}
+
 /** the terrain's grid — shared by anything draped over it (canopy.ts), so their vertices coincide */
 export const TERRAIN_GRID = { rings: 240, segments: 720, spacing: (t: number) => t ** 1.8 }
 
@@ -77,16 +91,15 @@ export function createTerrain(): THREE.Mesh {
       // gravel shoulders along the road
       c.lerp(gravel, smoothstep(onRoad(x, z), 0.05, 0.4) * 0.8)
       // farmland on the valley floor: a patchwork of parcels — rice, vegetables, stubble, bare earth
-      const farm = smoothstep(r, 140, 260) * (1 - smoothstep(r, 2600, 3000)) * smoothstep(fbm(x / 350 - 5, z / 350 + 9, 2), 0.38, 0.5)
+      const farm = farmland(x, z)
       if (farm > 0) {
-        const u = x * 0.956 + z * 0.292 // parcels run along the valley, turned a little
-        const v = -x * 0.292 + z * 0.956
-        const pu = Math.floor(u / 55)
+        const { u, v } = parcelSpace(x, z)
+        const pu = Math.floor(u / PARCEL)
         const pv = Math.floor(v / (30 + 25 * noise(pu * 0.7, 3.1)))
         const pick = noise(pu * 1.37 + 0.5, pv * 2.11 + 0.5)
         const crop = CROPS[Math.min(CROPS.length - 1, Math.floor(pick * CROPS.length * 1.3) % CROPS.length)]
         // hedges and paths between parcels
-        const edge = Math.min((u / 55) % 1, 1 - ((u / 55) % 1)) < 0.05 ? 0.6 : 1
+        const edge = Math.min((u / PARCEL) % 1, 1 - ((u / PARCEL) % 1)) < 0.05 ? 0.6 : 1
         c.lerp(crop, farm * 0.85).multiplyScalar(1 - (1 - edge) * farm * 0.5)
       }
       // darker ground under woodland
