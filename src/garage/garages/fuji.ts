@@ -81,16 +81,19 @@ function createFujiPavilion(): Room {
   // dark polished concrete: the view, the car and the light strips show in it
   const floorSurface = new THREE.MeshStandardMaterial({
     ...floorMaps.maps,
-    color: 0xfff6ea, // the photographed concrete is already dark (~0.085 albedo): only warm it a touch
-    roughness: 0.6, // × the map: polished, with duller patches
+    color: 0xd8d2c8, // the photographed concrete is already dark (~0.085 albedo): a touch darker and warmer
+    roughness: 0.45, // × the map: polished, with duller patches
     normalScale: new THREE.Vector2(0.6, 0.6),
     metalness: 0.02,
-    opacity: 0.68,
-    // the mirror under it does the sharp reflections; a rough sheen of the whole bright sky
-    // on top turned the floor navy blue
-    envMapIntensity: 0.35,
+    // a wet-look polish: the mirror below shows through strongly — the car, the bright windows
+    opacity: 0.55,
+    // the mirror under it does the reflections; the surface's own sheen of the room's environment
+    // (the whole bright sky through the glass) turned the floor navy blue
+    envMapIntensity: 0.05,
   })
-  const floor = createFloor(group, { geometry: deck, tint: 0x9a9a9a, blur: 0.009, surface: floorSurface })
+  // the mirror at ~45%: from eye height it mostly shows the sky past the roof edge, which at full
+  // strength turned the floor blue; the car and the window frames still read clearly in it
+  const floor = createFloor(group, { geometry: deck, tint: 0x747474, blur: 0.005, lod: 1, surface: floorSurface })
   // sunlight falling in through the glass lies on the floor in patches, with the car's shadow
   group.traverse((o) => {
     if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === floorSurface) o.receiveShadow = true
@@ -177,7 +180,7 @@ function createFujiPavilion(): Room {
   skyLight.lookAt(0, 0, 0)
   group.add(skyLight)
   // recessed LED slots in the ceiling, framing the skylight and running out to the edges
-  const led = glowMaterial(0xfff1dc, 5)
+  const led = glowMaterial(0xfff1dc, 2.5) // dimmer than the day outside: the room stays moody, the car the brightest thing in it
   for (const side of [-1, 1]) {
     const slot = new THREE.Mesh(new THREE.PlaneGeometry(0.05, roofD - 1), led)
     slot.rotation.x = Math.PI / 2
@@ -188,7 +191,7 @@ function createFujiPavilion(): Room {
     outer.position.set(side * (SKY.w / 2 + 4.5), ROOF_Y - 0.005, 0)
     group.add(outer)
   }
-  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 1.2, SKY.w + 9, roofD - 4)
+  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 0.6, SKY.w + 9, roofD - 4)
   ceilingLight.position.set(0, ROOF_Y - 0.05, 0)
   ceilingLight.up.set(0, 0, -1)
   ceilingLight.lookAt(0, 0, 0)
@@ -333,6 +336,6 @@ export const fujiPavilion: GarageDef = {
   name: 'Fuji Pavilion',
   tag: 'Concrete and glass on a terrace above a lake, Mount Fuji across the valley',
   palette: ['#2f5f9e', '#a7bdd8', '#f4f6fa', '#5f8a2e'],
-  look: 'natural',
+  look: 'golden',
   create: createFujiPavilion,
 }

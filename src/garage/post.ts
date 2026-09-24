@@ -20,7 +20,7 @@ import { AtmosphereEffect, type AtmosphereParams } from './atmosphere-effect'
 
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 export type ToneMapper = 'agx' | 'aces' | 'neutral'
-export type GradeLook = 'natural' | 'cyber' | 'warm' | 'cold' | 'noir'
+export type GradeLook = 'natural' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
 export type Msaa = 0 | 2 | 4 | 8
 export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
 /** floor mirror resolution relative to the canvas; 0 turns the mirror off */
@@ -179,6 +179,8 @@ interface Look {
 /** a look sets the grade sliders to a starting point; the sliders fine-tune from there */
 export const LOOKS: Record<GradeLook, Look> = {
   natural: { contrast: 1, saturation: 1, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff },
+  // late-afternoon landscape photography: a touch warm, cool shadows, gold highlights, more bite
+  golden: { contrast: 1.14, saturation: 1.1, temperature: 0.12, split: 0.3, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
   cyber: { contrast: 1.12, saturation: 1.1, temperature: -0.1, split: 0.3, shadowTint: 0x1fb6c9, highlightTint: 0xff7ad9 },
   warm: { contrast: 1.08, saturation: 1.05, temperature: 0.45, split: 0.2, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
   cold: { contrast: 1.1, saturation: 0.9, temperature: -0.5, split: 0.2, shadowTint: 0x2a4a8a, highlightTint: 0xd8f0ff },
