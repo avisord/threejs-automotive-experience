@@ -15,8 +15,12 @@ const SKY = { w: 4, d: 9 }
 const GROUND_Y = -0.6
 /** the reflecting pool in front of the open side (z extent past the deck) */
 const POOL = { d: 8, water: -0.28 }
-/** front right, mid-morning: lights the car's face and Fuji's near slope, and shapes both */
-const DEFAULT_SUN: SunPosition = { azimuth: -40, elevation: 34 }
+/**
+ * From the right, mid-morning: side light, so the mountain has a sunlit and a
+ * shaded flank and the car's shape reads — a sun behind the camera lights
+ * everything flat.
+ */
+const DEFAULT_SUN: SunPosition = { azimuth: -100, elevation: 30 }
 
 /**
  * An open concrete-and-glass pavilion on grassland below Mount Fuji, under a
@@ -230,7 +234,7 @@ function createFujiPavilion(): Room {
     sun.intensity = light.intensity * 1.7
     sun.shadow.needsUpdate = true
     aimFarShadow(farShadow, dir)
-    fill.intensity = 0.08 + 0.14 * day
+    fill.intensity = 0.04 + 0.06 * day // bounce from the grass; the sky's own fill is the env map
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
     skyLight.intensity = 1 + 3 * day
     water.setSunDirection(dir)

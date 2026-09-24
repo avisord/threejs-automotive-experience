@@ -34,10 +34,14 @@ export function sunLight(elevation: number): { color: THREE.Color; intensity: nu
 
 /**
  * How strongly the open sky (the outdoor environment map) lights the land.
- * On a clear day the sun outshines the sky several times over; at full
- * strength the sky's fill flattened sunlit and shaded ground into one.
+ *
+ * On a clear day direct sun on level ground is ~5× the sky's diffuse light —
+ * that's what makes shade read as shade. Measured on a white horizontal patch
+ * with the sun at 34°: sun 0.78, sky at full strength 0.45. At 0.55 (plus the
+ * hemisphere fill) the ratio was 2.6:1 and shadows looked washed out; 0.3
+ * brings it to ~5:1.
  */
-export const OUTDOOR_SKY_LIGHT = 0.55
+export const OUTDOOR_SKY_LIGHT = 0.3
 
 /** analytic daylight scale → our scene's lighting level (the shader is written for ~0.5 exposure) */
 const SKY_GAIN = 0.55

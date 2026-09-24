@@ -150,8 +150,11 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   terrain, Fuji and every tree; landscape materials get `receiveFarShadow()`, which reads
   `directionalShadowMap[1]` after `lights_fragment_end` where the near map doesn't reach.
   It must be the second shadow-casting directional light added (the sun is index 0).
-  Outdoor materials use `envMapIntensity = OUTDOOR_SKY_LIGHT` (0.55) and the sun is
-  ×1.7 of `sunLight()` — at a 1:1.5 sun:sky ratio shadows didn't read at all.
+  Outdoor materials use `envMapIntensity = OUTDOOR_SKY_LIGHT` (0.3) and the sun is
+  ×1.7 of `sunLight()`. Calibrated by rendering a white horizontal Lambert patch into a
+  float target with only the sun / only the env / only the hemisphere lit: sun:sky must be
+  ~5:1 on a clear day (it was 2.6:1 and shade looked washed out). Default sun comes from
+  the side (az −100°, 30°): lit from behind the camera, Fuji has no shaded flank.
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too: a shadow-casting light's map is a render target
