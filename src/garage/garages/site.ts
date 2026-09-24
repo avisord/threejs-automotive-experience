@@ -177,10 +177,14 @@ export function heightAt(x: number, z: number): number {
   const hills = fbm(x / 420 + 3, z / 420 - 7, 4)
   const aside = smoothstep(Math.abs(Math.atan2(x, -z)), 0.4, 0.7) + smoothstep(z, -200, 100)
   h += smoothstep(r, 250, 900) * 38 * smoothstep(hills, 0.45, 0.8) * (1 - lakeness) * Math.min(1, aside)
-  // the valley's flanks, the far shore and the rise behind — different heights, ragged crests
-  h += flank(x) * (80 + 150 * ridged(x / 700, z / 700, 4))
-  h += farShore(z) * (25 + 65 * ridged(x / 600 + 2, z / 600, 4)) * (1 - flank(x) * 0.5)
-  h += behind(z) * (35 + 55 * fbm(x / 500, z / 500))
+  // the valley's flanks, the far shore and the rise behind — different heights, ragged crests.
+  // They rise from the water over a few hundred metres: where the lake reached into a flank at
+  // full height the land stood up as a cliff within one grid cell, its colours smeared into
+  // streaks and the canopy poked through it, flickering.
+  const rise = smoothstep(lake, 1.0, 1.35)
+  h += rise * flank(x) * (80 + 150 * ridged(x / 700, z / 700, 4))
+  h += rise * farShore(z) * (25 + 65 * ridged(x / 600 + 2, z / 600, 4)) * (1 - flank(x) * 0.5)
+  h += rise * behind(z) * (35 + 55 * fbm(x / 500, z / 500))
   // The lake basin. Depth precision at a kilometre or two is metres, so land
   // near the water keeps clear of its level — above it outside the shore,
   // below it inside — by more the farther it is, or the shoreline flickers.

@@ -44,6 +44,9 @@ const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace
 /** field colours: young rice, deep greens, stubble, bare earth, vegetable rows */
 const CROPS = [0x7a9a3c, 0x456d28, 0xb3a45e, 0x7a6146, 0x93a84a, 0x5b7a30, 0xc2b36e, 0x8c7a52].map(srgb)
 
+/** the terrain's grid — shared by anything draped over it (canopy.ts), so their vertices coincide */
+export const TERRAIN_GRID = { rings: 240, segments: 720, spacing: (t: number) => t ** 1.8 }
+
 /**
  * The real-scale land: the pavilion's lawn terrace, the valley falling to the
  * road and the lake, farmland, wooded hillsides and the far shore. 3.3 km
@@ -60,9 +63,9 @@ export function createTerrain(): THREE.Mesh {
   const lakeBed = srgb(0x2c3a36)
   const geometry = polarGrid(
     SITE.realRadius,
-    240,
-    720,
-    (t) => t ** 1.8, // fine near the pavilion (lawn, road), coarser at the far shore
+    TERRAIN_GRID.rings,
+    TERRAIN_GRID.segments,
+    TERRAIN_GRID.spacing, // fine near the pavilion (lawn, road), coarser at the far shore
     (x, z, _t, _a, c) => {
       const h = heightAt(x, z)
       const r = Math.hypot(x, z)
@@ -98,6 +101,17 @@ export function createTerrain(): THREE.Mesh {
     },
     1 / 3, // grass detail repeats every 3 m
   )
+  // steep ground is scrub and woods, not fields or lawn: fades the valley-floor colours off slopes
+  const normal = geometry.attributes.normal
+  const color = geometry.attributes.color
+  const scrub = srgb(0x34432a)
+  const c = new THREE.Color()
+  for (let i = 0; i < normal.count; i++) {
+    const steep = 1 - smoothstep(normal.getY(i), 0.78, 0.94)
+    if (steep <= 0) continue
+    c.fromBufferAttribute(color, i).lerp(scrub, steep * 0.8)
+    color.setXYZ(i, c.r, c.g, c.b)
+  }
   const terrain = new THREE.Mesh(
     geometry,
     outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, map: grassDetailTexture(), roughness: 1 })),

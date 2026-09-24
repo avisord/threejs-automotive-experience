@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { fbm, noRaycast, noise, polarGrid, seeded, smoothstep } from './landform'
 import { SITE, forestDensity, heightAt } from './site'
-import { outdoorMaterial } from './terrain'
+import { TERRAIN_GRID, outdoorMaterial } from './terrain'
 
 /**
  * The woods seen from afar, as a mass: a lumpy shell of crowns laid over the
@@ -55,11 +55,14 @@ export function createCanopy(): THREE.Mesh {
   const cedar = srgb(0x2b4629)
   const pine = srgb(0x385a31)
   const broadleaf = srgb(0x557238)
+  // on the terrain's own grid: where there's no wood the shell lies exactly 3 m under the ground at
+  // every vertex, so it can't poke through between them (on a different grid it did, on steep
+  // slopes, and flickered)
   const geometry = polarGrid(
     SITE.realRadius,
-    170,
-    720,
-    (t) => t ** 1.25,
+    TERRAIN_GRID.rings,
+    TERRAIN_GRID.segments,
+    TERRAIN_GRID.spacing,
     (x, z, _t, _a, c) => {
       const r = Math.hypot(x, z)
       const ground = heightAt(x, z)
