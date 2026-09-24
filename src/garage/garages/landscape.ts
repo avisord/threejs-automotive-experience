@@ -138,7 +138,14 @@ function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.Instanced
     const height = Math.min(room, 0.3 + rand() * 0.4 + tall * (0.5 + rand() * 0.4))
     s.set(0.8 + rand() * 0.5, height, 0.8 + rand() * 0.5)
     mesh.setMatrixAt(n, m.compose(p, q, s))
-    c.setHSL(0.24 - tall * 0.05 + rand() * 0.04, 0.45 + rand() * 0.2, 0.25 + tall * 0.08 + rand() * 0.08, THREE.SRGBColorSpace)
+    // green, with drifts of dry golden grass (late in the season, as in the valley's fields)
+    const dry = smoothstep(fbm(p.x / 5 + 9, p.z / 5 - 3, 2), 0.48, 0.62) * (0.6 + 0.4 * rand())
+    c.setHSL(
+      THREE.MathUtils.lerp(0.23 - tall * 0.04 + rand() * 0.04, 0.12 + rand() * 0.02, dry),
+      THREE.MathUtils.lerp(0.4 + rand() * 0.2, 0.42, dry),
+      THREE.MathUtils.lerp(0.22 + tall * 0.06 + rand() * 0.08, 0.4 + rand() * 0.08, dry),
+      THREE.SRGBColorSpace,
+    )
     mesh.setColorAt(n, c)
     n++
   }

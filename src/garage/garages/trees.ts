@@ -178,7 +178,12 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
           base.call(material, shader, renderer)
           shader.fragmentShader = shader.fragmentShader.replace(
             '#include <map_fragment>',
-            '#include <map_fragment>\n\tdiffuseColor.rgb = vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ) * 2.2;', // (the instance colour is multiplied in after, by color_fragment)
+            '#include <map_fragment>\n\tdiffuseColor.rgb = vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ) * 3.2;', // (the instance colour is multiplied in after, by color_fragment)
+          )
+          // petals are thin: light through them keeps a blossom pale pink even in shade (not lavender)
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <emissivemap_fragment>',
+            '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.3;',
           )
         }
         material.customProgramCacheKey = () => 'blossom'
@@ -221,7 +226,7 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
         m.compose(new THREE.Vector3(x, opts.heightAt(x, z) - 0.2, z), q, new THREE.Vector3(h, h, h))
         trunks.setMatrixAt(i, m)
         crowns.setMatrixAt(i, m)
-        crowns.setColorAt(i, blossom ? c.setHSL(0.94 + rand() * 0.03, 0.5, 0.8 + rand() * 0.06, THREE.SRGBColorSpace) : tint(variant.conifer, rand()))
+        crowns.setColorAt(i, blossom ? c.setHSL(0.95 + rand() * 0.03, 0.62, 0.84 + rand() * 0.06, THREE.SRGBColorSpace) : tint(variant.conifer, rand()))
       })
       for (const mesh of [trunks, crowns]) {
         mesh.castShadow = true
