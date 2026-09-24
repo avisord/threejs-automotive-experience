@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { createFujiMountain } from './fuji-mountain'
+import { createCanopy } from './canopy'
 import { fbm, noRaycast, seeded, smoothstep } from './landform'
 import { createRanges } from './ranges'
 import { createRoadside } from './roadside'
@@ -150,9 +151,10 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
 
   const meadow = createMeadow(opts.keepClear)
   const roadside = createRoadside()
-  outdoor.add(createTerrain(), createFujiMountain(), createRanges(), roadside.group, meadow)
+  const canopy = createCanopy()
+  outdoor.add(createTerrain(), canopy, createFujiMountain(), createRanges(), roadside.group, meadow)
 
-  const farDetail: THREE.Object3D[] = [...roadside.details]
+  const farDetail: THREE.Object3D[] = [...roadside.details, canopy]
   // the lake can't show anything near the pavilion: skip it all in its mirror pass
   const nearDetail: THREE.Object3D[] = [meadow, roadside.group]
   const lake = createLake(opts, () => [...nearDetail, ...opts.hideFromLake()])
