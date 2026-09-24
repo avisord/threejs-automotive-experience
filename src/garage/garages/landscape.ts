@@ -113,9 +113,13 @@ function grassClump(): THREE.BufferGeometry {
  * patches of taller grass.
  */
 function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.InstancedMesh {
-  const COUNT = 42000
+  const COUNT = 62000
   const INNER = 2
-  const OUTER = 44
+  const OUTER = 150
+  /** full density out to here, then thinning */
+  const FULL = 24
+  /** where the meadow gives out, by direction: uneven, 70–125 m — not a circle */
+  const edge = (a: number) => 70 + 55 * fbm(Math.cos(a) * 1.6 + 7, Math.sin(a) * 1.6 - 2, 3)
   const mesh = new THREE.InstancedMesh(
     grassClump(),
     outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })),
@@ -130,13 +134,19 @@ function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.Instanced
   const up = new THREE.Vector3(0, 1, 0)
   const c = new THREE.Color()
   let n = 0
-  for (let tries = 0; n < COUNT && tries < COUNT * 6; tries++) {
+  for (let tries = 0; n < COUNT && tries < COUNT * 12; tries++) {
     const r = Math.sqrt(rand() * (OUTER * OUTER - INNER * INNER) + INNER * INNER)
     const a = rand() * Math.PI * 2
     p.set(Math.cos(a) * r, 0, Math.sin(a) * r)
     if (keepClear(p.x, p.z)) continue
-    // thinner toward the edge, where the terrain's texture takes over
-    if (rand() > 1 - 0.6 * smoothstep(r, OUTER * 0.6, OUTER)) continue
+    // Thinner with distance and gone past an uneven edge, with patches and stray tufts beyond it,
+    // so the meadow fades into the terrain's own grass instead of stopping on a circle. Farther
+    // clumps are wider (below): fewer of them still cover the ground at a distance.
+    const e = edge(a)
+    const patches = smoothstep(fbm(p.x / 14 + 5, p.z / 14 - 8, 3), 0.5, 0.68)
+    const thin = r < FULL ? 1 : (FULL / r) ** 1.3
+    const keep = thin * Math.max(1 - smoothstep(r, e * 0.55, e), patches * (1 - smoothstep(r, e, OUTER)) * 0.8)
+    if (rand() > keep) continue
     p.y = heightAt(p.x, p.z)
     q.setFromAxisAngle(up, rand() * Math.PI * 2)
     // patches of taller, seeding grass
@@ -144,15 +154,19 @@ function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.Instanced
     // …kept below the view of the valley past the glass (a fringe along the sill, not a screen)
     const room = roomBelowView(p.x, p.z)
     if (room < 0.25) continue
-    const height = Math.min(room, 0.3 + rand() * 0.4 + tall * (0.5 + rand() * 0.4))
-    s.set(0.8 + rand() * 0.5, height, 0.8 + rand() * 0.5)
+    // shorter toward the edge (grazed and trodden where it thins), wider clumps farther out
+    const far = smoothstep(r, FULL, e)
+    const height = Math.min(room, (0.3 + rand() * 0.4 + tall * (0.5 + rand() * 0.4)) * (1 - 0.45 * far))
+    const spread = 1 + 1.2 * smoothstep(r, FULL, OUTER)
+    s.set((0.8 + rand() * 0.5) * spread, height, (0.8 + rand() * 0.5) * spread)
     mesh.setMatrixAt(n, m.compose(p, q, s))
     // green, with drifts of dry golden grass (late in the season, as in the valley's fields)
     const dry = smoothstep(fbm(p.x / 5 + 9, p.z / 5 - 3, 2), 0.48, 0.62) * (0.6 + 0.4 * rand())
     c.setHSL(
       THREE.MathUtils.lerp(0.23 - tall * 0.04 + rand() * 0.04, 0.12 + rand() * 0.02, dry),
       THREE.MathUtils.lerp(0.4 + rand() * 0.2, 0.42, dry),
-      THREE.MathUtils.lerp(0.27 + tall * 0.06 + rand() * 0.1, 0.42 + rand() * 0.08, dry),
+      // (lighter where the meadow thins out: sparse dark tufts on the lit ground read as spots)
+      THREE.MathUtils.lerp(0.27 + tall * 0.06 + rand() * 0.1, 0.42 + rand() * 0.08, dry) + 0.12 * far,
       THREE.SRGBColorSpace,
     )
     mesh.setColorAt(n, c)
