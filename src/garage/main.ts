@@ -571,6 +571,7 @@ const videoStage: Stage = (() => {
       camera.lookAt(pose.target)
       if (pose.roll) camera.rotateZ(pose.roll)
       bay?.configurator.update()
+      room.update?.(dt)
       fitCameraInRoom() // moves only along the view ray, so the look direction holds
       clearLineOfSight(pose.target)
       post.render(dt)
@@ -877,6 +878,7 @@ function frame(timestamp: number): void {
   dirtyFrames = Math.max(0, dirtyFrames - 1)
 
   bay?.configurator.update()
+  room.update?.(dt)
   fitCameraInRoom()
   if (tracing) traceStep()
   post.render(dt)

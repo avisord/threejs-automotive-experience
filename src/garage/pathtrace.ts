@@ -62,7 +62,8 @@ export interface PathTraceScene {
  *  - repainted parts use their main colour — the shader patterns can't run
  *  - instanced meshes are merged (the tracer ignores instancing)
  *  - shader-based fakes (the floor mirror, headlight beams, selection
- *    overlays) are hidden: the path tracer does reflections and light for real
+ *    overlays) are hidden: the path tracer does reflections and light for real.
+ *    A shader material can offer a standard stand-in as `userData.pathTrace`
  *
  * Proxies are cached per source, so a material-only change rebuilds cheaply.
  */
@@ -187,7 +188,8 @@ export function createPathTracer(renderer: THREE.WebGLRenderer, host: PathTraceS
 
   /** the material the path tracer should see, or null to hide the mesh */
   function proxyFor(material: THREE.Material, opaque: boolean): THREE.Material | null {
-    if ((material as THREE.ShaderMaterial).isShaderMaterial) return null
+    // shader fakes are hidden, unless they offer a stand-in the tracer can render (water)
+    if ((material as THREE.ShaderMaterial).isShaderMaterial) return (material.userData.pathTrace as THREE.Material | undefined) ?? null
     const basic = material as THREE.MeshBasicMaterial
     if (basic.isMeshBasicMaterial) {
       const p = materialProxies.get(material) ?? new THREE.MeshStandardMaterial()

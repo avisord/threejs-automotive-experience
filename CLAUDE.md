@@ -128,6 +128,12 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   exposes `ready` so the env map is re-captured once it's in, and video exports wait for it.
   Dome uv column u faces (cos 2πu, ·, sin 2πu) after `scale.x = -1`; rotating by φ maps
   angle a → a − φ. Far meshes set `raycast = () => {}` so `clearLineOfSight` stays cheap.
+- Water (`garages/water.ts`): its own `Reflector` with a ripple/Fresnel/sun-glint shader.
+  Two mirrors must not render inside each other — the water hides the deck mirror during
+  its pass and sits in `floorLayers` for the deck's. Ripples advance through the optional
+  `Room.update(dt)` (called by the frame loop and the video director), so idle water holds
+  still and exports stay deterministic. Shader materials can hand the path tracer a
+  standard stand-in via `material.userData.pathTrace`.
 - three-gpu-pathtracer reads vertex colours as RGBA and multiplies albedo **alpha** by
   them: an RGB colour attribute made terrain/grass fully transparent in traces.
   `pathtrace.ts` pads them to RGBA (alpha 1), and bakes `instanceColor` when merging

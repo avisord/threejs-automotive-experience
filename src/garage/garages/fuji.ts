@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { assembleRoom, box, concreteTexture, createFloor, glowMaterial, type GarageDef, type Room } from './kit'
 import { createLandscape } from './landscape'
+import { createWater } from './water'
 
 /** platform the pavilion stands on (x × z), and its roof height */
 const DECK = { w: 26, d: 22 }
@@ -90,13 +91,14 @@ function createFujiPavilion(): Room {
   })
 
   // ─── the reflecting pool in front, with stepping stones ─────────────────
-  const pool = new THREE.Mesh(
-    new THREE.PlaneGeometry(w, POOL.d),
-    new THREE.MeshStandardMaterial({ color: 0x05080d, roughness: 0.03, metalness: 0, envMapIntensity: 1.6 }),
-  )
-  pool.rotation.x = -Math.PI / 2
-  pool.position.set(0, POOL.water, d / 2 + POOL.d / 2)
-  group.add(pool)
+  const water = createWater(new THREE.PlaneGeometry(w, POOL.d), {
+    sunDirection: landscape.sunDirection,
+    hideWhileReflecting: () => [floor.reflector], // the deck's own mirror would render again inside this one
+  })
+  water.mesh.position.set(0, POOL.water, d / 2 + POOL.d / 2)
+  group.add(water.mesh)
+  // …and the other way round: the deck's mirror doesn't need to see the pool below its edge
+  floor.floorLayers.push(water.mesh)
   const rimH = POOL.water - GROUND_Y + 0.06
   box(group, [w + 0.6, rimH, 0.3], concrete, [0, GROUND_Y + rimH / 2, d / 2 + POOL.d + 0.15])
   for (const side of [-1, 1]) box(group, [0.3, rimH, POOL.d], concrete, [side * (w / 2 + 0.15), GROUND_Y + rimH / 2, d / 2 + POOL.d / 2])
@@ -196,7 +198,7 @@ function createFujiPavilion(): Room {
   group.add(sun) // aims at the origin by default
   group.add(new THREE.HemisphereLight(0xbcd2f0, 0x5a6a3c, 0.45))
 
-  return assembleRoom(group, floor, {
+  const room = assembleRoom(group, floor, {
     bounds: [
       [-w / 2 + 2.3, 0.3, -d / 2 + 1.6],
       [glassX - 0.6, ROOF_Y - 0.5, d / 2 + OUT_FRONT],
@@ -205,6 +207,18 @@ function createFujiPavilion(): Room {
     environmentIntensity: 1,
     ready: landscape.ready,
   })
+  return {
+    ...room,
+    resize(width, height, pixelRatio) {
+      room.resize(width, height, pixelRatio)
+      water.resize(width, height, pixelRatio)
+    },
+    setReflectionScale(scale) {
+      room.setReflectionScale(scale)
+      water.setReflectionScale(scale)
+    },
+    update: water.update,
+  }
 }
 
 export const fujiPavilion: GarageDef = {

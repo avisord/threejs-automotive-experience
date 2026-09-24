@@ -46,6 +46,8 @@ export interface Room {
    * The room is usable before; the app re-captures its environment map then.
    */
   ready?: Promise<void>
+  /** advance anything that moves on its own (water ripples); called for every frame drawn */
+  update?(dt: number): void
 }
 
 /**
