@@ -56,9 +56,11 @@ let lastActivity = 0
 let traceTimer = 0
 
 // ─── camera: orbit around the car, never from below ─────────────────────────
-// far enough for open-air garages that paint a whole landscape (see garages/fuji.ts)
-const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 3000)
-camera.position.set(4.4, 2.5, 5.6) // front-left, from above
+// Far enough for open-air garages' landscapes (garages/site.ts draws its far layers within ~6 km).
+// A 0.1 m near plane still clears close-up camera moves and keeps depth precision workable at a few km.
+const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 12000)
+// front-left, from above — a touch farther back than before, for the longer default lens (Display › Field of view)
+camera.position.set(5.0, 2.8, 6.4)
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, 0.6, 0)
 controls.enableDamping = true
@@ -185,7 +187,7 @@ function captureEnvironment(): void {
   // the room must not reflect the previous garage's map while it's captured
   environmentTarget?.dispose()
   scene.environment = null
-  environmentTarget = pmrem.fromScene(scene, 0, 0.1, 3000, {
+  environmentTarget = pmrem.fromScene(scene, 0, 0.1, 12000, {
     size: 512,
     position: new THREE.Vector3(0, 1.2, 0),
   })
@@ -196,7 +198,7 @@ function captureEnvironment(): void {
   outdoorTarget?.dispose()
   outdoorTarget = null
   if (room.outdoor) {
-    outdoorTarget = pmrem.fromScene(scene, 0, 0.1, 3000, { size: 256, position: room.outdoor.probe })
+    outdoorTarget = pmrem.fromScene(scene, 0, 0.1, 12000, { size: 256, position: room.outdoor.probe })
     const map = outdoorTarget.texture
     room.outdoor.root.traverse((obj) => {
       const mesh = obj as THREE.Mesh

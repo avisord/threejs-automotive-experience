@@ -440,8 +440,9 @@ function disposeTree(root: THREE.Object3D): void {
       light.dispose()
       return
     }
+    // meshes, and lines and points too (a landscape's power lines)
     const mesh = obj as THREE.Mesh
-    if (!mesh.isMesh) return
+    if (!mesh.isMesh && !(obj as THREE.Line).isLine && !(obj as THREE.Points).isPoints) return
     mesh.geometry.dispose()
     for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       for (const value of Object.values(material)) if ((value as THREE.Texture | null)?.isTexture) (value as THREE.Texture).dispose()

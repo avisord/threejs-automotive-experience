@@ -15,6 +15,11 @@ export interface AtmosphereParams {
   falloff: number
   /** ground level the haze sits on */
   groundY: number
+  /**
+   * Far layers drawn closer than they are (a distance-compressed backdrop):
+   * past `start` metres, a drawn distance d stands for start + (d − start) × factor.
+   */
+  compress?: { start: number; factor: number }
   /** a shadow-casting sun: its shadow map carves light shafts out of the near air */
   shaftLight: THREE.DirectionalLight | null
   /** scattering of the open near air that shows the shafts, per metre — keep it faint, it's everywhere */
@@ -38,6 +43,8 @@ uniform vec3 uAirColor;
 uniform float uDensity;
 uniform float uFalloff;
 uniform float uGroundY;
+uniform float uCompressStart;
+uniform float uCompressFactor;
 uniform float uStrength;
 uniform float uShaftDensity;
 uniform float uShaftRange;
@@ -77,7 +84,9 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
   float viewZ = sky ? -1e6 : getViewZ( depth );
   vec3 viewPos = viewDir * ( viewZ / viewDir.z );
   vec3 rd = normalize( ( uCameraWorld * vec4( viewDir, 0.0 ) ).xyz );
-  float dist = sky ? 0.0 : length( viewPos );
+  float drawn = sky ? 0.0 : length( viewPos );
+  // the backdrop past the compression start stands for land much farther off
+  float dist = drawn > uCompressStart ? uCompressStart + ( drawn - uCompressStart ) * uCompressFactor : drawn;
 
   float mu = dot( rd, uSunDir );
   vec3 color = inputColor.rgb;
@@ -98,7 +107,7 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
 
   // ─── light shafts: march the near air, sampling the sun's shadow map ───
   if ( uShafts > 0.5 ) {
-    float range = sky ? uShaftRange : min( dist, uShaftRange );
+    float range = sky ? uShaftRange : min( drawn, uShaftRange );
     float stepLen = range / float( STEPS );
     float t = stepLen * ign( gl_FragCoord.xy );
     float scattered = 0.0;
@@ -145,6 +154,8 @@ export class AtmosphereEffect extends Effect {
         ['uDensity', new THREE.Uniform(0)],
         ['uFalloff', new THREE.Uniform(0.01)],
         ['uGroundY', new THREE.Uniform(0)],
+        ['uCompressStart', new THREE.Uniform(1e9)],
+        ['uCompressFactor', new THREE.Uniform(1)],
         ['uStrength', new THREE.Uniform(1)],
         ['uShaftDensity', new THREE.Uniform(0)],
         ['uShaftRange', new THREE.Uniform(50)],
@@ -187,6 +198,8 @@ export class AtmosphereEffect extends Effect {
     u.get('uDensity')!.value = p.density
     u.get('uFalloff')!.value = p.falloff
     u.get('uGroundY')!.value = p.groundY
+    u.get('uCompressStart')!.value = p.compress?.start ?? 1e9
+    u.get('uCompressFactor')!.value = p.compress?.factor ?? 1
     u.get('uShaftDensity')!.value = p.shaftDensity
     u.get('uShaftRange')!.value = p.shaftRange
     u.get('uDustDensity')!.value = p.dust?.density ?? p.shaftDensity

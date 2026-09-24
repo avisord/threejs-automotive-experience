@@ -56,6 +56,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
 | `atmosphere-effect.ts` | Open-air rooms' air, first in the effect pass: aerial perspective (exponential height fog from depth, forward scattering toward the sun) and volumetric sun shafts (ray-marches the sun's `sampler2DShadow` map; a dust box makes beams read under a roof). Params come from `room.atmosphere`; Settings › Graphics › Atmosphere. |
 | `pathtrace.ts` | Wrapper around three-gpu-pathtracer: builds the scene through proxies (see gotchas), paces GPU work with fence syncs, denoises early samples. |
+| (lens) | Default Display › Field of view is 36° (~37 mm) with the start camera a little farther back — a photographer's lens, not a wide game camera. Saved settings keep their own value. |
 | `camera-moves.ts` | `CAMERA_MOVES`: 15 parametric moves (turntable, hero sweep, push in, flyover, side track, detail reveal, top-down, dolly zoom, spiral rise, dutch orbit, ground skim, wheel orbit, headlight slide, crane down, handheld hero hold) — `pose(u, framing, out, seconds)` in car space, framed from the car's size, lens and aspect; a pose may set its own `fov` (lens) and `roll` (dutch angle). |
 | `director.ts` | Reel model (shots = move + garage + length, fade/cut, resolution, fps, quality), `preview()` live in the window and `exportVideo()`: fixed-timestep render → `CanvasSource` (captured in the same task as the draw) → MP4. Talks to the app only through a `Stage` (implemented in `main.ts`: takes the view, swaps garages without the UI fade, restores camera/garage/grade after). |
 | `ui/` | Side panel shell (`panel.ts`: page stack + breadcrumb + `leave()` hook), widgets, and pages: Garage, Collection, Car, Parts, Lights, Video, Settings › Graphics / Display. `material-controls.ts` is the shared material picker. |
@@ -123,9 +124,22 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - The floor mirror (`Reflector`) re-renders the scene; objects lying on the floor must be
   in `room.floorLayers` so they're hidden during the mirror pass.
 - `THREE.Clock` is deprecated — the loop uses `THREE.Timer`.
-- Open-air garages: `garages/landscape.ts` builds the world (sky, 3D Fuji, terrain,
-  instanced meadow, `trees.ts` forest — all from fixed seeds so videos are repeatable).
-  The camera far plane and the PMREM capture's far plane are 3000 m for it. Optional
+- Open-air garages: `garages/site.ts` lays out the Fuji site (terrace → road → valley →
+  lake → far shore → ranges → Fuji) and owns `heightAt`, `lakeShape`, `roadZ`,
+  `forestDensity`; `landscape.ts` assembles `terrain.ts` (real scale to 3.3 km),
+  `roadside.ts` (road, poles, wires, guardrail, signs, cars, houses), `trees.ts`,
+  `ranges.ts`, `fuji-mountain.ts`, the lake (`water.ts`, its own low-res mirror) and the
+  sky — all from fixed seeds so videos are repeatable. Past 3.3 km the far layers are
+  **distance-compressed**: built in real metres (Fuji 2,950 m above the lake at 17 km)
+  and mapped vertex by vertex (`site.mapFar`, normals from the real shape first) so each
+  point keeps its exact direction from the eye and its depth order; the atmosphere
+  effect's `compress` undoes the mapping to haze them for their real distance. (A 60 km
+  far plane would leave metres of depth error near the lake shore.) The valley profile
+  is designed from **depression angles** seen from inside (`site.fall`): past the
+  terrace edge only ground < ~6.8° below the eye is visible, so each farther point must
+  appear a bit higher — a natural convex slope hid the lake. Land keeps ≥ 0.004 × r clear
+  of the lake level for depth precision. Camera near/far 0.1 / 12000 m; PMREM far 12000.
+  Three mirrors (deck, pool, lake) each hide the other two in their own pass. Optional
   `Room` hooks: `ready` (async assets; env re-captured after, video exports wait),
   `outdoor` (meshes get a second env map captured from an open-air `probe` — the interior
   capture sees the roof, which lit the far land like concrete), `sun` (get/set; main saves
@@ -147,7 +161,7 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - Far shadows (`garages/far-shadow.ts`): the sun's map only covers ±45 m, so beyond it
   sunlit and shaded land looked the same. A second directional light with intensity 0
   and a 3.2 km, 4096² shadow map (re-rendered on sun moves / when trees arrive) casts for
-  terrain, Fuji and every tree; landscape materials get `receiveFarShadow()`, which reads
+  terrain, Fuji and every tree (6.8 km across, 1.7 m texels); landscape materials get `receiveFarShadow()`, which reads
   `directionalShadowMap[1]` after `lights_fragment_end` where the near map doesn't reach.
   It must be the second shadow-casting directional light added (the sun is index 0).
   Outdoor materials use `envMapIntensity = OUTDOOR_SKY_LIGHT` (0.3) and the sun is
@@ -157,8 +171,8 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   the side (az −100°, 30°): lit from behind the camera, Fuji has no shaded flank.
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
-- `kit.disposeTree` disposes lights too: a shadow-casting light's map is a render target
-  (2 textures) that leaked on every visit before.
+- `kit.disposeTree` disposes lights too (a shadow-casting light's map is a render target,
+  2 textures) and lines/points (the power lines' geometry) — both leaked per visit before.
 - Photographed surfaces: `kit.SURFACES` + `pbrMaps()` load 2k Poly Haven (CC0) colour /
   normal / roughness maps from `public/textures/<name>/` (WebP, AO baked into colour —
   bake with `blend` on **planar** `gbrp`; on packed `rgb24` it silently turns the result

@@ -196,7 +196,8 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   vignette: { enabled: true, darkness: 0.55, offset: 0.3 },
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
-  display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 42, showFps: true },
+  // ~37 mm on full frame: a photographer's lens for a car, not a wide game camera
+  display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 36, showFps: true },
   atmosphere: { enabled: true, strength: 1 },
   pathTracing: { enabled: false, bounces: 4, samples: 256, resolution: 0.75, denoise: true },
 }

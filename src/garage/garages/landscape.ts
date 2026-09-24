@@ -1,33 +1,33 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { receiveFarShadow } from './far-shadow'
-import { OUTDOOR_SKY_LIGHT, createSky } from './sky'
+import { createFujiMountain } from './fuji-mountain'
+import { fbm, noRaycast, seeded, smoothstep } from './landform'
+import { createRanges } from './ranges'
+import { createRoadside } from './roadside'
+import { SITE, forestDensity, heightAt, inView } from './site'
+import { createSky } from './sky'
+import { createTerrain, outdoorMaterial } from './terrain'
 import { createForest } from './trees'
-
-/** a landscape material: sky fill toned down, far shadows read in */
-function outdoorMaterial<M extends THREE.MeshStandardMaterial>(material: M): M {
-  material.envMapIntensity = OUTDOOR_SKY_LIGHT
-  receiveFarShadow(material)
-  return material
-}
+import { createWater, type WaterSurface } from './water'
 
 /**
- * An open-air world for a garage to stand in: an analytic clear sky for any
- * sun position (sky.ts), a 3D Mount Fuji, rolling grassland out to distant
- * ranges, grass around the building and conifer forests (trees.ts).
+ * The world around the Fuji Pavilion, in depth layers (site.ts has the plan):
+ * the lawn and meadow → the valley falling away to a winding road with poles,
+ * cars and farmhouses → rolling wooded ground and a village → a lake with a
+ * real reflection → its forested far shore → foothill ranges → Mount Fuji,
+ * at their real angular sizes. An analytic sky over it all (sky.ts); distance
+ * haze is added from depth by the atmosphere effect, not painted in.
  *
- * Distance haze isn't painted in: the atmosphere post effect adds it from
- * depth, so it follows the sun and the view.
- *
- * Everything is placed from a fixed seed, so every load — and every frame of
- * an exported video — sees the same landscape.
+ * Everything is placed from fixed seeds, so every load — and every frame of an
+ * exported video — sees the same landscape.
  */
 
 export interface LandscapeOptions {
-  /** ground level around the building */
-  groundY: number
-  /** true where no grass or tree may grow (under the building, in a pool) */
+  /** true where no grass or bush may grow (the pavilion's footprint, its pool) */
   keepClear(x: number, z: number): boolean
+  sunDirection: THREE.Vector3
+  /** the pavilion's own things the lake's mirror needn't draw (they can't appear in it) */
+  hideFromLake(): THREE.Object3D[]
 }
 
 export interface Landscape {
@@ -35,245 +35,11 @@ export interface Landscape {
   /** everything lit by the open sky (the room captures an outdoor environment map for it) */
   outdoor: THREE.Object3D
   sky: ReturnType<typeof createSky>
-  /** far detail (distant forests) to leave out of mirror passes — filled once the trees are in */
+  lake: WaterSurface
+  /** detail the pavilion's own mirrors (deck, pool) can skip — a few pixels there at most */
   farDetail: THREE.Object3D[]
   /** resolves once the trees and their textures are in (never rejects) */
   ready: Promise<void>
-}
-
-// ─── noise ────────────────────────────────────────────────────────────────
-
-function hash(x: number, y: number): number {
-  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263)
-  h = Math.imul(h ^ (h >>> 13), 1274126177)
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967295
-}
-
-/** smooth value noise, 0–1 */
-function noise(x: number, y: number): number {
-  const xi = Math.floor(x)
-  const yi = Math.floor(y)
-  const xf = x - xi
-  const yf = y - yi
-  const u = xf * xf * (3 - 2 * xf)
-  const v = yf * yf * (3 - 2 * yf)
-  const a = hash(xi, yi)
-  const b = hash(xi + 1, yi)
-  const c = hash(xi, yi + 1)
-  const d = hash(xi + 1, yi + 1)
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
-}
-
-/** fractal noise, roughly 0–1 */
-function fbm(x: number, y: number, octaves = 4): number {
-  let sum = 0
-  let amp = 0.5
-  let freq = 1
-  let norm = 0
-  for (let i = 0; i < octaves; i++) {
-    sum += amp * noise(x * freq + i * 17.1, y * freq - i * 9.3)
-    norm += amp
-    amp *= 0.5
-    freq *= 2.03
-  }
-  return sum / norm
-}
-
-/** sharp crests where the noise crosses its middle: mountain ranges, gullies */
-const ridged = (x: number, y: number, octaves = 4) => 1 - Math.abs(2 * fbm(x, y, octaves) - 1)
-
-/** deterministic random numbers (mulberry32) */
-function seeded(seed: number): () => number {
-  let s = seed >>> 0
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0
-    let t = s
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-const smoothstep = THREE.MathUtils.smoothstep
-/** meshes out here are far from anything the camera clamps against — skip them in raycasts */
-const noRaycast = (o: THREE.Object3D) => (o.raycast = () => {})
-
-/**
- * A disc of `rings` × `segments` vertices, rings spaced by `spacing(i/rings)`
- * (0–1 → radius fraction), shaped and coloured by `vertex`.
- */
-function polarGrid(
-  radius: number,
-  rings: number,
-  segments: number,
-  spacing: (t: number) => number,
-  vertex: (x: number, z: number, t: number, angle: number, color: THREE.Color) => number,
-  uvScale = 0,
-): THREE.BufferGeometry {
-  const count = 1 + rings * segments
-  const position = new Float32Array(count * 3)
-  const color = new Float32Array(count * 3)
-  const uv = uvScale ? new Float32Array(count * 2) : null
-  const c = new THREE.Color()
-  const put = (k: number, x: number, z: number, t: number, a: number) => {
-    const y = vertex(x, z, t, a, c)
-    position.set([x, y, z], k * 3)
-    color.set([c.r, c.g, c.b], k * 3)
-    uv?.set([x * uvScale, z * uvScale], k * 2)
-  }
-  put(0, 0, 0, 0, 0)
-  for (let i = 1; i <= rings; i++) {
-    const t = spacing(i / rings)
-    for (let j = 0; j < segments; j++) {
-      const a = (j / segments) * Math.PI * 2
-      put(1 + (i - 1) * segments + j, Math.cos(a) * t * radius, Math.sin(a) * t * radius, t, a)
-    }
-  }
-  const index: number[] = []
-  for (let j = 0; j < segments; j++) index.push(0, 1 + ((j + 1) % segments), 1 + j)
-  for (let i = 1; i < rings; i++) {
-    const inner = 1 + (i - 1) * segments
-    const outer = inner + segments
-    for (let j = 0; j < segments; j++) {
-      const j1 = (j + 1) % segments
-      index.push(inner + j, inner + j1, outer + j, inner + j1, outer + j1, outer + j)
-    }
-  }
-  const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.BufferAttribute(position, 3))
-  g.setAttribute('color', new THREE.BufferAttribute(color, 3))
-  if (uv) g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
-  g.setIndex(index)
-  g.computeVertexNormals()
-  return g
-}
-
-// ─── Mount Fuji ───────────────────────────────────────────────────────────
-
-/**
- * Far enough that its summit sits ~9° up — under the roof line seen from
- * inside the pavilion — and its skirt spreads ~30° either side.
- */
-const FUJI = { radius: 540, height: 155, crater: 0.03, craterDepth: 5, at: new THREE.Vector3(0, -8, -900) }
-
-function createFuji(): THREE.Mesh {
-  const { radius: R, height: H, crater } = FUJI
-  const rock = new THREE.Color(0x3e3036)
-  const scree = new THREE.Color(0x5e4c4a)
-  const forest = new THREE.Color(0x1f3320)
-  const snowWhite = new THREE.Color(0xf4f6fa)
-  const geometry = polarGrid(
-    R,
-    120,
-    320,
-    (t) => t ** 1.35, // rings bunch up near the summit, where the detail is
-    (x, z, t, a, c) => {
-      const ca = Math.cos(a)
-      const sa = Math.sin(a)
-      // the famous profile: a steep concave cone with a shallow crater on top
-      let h: number
-      if (t < crater) h = H - FUJI.craterDepth * (1 - (t / crater) ** 2)
-      else h = H * (1 - (t - crater) / (1 - crater)) ** 2.3
-      // erosion gullies running down the slope, strongest mid-slope
-      const gully = ridged(ca * 9 + t * 1.2, sa * 9 + t * 1.2, 3)
-      const envelope = Math.sin(Math.PI * Math.min(1, t * 1.3)) ** 1.2
-      h += envelope * H * 0.045 * (gully - 0.55)
-      // lumpy lower flanks
-      h += smoothstep(t, 0.4, 1) * H * 0.07 * (fbm(x / 70, z / 70) - 0.5)
-
-      // snow down to ~55% of the height, reaching lower in the gullies
-      const snowLine = H * (0.5 + 0.1 * (gully - 0.5) + 0.06 * (fbm(ca * 5, sa * 5, 2) - 0.5))
-      const snow = smoothstep(h, snowLine - 3, snowLine + 2)
-      c.copy(rock).lerp(scree, fbm(x / 25, z / 25, 2))
-      c.lerp(forest, smoothstep(t, 0.42, 0.62))
-      c.lerp(snowWhite, snow)
-      return h
-    },
-  )
-  const fuji = new THREE.Mesh(
-    geometry,
-    outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })),
-  )
-  fuji.name = 'fuji'
-  fuji.castShadow = true // its own shaded flank, in the far shadow map
-  fuji.position.copy(FUJI.at)
-  noRaycast(fuji)
-  return fuji
-}
-
-// ─── the land ─────────────────────────────────────────────────────────────
-
-const TERRAIN = { radius: 1500, flat: 40 }
-
-/** ground height at a point — flat round the building, rolling further out, ranges on the horizon */
-export function terrainHeight(x: number, z: number, groundY: number): number {
-  const r = Math.hypot(x, z)
-  let h = groundY
-  h += smoothstep(r, TERRAIN.flat, 180) * 8 * (fbm(x / 120, z / 120) - 0.38)
-  // distant ranges — kept low straight behind the car, so they don't cut into Fuji
-  const towardFuji = Math.exp(-((Math.atan2(x, -z) / 0.7) ** 2))
-  h += smoothstep(r, 550, 1400) * 90 * ridged(x / 420, z / 420) * (1 - 0.85 * towardFuji)
-  return h
-}
-
-/** grey-green noise with little streaks — multiplied over the terrain's colours up close */
-function grassDetailTexture(): THREE.CanvasTexture {
-  const size = 256
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = size
-  const g = canvas.getContext('2d')!
-  const img = g.createImageData(size, size)
-  const rand = seeded(7)
-  for (let i = 0; i < size * size; i++) {
-    const v = 190 + rand() * 65
-    img.data.set([v * 0.95, v, v * 0.9, 255], i * 4)
-  }
-  g.putImageData(img, 0, 0)
-  for (let i = 0; i < 1400; i++) {
-    const x = rand() * size
-    const y = rand() * size
-    g.strokeStyle = `rgba(${rand() < 0.5 ? '255,255,230' : '60,70,40'},0.25)`
-    g.beginPath()
-    g.moveTo(x, y)
-    g.lineTo(x + (rand() - 0.5) * 3, y - 3 - rand() * 5)
-    g.stroke()
-  }
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping
-  texture.anisotropy = 8
-  return texture
-}
-
-function createTerrain(groundY: number): THREE.Mesh {
-  const lush = new THREE.Color(0x5f8a2e)
-  const dry = new THREE.Color(0x8e9a48)
-  const deep = new THREE.Color(0x3f6424)
-  const range = new THREE.Color(0x5d6f86)
-  const geometry = polarGrid(
-    TERRAIN.radius,
-    150,
-    256,
-    (t) => t ** 2.2, // dense near the building, sparse at the horizon
-    (x, z, t, _a, c) => {
-      const h = terrainHeight(x, z, groundY)
-      const r = t * TERRAIN.radius
-      c.copy(lush).lerp(dry, smoothstep(fbm(x / 45, z / 45), 0.45, 0.75))
-      // lusher patches — kept faint: strong dark blotches read as shadows that aren't there
-      c.lerp(deep, smoothstep(fbm(x / 14 + 5, z / 14), 0.55, 0.8) * 0.25)
-      c.lerp(range, smoothstep(h - groundY, 15, 60) * smoothstep(r, 400, 900)) // rock and scrub on the far ridges
-      return h
-    },
-    1 / 3, // grass detail repeats every 3 m
-  )
-  const terrain = new THREE.Mesh(
-    geometry,
-    outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, map: grassDetailTexture(), roughness: 1 })),
-  )
-  terrain.name = 'terrain'
-  terrain.castShadow = true // hills shade the ground behind them
-  noRaycast(terrain)
-  return terrain
 }
 
 /** three curved blades from one root — one instance of the meadow */
@@ -308,10 +74,15 @@ function grassClump(): THREE.BufferGeometry {
   return clump
 }
 
-function createMeadow(groundY: number, keepClear: LandscapeOptions['keepClear']): THREE.InstancedMesh {
-  const COUNT = 36000
+/**
+ * Grass around the pavilion: a short mown lawn behind it (tall grass there
+ * would hide the valley from inside), a meadow at the sides and front with
+ * patches of taller grass.
+ */
+function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.InstancedMesh {
+  const COUNT = 38000
   const INNER = 2
-  const OUTER = TERRAIN.flat - 2
+  const OUTER = 44
   const mesh = new THREE.InstancedMesh(
     grassClump(),
     outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })),
@@ -326,24 +97,46 @@ function createMeadow(groundY: number, keepClear: LandscapeOptions['keepClear'])
   const up = new THREE.Vector3(0, 1, 0)
   const c = new THREE.Color()
   let n = 0
-  while (n < COUNT) {
+  for (let tries = 0; n < COUNT && tries < COUNT * 6; tries++) {
     const r = Math.sqrt(rand() * (OUTER * OUTER - INNER * INNER) + INNER * INNER)
     const a = rand() * Math.PI * 2
-    p.set(Math.cos(a) * r, groundY, Math.sin(a) * r)
+    p.set(Math.cos(a) * r, 0, Math.sin(a) * r)
     if (keepClear(p.x, p.z)) continue
+    // the lawn behind the pavilion, toward the view, is mown: no meadow grass there
+    if (p.z < -8) continue
     // thinner toward the edge, where the terrain's texture takes over
     if (rand() > 1 - 0.6 * smoothstep(r, OUTER * 0.6, OUTER)) continue
+    p.y = heightAt(p.x, p.z)
     q.setFromAxisAngle(up, rand() * Math.PI * 2)
-    const height = 0.3 + rand() * 0.45
+    // patches of taller, seeding grass
+    const tall = smoothstep(fbm(p.x / 9 + 3, p.z / 9, 2), 0.55, 0.7)
+    const height = 0.3 + rand() * 0.4 + tall * (0.5 + rand() * 0.4)
     s.set(0.8 + rand() * 0.5, height, 0.8 + rand() * 0.5)
     mesh.setMatrixAt(n, m.compose(p, q, s))
-    c.setHSL(0.24 + rand() * 0.04, 0.45 + rand() * 0.2, 0.25 + rand() * 0.08, THREE.SRGBColorSpace) // matched to the terrain's greens
+    c.setHSL(0.24 - tall * 0.05 + rand() * 0.04, 0.45 + rand() * 0.2, 0.25 + tall * 0.08 + rand() * 0.08, THREE.SRGBColorSpace)
     mesh.setColorAt(n, c)
     n++
   }
+  mesh.count = n
   mesh.computeBoundingSphere()
-  noRaycast(mesh)
-  return mesh
+  return noRaycast(mesh)
+}
+
+/** the lake: open water with long, slow ripples and a real (low-resolution) reflection */
+function createLake(opts: LandscapeOptions, hide: () => THREE.Object3D[]): WaterSurface {
+  const { lake, lakeLevel } = SITE
+  const lakeWater = createWater(new THREE.PlaneGeometry(lake.rx * 2.7, lake.rz * 2.9), {
+    sunDirection: opts.sunDirection,
+    hideWhileReflecting: hide,
+    scale: 22, // waves tens of metres long, not a pool's ripples
+    distortion: 0.004,
+    body: new THREE.Color().setRGB(0.02, 0.035, 0.045),
+    resolution: 0.5, // it's far away: half the reflection setting's resolution is plenty
+  })
+  lakeWater.mesh.name = 'lake'
+  // the plane runs under the shore; the terrain keeps clear of the water level (site.heightAt)
+  lakeWater.mesh.position.set(lake.x, lakeLevel, lake.z)
+  return lakeWater
 }
 
 export function createLandscape(opts: LandscapeOptions): Landscape {
@@ -352,21 +145,30 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
   const sky = createSky()
   const outdoor = new THREE.Group()
   outdoor.name = 'outdoor'
-  outdoor.add(createFuji(), createTerrain(opts.groundY), createMeadow(opts.groundY, opts.keepClear))
-  group.add(sky.mesh, outdoor)
-  // straight behind the car the view opens onto the mountain: no trees there
-  const towardFuji = (x: number, z: number) => z < -20 && Math.abs(Math.atan2(x, -z)) < 0.42
-  const farDetail: THREE.Object3D[] = []
+
+  const meadow = createMeadow(opts.keepClear)
+  const roadside = createRoadside()
+  outdoor.add(createTerrain(), createFujiMountain(), createRanges(), roadside.group, meadow)
+
+  const farDetail: THREE.Object3D[] = [...roadside.details]
+  // the lake can't show anything near the pavilion: skip it all in its mirror pass
+  const nearDetail: THREE.Object3D[] = [meadow, roadside.group]
+  const lake = createLake(opts, () => [...nearDetail, ...opts.hideFromLake()])
+  group.add(sky.mesh, outdoor, lake.mesh)
+
   const ready = createForest({
     seed: 5,
-    heightAt: (x, z) => terrainHeight(x, z, opts.groundY),
-    keepClear: (x, z) => opts.keepClear(x, z) || towardFuji(x, z) || Math.hypot(x, z) < 44,
+    heightAt,
+    density: forestDensity,
+    bushAllowed: (x, z) =>
+      !opts.keepClear(x, z) && !(z < -8 && inView(x, z)) && Math.abs(x) + Math.abs(z) > 20 && forestDensity(x, z) < 0.5,
   })
     .then(async (forest) => {
       outdoor.add(forest.group)
-      farDetail.push(...forest.far)
+      farDetail.push(...forest.mid, ...forest.far)
+      nearDetail.push(...forest.near, ...forest.mid, ...forest.bushes)
       await forest.ready
     })
     .catch((err: unknown) => console.error('[garage] forest failed', err))
-  return { group, outdoor, sky, farDetail, ready }
+  return { group, outdoor, sky, lake, farDetail, ready }
 }

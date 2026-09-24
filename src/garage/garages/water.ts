@@ -25,6 +25,8 @@ const WaterShader = {
     uDistortion: { value: 0.018 },
     /** ripple slope scale: 0 = glass */
     uChop: { value: 1 },
+    /** ripple size: 1 = a pool's, larger for open water */
+    uScale: { value: 1 },
   },
   vertexShader: /* glsl */ `
     uniform mat4 textureMatrix;
@@ -47,6 +49,7 @@ const WaterShader = {
     uniform vec3 uSunColor;
     uniform float uDistortion;
     uniform float uChop;
+    uniform float uScale;
     varying vec4 vUv;
     varying vec3 vWorld;
     #include <logdepthbuf_pars_fragment>
@@ -80,7 +83,7 @@ const WaterShader = {
 
     void main() {
       #include <logdepthbuf_fragment>
-      vec2 p = vWorld.xz;
+      vec2 p = vWorld.xz / uScale;
       // a breeze from one side: a few long swells and a scatter of short ripples
       vec2 slope = vec2( 0.0 );
       slope += wave( p, normalize( vec2( 0.8, 0.6 ) ), 3.1, 0.35, 0.006 );
@@ -131,6 +134,14 @@ export function createWater(
     sunDirection: THREE.Vector3
     /** objects to hide while the water's own mirror renders (other mirrors: rendering one inside another doubles the work) */
     hideWhileReflecting: () => THREE.Object3D[]
+    /** ripple size (1 = a pool's; a lake's waves are tens of times longer) */
+    scale?: number
+    /** how far ripples bend the reflection, in screen uv */
+    distortion?: number
+    /** the water's own colour where it isn't reflecting (linear) */
+    body?: THREE.Color
+    /** mirror resolution relative to the reflection setting (a distant lake needs less) */
+    resolution?: number
   },
 ): WaterSurface {
   const mesh = new Reflector(geometry, {
@@ -144,6 +155,9 @@ export function createWater(
   mesh.rotation.x = -Math.PI / 2
   const uniforms = (mesh.material as THREE.ShaderMaterial).uniforms
   uniforms.uSunDir.value.copy(opts.sunDirection).normalize()
+  uniforms.uScale.value = opts.scale ?? 1
+  if (opts.distortion !== undefined) uniforms.uDistortion.value = opts.distortion
+  if (opts.body) uniforms.uBody.value = opts.body.clone()
 
   const baseBeforeRender = mesh.onBeforeRender
   mesh.onBeforeRender = (...args) => {
@@ -164,7 +178,7 @@ export function createWater(
   let scale = 0.5
   const viewport = { width: 1, height: 1, pixelRatio: 1 }
   const size = () => {
-    const k = viewport.pixelRatio * Math.max(scale, 0.05)
+    const k = viewport.pixelRatio * Math.max(scale * (opts.resolution ?? 1), 0.05)
     mesh.getRenderTarget().setSize(Math.round(viewport.width * k), Math.round(viewport.height * k))
   }
 

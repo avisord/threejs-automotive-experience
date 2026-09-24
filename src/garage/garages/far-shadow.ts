@@ -19,11 +19,11 @@ export function createFarShadowLight(): THREE.DirectionalLight {
   light.name = 'far-shadow'
   light.castShadow = true
   light.shadow.mapSize.set(4096, 4096)
-  // the land reaches ~1.5 km out; 3.2 km across 4096 texels ≈ 0.8 m a texel — a tree crown is ten
-  Object.assign(light.shadow.camera, { left: -1600, right: 1600, top: 1600, bottom: -1600, near: 100, far: 6000 })
+  // the real-scale land reaches 3.3 km out; 6.8 km across 4096 texels ≈ 1.7 m a texel — a tree crown is several
+  Object.assign(light.shadow.camera, { left: -3400, right: 3400, top: 3400, bottom: -3400, near: 100, far: 12000 })
   light.shadow.camera.updateProjectionMatrix()
   light.shadow.bias = -0.0004
-  light.shadow.normalBias = 0.9 // coarse texels on long gentle slopes: push well clear of acne
+  light.shadow.normalBias = 1.8 // coarse texels on long gentle slopes: push well clear of acne
   light.shadow.radius = 2
   light.shadow.autoUpdate = false // re-rendered when the sun moves or the trees arrive
   return light
@@ -31,7 +31,7 @@ export function createFarShadowLight(): THREE.DirectionalLight {
 
 /** place the far light for a sun direction (the landscape is centred on the origin) */
 export function aimFarShadow(light: THREE.DirectionalLight, sunDirection: THREE.Vector3): void {
-  light.position.copy(sunDirection).multiplyScalar(3000)
+  light.position.copy(sunDirection).multiplyScalar(6000)
   light.shadow.needsUpdate = true
 }
 

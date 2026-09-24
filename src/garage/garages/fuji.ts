@@ -3,6 +3,7 @@ import { SURFACES, assembleRoom, box, boxUV, createFloor, glowMaterial, pbrMaps,
 import type { AtmosphereParams } from '../atmosphere-effect'
 import { aimFarShadow, createFarShadowLight } from './far-shadow'
 import { createLandscape } from './landscape'
+import { GROUND, SITE } from './site'
 import { sunDirection, sunLight, type SunPosition } from './sky'
 import { createWater } from './water'
 
@@ -11,8 +12,8 @@ const DECK = { w: 26, d: 22 }
 const ROOF_Y = 5.5
 /** skylight cut into the roof over the car (x × z) */
 const SKY = { w: 4, d: 9 }
-/** the grass around the deck */
-const GROUND_Y = -0.6
+/** the lawn around the deck (site.ts lays out the land) */
+const GROUND_Y = GROUND
 /** the reflecting pool in front of the open side (z extent past the deck) */
 const POOL = { d: 8, water: -0.28 }
 /**
@@ -23,10 +24,11 @@ const POOL = { d: 8, water: -0.28 }
 const DEFAULT_SUN: SunPosition = { azimuth: -100, elevation: 30 }
 
 /**
- * An open concrete-and-glass pavilion on grassland below Mount Fuji, under a
- * clear sky. A cast concrete wall on one side, floor-to-ceiling glass
- * on two others, the front open to a reflecting pool — and a cantilevered
- * roof slab with a skylight over the car. The world around it is landscape.ts.
+ * An open concrete-and-glass pavilion on a lawn terrace above a lake, with
+ * Mount Fuji across the valley. A cast concrete wall on one side, floor-to-
+ * ceiling glass on two others, the front open to a reflecting pool — and a
+ * cantilevered roof slab with a skylight over the car. The world around it
+ * is landscape.ts (laid out in site.ts).
  */
 function createFujiPavilion(): Room {
   const { w, d } = DECK
@@ -36,9 +38,12 @@ function createFujiPavilion(): Room {
   // ─── the world outside ───────────────────────────────────────────────────
   const inPool = (x: number, z: number) => Math.abs(x) < w / 2 + 0.4 && z > d / 2 - 0.1 && z < d / 2 + POOL.d + 0.5
   const underDeck = (x: number, z: number) => Math.abs(x) < w / 2 + 0.15 && Math.abs(z) < d / 2 + 0.15
+  /** the pavilion itself: nothing the lake's mirror could show (filled once it's built) */
+  const pavilionParts: THREE.Object3D[] = []
   const landscape = createLandscape({
-    groundY: GROUND_Y,
     keepClear: (x, z) => underDeck(x, z) || inPool(x, z),
+    sunDirection: sunDirection(DEFAULT_SUN),
+    hideFromLake: () => pavilionParts,
   })
   group.add(landscape.group)
 
@@ -82,12 +87,13 @@ function createFujiPavilion(): Room {
   const water = createWater(new THREE.PlaneGeometry(w, POOL.d), {
     sunDirection: sunDirection(DEFAULT_SUN),
     // the deck's own mirror would render again inside this one; far forests are a few pixels in the pool
-    hideWhileReflecting: () => [floor.reflector, ...landscape.farDetail],
+    // (and no mirror renders another inside its own pass: that would double the work)
+    hideWhileReflecting: () => [floor.reflector, landscape.lake.mesh, ...landscape.farDetail],
   })
   water.mesh.position.set(0, POOL.water, d / 2 + POOL.d / 2)
   group.add(water.mesh)
-  // …and the other way round: the deck's mirror doesn't need to see the pool below its edge
-  floor.floorLayers.push(water.mesh)
+  // …and the other way round: the deck's mirror doesn't need the pool below its edge, nor the lake
+  floor.floorLayers.push(water.mesh, landscape.lake.mesh)
   const rimH = POOL.water - GROUND_Y + 0.06
   cast([w + 0.6, rimH, 0.3], concrete, [0, GROUND_Y + rimH / 2, d / 2 + POOL.d + 0.15])
   for (const side of [-1, 1]) cast([0.3, rimH, POOL.d], concrete, [side * (w / 2 + 0.15), GROUND_Y + rimH / 2, d / 2 + POOL.d / 2])
@@ -203,15 +209,20 @@ function createFujiPavilion(): Room {
     const mesh = obj as THREE.Mesh
     if (mesh.isMesh && [concrete, panels, darkSteel].includes(mesh.material as THREE.MeshStandardMaterial)) mesh.castShadow = true
   }
+  pavilionParts.push(...group.children.filter((o) => o !== landscape.group && !(o as THREE.Light).isLight))
 
   // the air: distance haze and light shafts, kept in step with the sun (atmosphere-effect.ts)
   const atmosphere: AtmosphereParams = {
     sunDirection: new THREE.Vector3(),
     sunColor: new THREE.Color(),
     airColor: new THREE.Color(),
-    density: 0.00028, // a clear day: the far ridges soften, the mountain stays crisp
-    falloff: 0.004, // thins out over a few hundred metres of height
-    groundY: GROUND_Y,
+    // A clear day: ~60 km visibility at the lake (extinction 3.9 / 60 km), thinning with a ~1.2 km
+    // scale height. The road at 300 m is crisp, the far shore softens, the ranges step back ridge
+    // by ridge, and Fuji at 17 km is veiled but its snow still stands out.
+    density: 6.5e-5,
+    falloff: 1 / 1200,
+    groundY: SITE.lakeLevel,
+    compress: SITE.compress, // far layers are drawn closer than they are (site.ts): haze them for their real distance
     shaftLight: sun,
     shaftDensity: 0.006, // clear open air: a faint glow toward the sun
     shaftRange: 40,
@@ -238,6 +249,7 @@ function createFujiPavilion(): Room {
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
     skyLight.intensity = 1 + 3 * day
     water.setSunDirection(dir)
+    landscape.lake.setSunDirection(dir)
     atmosphere.sunDirection.copy(dir)
     atmosphere.sunColor.copy(light.color).multiplyScalar(light.intensity * 0.35)
     atmosphere.airColor.copy(lowAir).lerp(noonAir, day).multiplyScalar(0.35 + 0.65 * day)
@@ -262,12 +274,17 @@ function createFujiPavilion(): Room {
     resize(width, height, pixelRatio) {
       room.resize(width, height, pixelRatio)
       water.resize(width, height, pixelRatio)
+      landscape.lake.resize(width, height, pixelRatio)
     },
     setReflectionScale(scale) {
       room.setReflectionScale(scale)
       water.setReflectionScale(scale)
+      landscape.lake.setReflectionScale(scale)
     },
-    update: water.update,
+    update(dt) {
+      water.update(dt)
+      landscape.lake.update(dt)
+    },
     outdoor: {
       root: landscape.outdoor,
       probe: new THREE.Vector3(0, 30, 70), // out front, above the roof: open sky, the land below
@@ -288,7 +305,7 @@ function createFujiPavilion(): Room {
 export const fujiPavilion: GarageDef = {
   id: 'fuji',
   name: 'Fuji Pavilion',
-  tag: 'Concrete and glass on open grassland, Mount Fuji under a clear sky',
+  tag: 'Concrete and glass on a terrace above a lake, Mount Fuji across the valley',
   palette: ['#2f5f9e', '#a7bdd8', '#f4f6fa', '#5f8a2e'],
   look: 'natural',
   create: createFujiPavilion,
