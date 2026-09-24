@@ -86,14 +86,15 @@ function createFujiPavilion(): Room {
     normalScale: new THREE.Vector2(0.6, 0.6),
     metalness: 0.02,
     // a wet-look polish: the mirror below shows through strongly — the car, the bright windows
-    opacity: 0.55,
+    opacity: 0.6,
     // the mirror under it does the reflections; the surface's own sheen of the room's environment
     // (the whole bright sky through the glass) turned the floor navy blue
     envMapIntensity: 0.05,
   })
-  // the mirror at ~45%: from eye height it mostly shows the sky past the roof edge, which at full
-  // strength turned the floor blue; the car and the window frames still read clearly in it
-  const floor = createFloor(group, { geometry: deck, tint: 0x747474, blur: 0.005, lod: 1, surface: floorSurface })
+  // A Fresnel mirror: faint seen from above, strong toward the glass at a grazing angle — the car
+  // and the windows stand in it, but the bright sky past the roof edge doesn't turn the floor blue
+  floorSurface.name = 'fuji-floor'
+  const floor = createFloor(group, { geometry: deck, tint: 0xc8c8c8, fresnel: 0.05, blur: 0.005, lod: 1, surface: floorSurface })
   // sunlight falling in through the glass lies on the floor in patches, with the car's shadow
   group.traverse((o) => {
     if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === floorSurface) o.receiveShadow = true

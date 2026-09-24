@@ -192,6 +192,20 @@ function captureEnvironment(): void {
     position: new THREE.Vector3(0, 1.2, 0),
   })
   scene.environment = environmentTarget.texture
+  // A material's envMapIntensity only counts when it has its own envMap (three uses
+  // scene.environmentIntensity for scene.environment): room materials that ask for a weaker or
+  // stronger reflection — the Fuji deck's polished floor — get the map handed over explicitly.
+  room.group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const standard = m as THREE.MeshStandardMaterial
+      if (standard.isMeshStandardMaterial && standard.envMapIntensity !== 1 && (!standard.envMap || standard.userData.roomEnv)) {
+        standard.envMap = environmentTarget!.texture
+        standard.userData.roomEnv = true
+      }
+    }
+  })
   // Open-air rooms: the interior capture sees a roof overhead, so the land
   // outside would be lit by concrete instead of sky. It gets its own map,
   // captured out in the open.

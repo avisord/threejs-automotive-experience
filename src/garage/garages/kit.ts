@@ -291,14 +291,22 @@ const BlurredReflectorShader = {
     blur: { value: 0.012 },
     /** mip level sampled — each step halves the resolution */
     lod: { value: 1.5 },
+    /**
+     * Reflectance looking straight down, as a fraction of `color` (1 = no Fresnel). A polished
+     * floor reflects a few percent seen from above and most of the light at a grazing angle —
+     * without it, a floor seen from a standing height mirrored the whole bright sky past the roof.
+     */
+    fresnel: { value: 1 },
   },
   vertexShader: /* glsl */ `
     uniform mat4 textureMatrix;
     varying vec4 vUv;
+    varying vec3 vWorld;
     #include <common>
     #include <logdepthbuf_pars_vertex>
     void main() {
       vUv = textureMatrix * vec4( position, 1.0 );
+      vWorld = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
       #include <logdepthbuf_vertex>
     }`,
@@ -307,7 +315,9 @@ const BlurredReflectorShader = {
     uniform sampler2D tDiffuse;
     uniform float blur;
     uniform float lod;
+    uniform float fresnel;
     varying vec4 vUv;
+    varying vec3 vWorld;
     #include <logdepthbuf_pars_fragment>
     void main() {
       #include <logdepthbuf_fragment>
@@ -320,7 +330,10 @@ const BlurredReflectorShader = {
         vec2 offset = vec2( cos( a ), sin( a ) ) * sqrt( fi / float( TAPS ) ) * blur;
         sum += textureLod( tDiffuse, uv + offset, lod ).rgb;
       }
-      gl_FragColor = vec4( color * sum / float( TAPS ), 1.0 );
+      // Schlick, from the reflectance straight down to 1 at grazing (the floor's normal is +y)
+      float cosV = clamp( normalize( cameraPosition - vWorld ).y, 0.0, 1.0 );
+      float f = fresnel + ( 1.0 - fresnel ) * pow( 1.0 - cosV, 5.0 );
+      gl_FragColor = vec4( color * f * sum / float( TAPS ), 1.0 );
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`,
@@ -334,6 +347,8 @@ export interface FloorOptions {
   /** how soft the reflection is, in screen uv (0.012 = polished epoxy, lower = wet) */
   blur?: number
   lod?: number
+  /** reflectance seen straight down, relative to `tint` (default 1: no Fresnel falloff) */
+  fresnel?: number
   /** the surface laid over the mirror; its opacity sets how much reflection shows through */
   surface: THREE.MeshStandardMaterial
 }
@@ -357,6 +372,7 @@ export function createFloor(parent: THREE.Object3D, opts: FloorOptions): Floor {
   const uniforms = (reflector.material as THREE.ShaderMaterial).uniforms
   uniforms.blur.value = opts.blur ?? 0.012
   uniforms.lod.value = opts.lod ?? 1.5
+  uniforms.fresnel.value = opts.fresnel ?? 1
   reflector.rotation.x = -Math.PI / 2
   // the blur samples a mip level, so the mirror target needs a mip chain
   const mirrorTexture = reflector.getRenderTarget().texture
