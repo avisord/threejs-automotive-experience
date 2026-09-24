@@ -1,12 +1,12 @@
 import * as THREE from 'three'
 import { noRaycast, seeded } from './landform'
-import { SITE, forestDensity, heightAt, lakeShape, onRoad, roadY, roadZ } from './site'
+import { SITE, heightAt, roadY, roadZ } from './site'
 import { outdoorMaterial } from './terrain'
 
 /**
  * The human-scale things in the valley — a winding two-lane road with its
  * markings, utility poles and sagging wires, a guardrail, a couple of signs,
- * a few cars, and houses: a village by the lake and farmhouses along the road.
+ * and a few cars. (The houses are town.ts.)
  * They're small because they're far away; that's their job — a car you can
  * barely make out on a road half a kilometre off tells you how big the
  * mountain behind it must be.
@@ -246,55 +246,12 @@ function createCars(pts: RoadPoint[]): THREE.Object3D[] {
   return [bodies, cabins].map(noRaycast)
 }
 
-/** houses: a village by the lake shore and farmhouses along the road */
-function createHouses(): THREE.Object3D[] {
-  const rand = seeded(47)
-  const spots: { x: number; z: number; w: number; d: number; h: number; turn: number }[] = []
-  const tryPlace = (x: number, z: number) => {
-    if (lakeShape(x, z) < 1.12 || onRoad(x, z) > 0 || Math.abs(z - roadZ(x)) < 18) return
-    if (forestDensity(x, z) > 0.5) return
-    if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < 24)) return
-    spots.push({ x, z, w: 8 + rand() * 5, d: 6 + rand() * 4, h: 4.2 + rand() * 1.8, turn: rand() * Math.PI })
-  }
-  // the village: a loose cluster above the lake's near shore, a little off the line to the mountain
-  for (let i = 0; i < 40 && spots.length < 12; i++) tryPlace(-520 + (rand() - 0.5) * 380, -1060 + (rand() - 0.5) * 160)
-  // farmhouses along the road, both sides of the valley
-  for (let i = 0; i < 30 && spots.length < 20; i++) {
-    const x = (rand() < 0.5 ? -1 : 1) * (380 + rand() * 1100)
-    tryPlace(x, roadZ(x) - 40 - rand() * 160)
-  }
-  const walls = outdoorMaterial(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 }))
-  const tiles = outdoorMaterial(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.1 }))
-  const body = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), walls, spots.length)
-  // a hipped roof: a four-sided pyramid turned square to the walls, overhanging them
-  const roof = new THREE.InstancedMesh(new THREE.ConeGeometry(Math.SQRT1_2 * 1.2, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0), tiles, spots.length)
-  const m = new THREE.Matrix4()
-  const q = new THREE.Quaternion()
-  const up = new THREE.Vector3(0, 1, 0)
-  const wallColors = [0xe8e2d6, 0xd9d4ca, 0xf0ede6, 0xc9bca6].map((c) => new THREE.Color().setHex(c, THREE.SRGBColorSpace))
-  const roofColors = [0x3a4250, 0x2f3238, 0x4a3b33, 0x444c58].map((c) => new THREE.Color().setHex(c, THREE.SRGBColorSpace))
-  spots.forEach((s, i) => {
-    const y = heightAt(s.x, s.z) - 0.3
-    q.setFromAxisAngle(up, s.turn)
-    body.setMatrixAt(i, m.compose(new THREE.Vector3(s.x, y, s.z), q, new THREE.Vector3(s.w, s.h, s.d)))
-    roof.setMatrixAt(i, m.compose(new THREE.Vector3(s.x, y + s.h, s.z), q, new THREE.Vector3(s.w, 2.2 + rand(), s.d)))
-    body.setColorAt(i, wallColors[i % wallColors.length])
-    roof.setColorAt(i, roofColors[(i * 7) % roofColors.length])
-  })
-  for (const o of [body, roof]) {
-    o.castShadow = true
-    o.receiveShadow = true
-    o.computeBoundingSphere()
-  }
-  return [body, roof].map(noRaycast)
-}
-
 export function createRoadside(): { group: THREE.Group; ground: THREE.Object3D; details: THREE.Object3D[] } {
   const group = new THREE.Group()
   group.name = 'roadside'
   const pts = roadPoints()
   const road = createRoad(pts)
-  const details = [...createPoles(pts), ...createGuardrail(pts), createSigns(pts), ...createCars(pts), ...createHouses()]
+  const details = [...createPoles(pts), ...createGuardrail(pts), createSigns(pts), ...createCars(pts)]
   group.add(road, ...details)
   return { group, ground: road, details }
 }

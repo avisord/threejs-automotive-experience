@@ -270,6 +270,7 @@ function createFujiPavilion(): Room {
     atmosphere.airColor.copy(noonAir).lerp(lowAir, 0.35 * (1 - day)).multiplyScalar(0.4 + 0.6 * day)
     // the lake mirrors hills kilometres off: give their reflection the air they're seen through
     landscape.lake.setHaze(atmosphere.airColor, 0.35)
+    landscape.setEvening(1 - THREE.MathUtils.smoothstep(sunAt.elevation, 4, 22))
   }
   applySun(sunAt)
 

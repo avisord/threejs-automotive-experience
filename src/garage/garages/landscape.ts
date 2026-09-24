@@ -45,6 +45,8 @@ export interface Landscape {
   farDetail: THREE.Object3D[]
   /** resolves once the trees and their textures are in (never rejects) */
   ready: Promise<void>
+  /** 0 by day … 1 at dusk: lit windows in the towns */
+  setEvening(amount: number): void
 }
 
 /**
@@ -174,9 +176,9 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
   const roadside = createRoadside()
   const canopy = createCanopy()
   const town = createTown()
-  outdoor.add(createTerrain(), canopy, town, createFujiMountain(), createRanges(), roadside.group, meadow)
+  outdoor.add(createTerrain(), canopy, town.group, createFujiMountain(), createRanges(), roadside.group, meadow)
 
-  const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town]
+  const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town.group]
   // the lake can't show anything near the pavilion: skip it all in its mirror pass
   const nearDetail: THREE.Object3D[] = [meadow, roadside.group]
   const lake = createLake(opts, () => [...nearDetail, ...opts.hideFromLake()])
@@ -198,5 +200,5 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
       await forest.ready
     })
     .catch((err: unknown) => console.error('[garage] forest failed', err))
-  return { group, outdoor, sky, lake, farDetail, ready }
+  return { group, outdoor, sky, lake, farDetail, ready, setEvening: town.setEvening }
 }
