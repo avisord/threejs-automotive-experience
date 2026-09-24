@@ -13,7 +13,7 @@ import { GROUND, heightAt, roadZ } from './site'
  */
 
 /** the pad the car stands on, metres */
-const PAD = { radius: 9 }
+const PAD = { radius: 6.5 }
 /** the track: width, and its course from the pad to the road (x, z; the end is put on the road) */
 const TRACK = {
   width: 3.4,
@@ -137,6 +137,23 @@ function pebbleGeometry(seed: number): THREE.BufferGeometry {
   return g
 }
 
+/**
+ * The photographed pebbles are dark and wet-looking: brighten them to sun-dried
+ * river stone (the albedo is scaled past 1 — the photo's mean is only ~0.08) and
+ * lift the dark gaps between stones, so the pad reads pale, not as a black bed.
+ */
+function dryPebbles(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+  material.color.setRGB(2.1, 2.0, 1.85)
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      '#include <map_fragment>\n\tdiffuseColor.rgb = pow( diffuseColor.rgb, vec3( 0.75 ) ) * 0.78;',
+    )
+  }
+  material.customProgramCacheKey = () => 'dry-pebbles'
+  return material
+}
+
 function createFujiMeadow(): Room {
   const group = new THREE.Group()
   group.name = 'fuji-meadow'
@@ -152,24 +169,22 @@ function createFujiMeadow(): Room {
 
   const maps = pbrMaps(SURFACES.riverPebbles)
   // ─── the pad ─────────────────────────────────────────────────────────────
-  // the photographed pebbles are dark and wet-looking: lighten them to sun-dried river stone
-  const gravel = new THREE.MeshStandardMaterial({ ...maps.maps, color: 0xfff8ee, roughness: 1, normalScale: new THREE.Vector2(0.6, 0.6) })
+  const gravel = dryPebbles(new THREE.MeshStandardMaterial({ ...maps.maps, roughness: 1, normalScale: new THREE.Vector2(0.5, 0.5) }))
   const pad = new THREE.Mesh(padGeometry(), gravel)
   pad.receiveShadow = true
   pad.name = 'pebble-pad'
   group.add(pad)
 
   // ─── the track, down to the road ─────────────────────────────────────────
-  const trackMaterial = new THREE.MeshStandardMaterial({
+  const trackMaterial = dryPebbles(new THREE.MeshStandardMaterial({
     ...maps.maps,
-    color: 0xfff8ee,
     vertexColors: true,
     roughness: 1,
-    normalScale: new THREE.Vector2(0.6, 0.6),
+    normalScale: new THREE.Vector2(0.5, 0.5),
     polygonOffset: true, // it lies on the terrain: win the depth test where they meet
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
-  })
+  }))
   const track = new THREE.Mesh(trackGeometry(line), trackMaterial)
   track.receiveShadow = true
   track.name = 'pebble-track'
@@ -195,7 +210,7 @@ function createFujiMeadow(): Room {
     const s = open ? 0.0001 : 0.3 + rand() * 0.12
     q.setFromEuler(e.set((rand() - 0.5) * 0.3, -a + (rand() - 0.5) * 0.4, (rand() - 0.5) * 0.3))
     stones.setMatrixAt(i, m.compose(new THREE.Vector3(x, 0.02, z), q, new THREE.Vector3(s * 1.1, s * 0.9, s * 0.8)))
-    stones.setColorAt(i, c.setHSL(0.08, 0.05 + rand() * 0.05, 0.3 + rand() * 0.2, THREE.SRGBColorSpace))
+    stones.setColorAt(i, c.setHSL(0.08, 0.05 + rand() * 0.05, 0.48 + rand() * 0.2, THREE.SRGBColorSpace))
   }
   stones.castShadow = true
   stones.receiveShadow = true
@@ -228,7 +243,7 @@ function createFujiMeadow(): Room {
     const s = 0.025 + rand() ** 2 * 0.06
     q.setFromEuler(e.set((rand() - 0.5) * 0.4, rand() * Math.PI * 2, (rand() - 0.5) * 0.4))
     pebbles.setMatrixAt(n, m.compose(new THREE.Vector3(x, y + s * 0.15, z), q, new THREE.Vector3(s, s, s)))
-    pebbles.setColorAt(n, c.setHSL(0.08 + rand() * 0.04, 0.08 + rand() * 0.1, 0.35 + rand() * 0.35, THREE.SRGBColorSpace))
+    pebbles.setColorAt(n, c.setHSL(0.08 + rand() * 0.04, 0.08 + rand() * 0.1, 0.5 + rand() * 0.3, THREE.SRGBColorSpace))
     n++
   }
   pebbles.count = n
