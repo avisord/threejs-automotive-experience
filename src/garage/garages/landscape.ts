@@ -131,7 +131,7 @@ function createLake(opts: LandscapeOptions, hide: () => THREE.Object3D[]): Water
     sunDirection: opts.sunDirection,
     hideWhileReflecting: hide,
     scale: 22, // waves tens of metres long, not a pool's ripples
-    distortion: 0.004,
+    distortion: 0.0015, // a calm lake: soft reflections, not streaks
     body: new THREE.Color().setRGB(0.02, 0.035, 0.045),
     resolution: 0.5, // it's far away: half the reflection setting's resolution is plenty
   })

@@ -27,6 +27,11 @@ const WaterShader = {
     uChop: { value: 1 },
     /** ripple size: 1 = a pool's, larger for open water */
     uScale: { value: 1 },
+    /**
+     * Air over what the mirror shows (rgb, amount): the reflection pass has no aerial
+     * perspective, so a lake would mirror far hills unhazed — darker than the hills themselves.
+     */
+    uHaze: { value: new THREE.Vector4(0, 0, 0, 0) },
   },
   vertexShader: /* glsl */ `
     uniform mat4 textureMatrix;
@@ -50,6 +55,7 @@ const WaterShader = {
     uniform float uDistortion;
     uniform float uChop;
     uniform float uScale;
+    uniform vec4 uHaze;
     varying vec4 vUv;
     varying vec3 vWorld;
     #include <logdepthbuf_pars_fragment>
@@ -105,6 +111,7 @@ const WaterShader = {
       vec2 uv = vUv.xy / vUv.w;
       uv += n.xz * uDistortion / max( vUv.w * 0.25, 1.0 );
       vec3 reflection = texture2D( tDiffuse, uv ).rgb * color;
+      reflection = mix( reflection, uHaze.rgb, uHaze.a );
 
       // the sun caught on the ripples
       vec3 r = reflect( -toEye, n );
@@ -126,6 +133,8 @@ export interface WaterSurface {
   setReflectionScale(scale: number): void
   /** where the glint comes from */
   setSunDirection(direction: THREE.Vector3): void
+  /** the air laid over the mirrored image (see uHaze) */
+  setHaze(color: THREE.Color, amount: number): void
 }
 
 export function createWater(
@@ -189,6 +198,9 @@ export function createWater(
     },
     setSunDirection(direction) {
       uniforms.uSunDir.value.copy(direction).normalize()
+    },
+    setHaze(color, amount) {
+      uniforms.uHaze.value.set(color.r, color.g, color.b, amount)
     },
     resize(width, height, pixelRatio) {
       Object.assign(viewport, { width, height, pixelRatio })

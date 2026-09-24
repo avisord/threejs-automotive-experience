@@ -216,10 +216,10 @@ function createFujiPavilion(): Room {
     sunDirection: new THREE.Vector3(),
     sunColor: new THREE.Color(),
     airColor: new THREE.Color(),
-    // A clear day: ~60 km visibility at the lake (extinction 3.9 / 60 km), thinning with a ~1.2 km
-    // scale height. The road at 300 m is crisp, the far shore softens, the ranges step back ridge
-    // by ridge, and Fuji at 17 km is veiled but its snow still stands out.
-    density: 6.5e-5,
+    // A clear day: ~100 km visibility at the lake (extinction 3.9 / 100 km), thinning with a ~1.2 km
+    // scale height. The road is crisp, the far shore softens, the ranges step back ridge by ridge,
+    // and Fuji at 17 km is veiled but its dark lower slopes still stand apart from the snow.
+    density: 4e-5,
     falloff: 1 / 1200,
     groundY: SITE.lakeLevel,
     compress: SITE.compress, // far layers are drawn closer than they are (site.ts): haze them for their real distance
@@ -253,6 +253,8 @@ function createFujiPavilion(): Room {
     atmosphere.sunDirection.copy(dir)
     atmosphere.sunColor.copy(light.color).multiplyScalar(light.intensity * 0.35)
     atmosphere.airColor.copy(lowAir).lerp(noonAir, day).multiplyScalar(0.35 + 0.65 * day)
+    // the lake mirrors hills kilometres off: give their reflection the air they're seen through
+    landscape.lake.setHaze(atmosphere.airColor, 0.35)
   }
   applySun(sunAt)
 

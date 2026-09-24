@@ -11,7 +11,7 @@ import { fbm, lerp, noise, ridged, smoothstep } from './landform'
  *   → the land falls away behind it (a steep bank, then a long gentle slope)
  *   → a winding rural road across the valley (~480 m)
  *   → rolling ground, farms and a village, down to
- *   → the lake (~0.95–3.05 km), then its wooded far shore (~3.2 km)
+ *   → the lake (~1–2.9 km), then its wooded far shore rising gently to 3.3 km
  *   → foothill ranges (5–12 km) → Mount Fuji (~17 km)
  *
  * The pavilion stands ~50 m above the lake, a few metres from the edge of
@@ -30,7 +30,7 @@ export const SITE = {
   terraceEdge: -16,
   road: { z: -480, sway: 45, extent: 2500, width: 7 },
   lakeLevel: GROUND - 50,
-  lake: { x: 0, z: -2000, rx: 2000, rz: 1050 },
+  lake: { x: 0, z: -1950, rx: 2000, rz: 950 },
   /** real-scale terrain reaches this far; beyond, far layers are distance-compressed */
   realRadius: 3300,
   /**
@@ -136,7 +136,7 @@ export function roadZ(x: number): number {
 /** flanking ranges left and right of the valley, 0 in the valley, 1 on the ridges */
 const flank = (x: number) => smoothstep(Math.abs(x), 900, 2600)
 /** the far shore rising beyond the lake */
-const farShore = (z: number) => smoothstep(-z, 2550, 3200)
+const farShore = (z: number) => smoothstep(-z, 2700, 3300)
 /** rising ground in front of the pavilion (+z) */
 const behind = (z: number) => smoothstep(z, 150, 1400)
 

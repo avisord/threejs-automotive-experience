@@ -19,46 +19,58 @@ const FUJI = {
   height: 2950,
   /** radius of the modelled cone; beyond it the skirts are below the foothills */
   radius: 7000,
-  crater: 0.035,
+  /** the crater's rim, as a fraction of the radius (~800 m across: the top reads flat, not a point) */
+  crater: 0.06,
 }
 
 export function createFujiMountain(): THREE.Mesh {
   const { height: H, radius: R, crater } = FUJI
   const snow = new THREE.Color().setHex(0xf2f4f8, THREE.SRGBColorSpace)
+  const oldSnow = new THREE.Color().setHex(0xd4d8de, THREE.SRGBColorSpace)
   const scoria = new THREE.Color().setHex(0x4a3834, THREE.SRGBColorSpace)
-  const ash = new THREE.Color().setHex(0x383234, THREE.SRGBColorSpace)
-  const forest = new THREE.Color().setHex(0x243a22, THREE.SRGBColorSpace)
-  const plain = new THREE.Color().setHex(0x4d6a34, THREE.SRGBColorSpace)
+  const ash = new THREE.Color().setHex(0x3a3638, THREE.SRGBColorSpace)
+  const forest = new THREE.Color().setHex(0x223a24, THREE.SRGBColorSpace)
+  const plain = new THREE.Color().setHex(0x4a6234, THREE.SRGBColorSpace)
   const geometry = polarGrid(
     R,
-    220,
-    640,
-    (t) => t ** 1.25, // rings bunch toward the summit, where the detail is
+    240,
+    720,
+    (t) => t ** 1.3, // rings bunch toward the summit, where the detail is
     (x, z, t, a, c) => {
-      const ca = Math.cos(a)
-      const sa = Math.sin(a)
-      // the profile: steep near the top, easing out into broad skirts
+      // gullies wander a little as they run down, and aren't evenly spaced: warp the angle
+      const w = a + 0.22 * (fbm(Math.cos(a) * 2 + t * 2.5, Math.sin(a) * 2 - t * 1.5, 3) - 0.5) + 0.05 * Math.sin(a * 3 + t * 6)
+      const ca = Math.cos(w)
+      const sa = Math.sin(w)
+      // the profile: a broad, slightly uneven rim, a steep concave upper cone, broad skirts
       const u = Math.max(0, (t - crater) / (1 - crater))
-      let h = t < crater ? H - 80 * (1 - (t / crater) ** 2) + 20 : H * (1 - u) ** 1.6
+      const rim = H + 25 * (noise(ca * 9 + 3, sa * 9) - 0.5) + 30 * smoothstep(Math.sin(a - 2.2), 0.7, 1) // the highest point on one side
+      let h = t < crater ? rim - 110 * (1 - (t / crater) ** 3) : H * (1 - u) ** 1.55 + (rim - H) * (1 - smoothstep(u, 0, 0.04))
       // a slight asymmetry — no mountain is a lathe-turned cone
       h *= 1 + 0.035 * Math.sin(a + 0.8) * smoothstep(t, 0.1, 0.6)
-      // erosion channels: many radial gullies, deepest mid-slope, finer ones between
-      const envelope = Math.sin(Math.PI * Math.min(1, t * 1.5)) ** 1.3
-      const gullies = ridged(ca * 11 + t * 3, sa * 11 + t * 3, 3)
-      const rills = ridged(ca * 34 + t * 9, sa * 34 + t * 9, 2)
-      h += envelope * (95 * (gullies - 0.55) + 30 * (rills - 0.5))
+      // erosion: a few big ravines, many smaller gullies, and fine rills — irregular in depth
+      // (shallow under the rim, where the snow fills them)
+      const envelope = smoothstep(t, crater, 0.4) * (1 - smoothstep(t, 0.6, 0.95))
+      const strength = 0.4 + 0.9 * fbm(ca * 3 + 11, sa * 3 - 4, 2) // some sectors are cut deeper than others
+      const ravines = smoothstep(ridged(ca * 4.2 + 5, sa * 4.2 + t * 1.5, 2), 0.7, 1)
+      const gullies = ridged(ca * 13 + t * 2, sa * 13 + t * 2, 3)
+      const rills = ridged(ca * 41 + t * 7, sa * 41 + t * 7, 2)
+      h += envelope * (-150 * ravines * strength + 70 * strength * (gullies - 0.55) + 22 * (rills - 0.5))
       // lumps and old lava flows on the lower flanks
       h += smoothstep(t, 0.35, 1) * 120 * (fbm(x / 1500, z / 1500) - 0.5)
 
-      // snow above ~1,700 m over the lake, reaching down the gullies
-      const snowLine = 1700 - 260 * (gullies - 0.5) - 120 * (noise(ca * 4 + 2, sa * 4) - 0.5)
-      const snowy = smoothstep(h, snowLine - 50, snowLine + 30)
+      // snow above ~1,550 m over the lake: it lingers far down the gullies in long fingers and
+      // melts off the ridges between them first
+      const finger = fbm(ca * 6 + 2, sa * 6 - 1, 3)
+      const snowLine = 1550 - 380 * smoothstep(finger, 0.45, 0.75) - 220 * (gullies - 0.5) - 260 * ravines + 180 * (rills - 0.5) * smoothstep(t, 0.2, 0.5)
+      const snowy = smoothstep(h, snowLine - 40, snowLine + 60)
       // bare slopes: reddish scoria and grey ash in streaks
       c.copy(scoria).lerp(ash, fbm(ca * 20 + t * 6, sa * 20 + t * 6, 2))
       // the forest belt below ~900 m, farmland at the very foot
       c.lerp(forest, 1 - smoothstep(h, 700, 1000))
       c.lerp(plain, 1 - smoothstep(h, 120, 300))
-      c.lerp(snow, snowy)
+      // snow: fresh up high, greyer and thinner near its edge
+      const fresh = smoothstep(h, snowLine + 60, snowLine + 500)
+      c.lerp(oldSnow.clone().lerp(snow, fresh), snowy)
       return h
     },
   )

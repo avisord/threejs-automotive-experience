@@ -73,9 +73,11 @@ export function createTerrain(): THREE.Mesh {
       c.lerp(gravel, smoothstep(onRoad(x, z), 0.05, 0.4) * 0.8)
       // darker ground under woodland
       if (r > 60 && r < SITE.realRadius) c.lerp(woodland, smoothstep(forestDensity(x, z), 0.1, 0.6) * 0.7)
-      // shore and lake bed
+      // the far shore and the valley's flanks, seen across the lake: wooded hillsides
       const lake = lakeShape(x, z)
-      c.lerp(shore, 1 - smoothstep(lake, 1.0, 1.06))
+      c.lerp(woodland, smoothstep(r, 1800, 2600) * smoothstep(lake, 1.03, 1.12) * (0.55 + 0.4 * fbm(x / 250 + 7, z / 250)))
+      // a thin shore and the lake bed
+      c.lerp(shore, 1 - smoothstep(lake, 1.0, 1.025))
       c.lerp(lakeBed, 1 - smoothstep(lake, 0.9, 1.0))
       return h
     },
