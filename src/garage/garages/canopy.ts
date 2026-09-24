@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { fbm, noRaycast, noise, polarGrid, seeded, smoothstep } from './landform'
-import { SITE, forestDensity, heightAt } from './site'
+import { SITE, heightAt } from './site'
 import { TERRAIN_GRID, outdoorMaterial } from './terrain'
 
 /**
@@ -15,7 +15,7 @@ import { TERRAIN_GRID, outdoorMaterial } from './terrain'
  */
 
 /** crown height over the ground, metres */
-const CANOPY = { height: 16, inner: 600 }
+const CANOPY = { height: 14, inner: 900 }
 
 /** dark crowns with lit tops, in metres-sized blobs — multiplied over the shell's vertex colours */
 function crownTexture(): THREE.CanvasTexture {
@@ -50,7 +50,11 @@ function crownTexture(): THREE.CanvasTexture {
   return texture
 }
 
-export function createCanopy(): THREE.Mesh {
+/**
+ * `cover` is the planned vegetation's canopy (vegetation-layout.ts): the shell
+ * is raised only where trees actually stand, a little wider than their crowns.
+ */
+export function createCanopy(cover: (x: number, z: number) => number): THREE.Mesh {
   const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace)
   const cedar = srgb(0x2b4629)
   const pine = srgb(0x385a31)
@@ -67,11 +71,13 @@ export function createCanopy(): THREE.Mesh {
       const r = Math.hypot(x, z)
       const ground = heightAt(x, z)
       // thick woods only: open stands stay individual trees; the near valley is left to trees.ts
-      const cover = smoothstep(forestDensity(x, z), 0.1, 0.5) * smoothstep(r, CANOPY.inner, CANOPY.inner + 300)
+      // the stand's canopy, blurred over ~15 m (the shell's grid is coarser than a crown out there)
+      const blur = (cover(x, z) + cover(x + 12, z) + cover(x - 12, z) + cover(x, z + 12) + cover(x, z - 12)) / 5
+      const covered = smoothstep(blur, 0.12, 0.5) * smoothstep(r, CANOPY.inner, CANOPY.inner + 300)
       // crowns: uneven heights in patches, and lumps of a few tens of metres
       const lumps = 0.7 + 0.3 * fbm(x / 60, z / 60, 3) + 0.25 * (noise(x / 18, z / 18) - 0.5)
       // (height follows cover, so a wood's edge slopes down over tens of metres instead of standing as a wall)
-      const h = cover > 0.02 ? ground + CANOPY.height * lumps * cover - 3 * (1 - cover) : ground - 3
+      const h = covered > 0.02 ? ground + CANOPY.height * lumps * covered - 3 * (1 - covered) : ground - 3
       // mostly dark conifers, fresher broadleaf stands in between
       c.copy(cedar).lerp(pine, fbm(x / 140 + 3, z / 140, 2))
       c.lerp(broadleaf, smoothstep(fbm(x / 300 - 9, z / 300 + 2, 2), 0.55, 0.7) * 0.8)

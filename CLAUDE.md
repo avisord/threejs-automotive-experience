@@ -171,6 +171,19 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   sky's own luminance — the model's output is in large arbitrary units). The sun disc is hidden during env
   captures (its spike smears in the PMREM prefilter). The HDRI photo sky was dropped: its
   sun can't move. The path tracer gets a uniform sky-colour stand-in (`userData.pathTrace`).
+- Vegetation (Fuji): `vegetation-layout.ts` plans every tree/shrub up front (`VEGETATION`
+  tunables: cluster count/radius/density, lone trees, shrubs, clearings, size log-normal,
+  veterans, crown width, lean, LOD bands/caps) — clustered Gaussian stands weighted by
+  `site.woodedness`, lone trees, a clearing noise field; `landscape.planVegetation` supplies
+  the site rules (not water/road/houses/cliffs, nothing rising into the lake view). Its
+  `cover()` darkens the terrain under trees and shapes the canopy shell. `trees.ts` gives
+  each plant a LOD: ez-tree full (<220 m, cap 70) → light (<450 m, cap 520) → impostors
+  (`impostors.ts`: 8 species baked into an albedo atlas with a throwaway WebGL context,
+  two crossed quads, view-facing crown normals, mip-scaled alpha so far crowns don't
+  vanish, dilated colours so mips don't fringe). ~0.5 M impostors + `greenery.ts` village
+  gardens/hedgerows + `ranges.createRangeForest` (crest lines and slope stands on ranges
+  < 14 km, mapped into the compression, not in the far shadow map). All instanced, all
+  cast into the shadow maps. Layout takes ~2 s of the ~8 s garage build.
 - Trees (`garages/trees.ts`): ez-tree grows 3 near + 3 light variants (pine presets),
   instanced; Poly Haven 2k Japanese cedar bark replaces its 1k bark; its needle atlas is
   kept (straight alpha, `alphaToCoverage`, a lower alphaTest for far crowns — otherwise

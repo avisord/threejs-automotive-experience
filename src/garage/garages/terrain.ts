@@ -148,7 +148,7 @@ function groundDetail<M extends THREE.MeshStandardMaterial>(material: M): M {
  * road and the lake, farmland, wooded hillsides and the far shore. 3.3 km
  * across in every direction, finest near the pavilion.
  */
-export function createTerrain(): { mesh: THREE.Mesh; ready: Promise<void> } {
+export function createTerrain(cover: (x: number, z: number) => number = () => 0): { mesh: THREE.Mesh; ready: Promise<void> } {
   const lawn = srgb(0x557f2e)
   const lush = srgb(0x5a8330)
   const dry = srgb(0x8a9346)
@@ -186,6 +186,9 @@ export function createTerrain(): { mesh: THREE.Mesh; ready: Promise<void> } {
       }
       // darker ground under woodland
       if (r > 60 && r < SITE.realRadius) c.lerp(woodland, smoothstep(forestDensity(x, z), 0.1, 0.6) * 0.7)
+      // under the trees themselves: shaded, leaf-littered ground, darkest at the trunks — grounds them
+      const shade = cover(x, z)
+      if (shade > 0) c.lerp(woodland, shade * 0.55).multiplyScalar(1 - 0.3 * shade)
       // the far shore and the valley's flanks, seen across the lake: wooded hillsides
       const lake = lakeShape(x, z)
       c.lerp(woodland, smoothstep(r, 1800, 2600) * smoothstep(lake, 1.03, 1.12) * (0.55 + 0.4 * fbm(x / 250 + 7, z / 250)))

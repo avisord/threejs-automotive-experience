@@ -5,11 +5,13 @@ import { createCanopy } from './canopy'
 import { fbm, noRaycast, seeded, smoothstep } from './landform'
 import { createRanges } from './ranges'
 import { createRoadside } from './roadside'
-import { SITE, forestDensity, heightAt, roomBelowView } from './site'
+import { SITE, forestDensity, heightAt, inView, lakeShape, onRoad, roadZ, roomBelowView, woodedness } from './site'
 import { createSky } from './sky'
-import { createTerrain, outdoorMaterial } from './terrain'
+import { createTerrain, farmland, outdoorMaterial } from './terrain'
 import { createGreenery } from './greenery'
-import { createTown } from './town'
+import { createTown, type House } from './town'
+import { layoutVegetation, type VegetationLayout } from './vegetation-layout'
+import { createRangeForest } from './ranges'
 import { createForest } from './trees'
 import { createWater, type WaterSurface } from './water'
 
@@ -196,6 +198,48 @@ function createLake(opts: LandscapeOptions, hide: () => THREE.Object3D[]): Water
   return lakeWater
 }
 
+/** the valley's vegetation plan (vegetation-layout.ts), with this site's rules for where things grow */
+function planVegetation(opts: LandscapeOptions, houses: House[]): VegetationLayout {
+  // houses on a coarse grid, so "not on a house" stays cheap
+  const CELL = 40
+  const lots = new Map<string, House[]>()
+  for (const h of houses) {
+    const k = `${Math.floor(h.x / CELL)},${Math.floor(h.z / CELL)}`
+    lots.set(k, [...(lots.get(k) ?? []), h])
+  }
+  const onHouse = (x: number, z: number) => {
+    const cx = Math.floor(x / CELL)
+    const cz = Math.floor(z / CELL)
+    for (let i = -1; i <= 1; i++)
+      for (let j = -1; j <= 1; j++)
+        for (const h of lots.get(`${cx + i},${cz + j}`) ?? []) if (Math.hypot(h.x - x, h.z - z) < Math.max(h.w, h.d) * 0.6 + 2.5) return true
+    return false
+  }
+  const lakeNear = -SITE.lake.z - SITE.lake.rz
+  return layoutVegetation(
+    {
+      radius: [40, SITE.realRadius - 30],
+      // hillsides are woods; the valley floor is fields with copses and hedgerow trees
+      wood: (x, z) => Math.max(0.1, woodedness(x, z)) * (1 - 0.6 * farmland(x, z)),
+      conifers: (x, z) => 0.4 + 0.45 * smoothstep(heightAt(x, z) - SITE.lakeLevel, 40, 220),
+      allowed(x, z, height) {
+        const r = Math.hypot(x, z)
+        if (r < 40 || r > SITE.realRadius - 30 || opts.keepClear(x, z)) return false
+        if (lakeShape(x, z) < 1.04) return false
+        if (onRoad(x, z) > 0 || (Math.abs(x) < SITE.road.extent && Math.abs(z - roadZ(x)) < 10)) return false
+        if (onHouse(x, z)) return false
+        const h = heightAt(x, z)
+        const slope = Math.hypot(heightAt(x + 3, z) - h, heightAt(x, z + 3) - h) / 3
+        if (slope > 1.2) return false // cliffs and cuttings (a one-sided difference: rougher than a central one)
+        // between the pavilion and the lake: nothing may rise into the view of the water
+        if (inView(x, z) && -z < lakeNear && roomBelowView(x, z) < height) return false
+        return true
+      },
+    },
+    7,
+  )
+}
+
 export function createLandscape(opts: LandscapeOptions): Landscape {
   const group = new THREE.Group()
   group.name = 'landscape'
@@ -205,13 +249,14 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
 
   const meadow = createMeadow(opts.keepClear)
   const roadside = createRoadside()
-  const canopy = createCanopy()
   const town = createTown()
-  const greenery = createGreenery(town.houses)
-  const terrain = createTerrain()
-  outdoor.add(terrain.mesh, canopy, town.group, greenery, createFujiMountain(), createRanges(), roadside.group, meadow)
+  // every tree and shrub of the valley, decided up front: the terrain darkens the ground under them
+  const layout = planVegetation(opts, town.houses) // ~2 s: the heaviest part of building the garage
+  const terrain = createTerrain(layout.cover)
+  const canopy = createCanopy(layout.cover)
+  outdoor.add(terrain.mesh, canopy, town.group, createFujiMountain(), createRanges(), roadside.group, meadow)
 
-  const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town.group, greenery]
+  const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town.group]
   // the lake can't show anything near the pavilion: skip it all in its mirror pass
   const nearDetail: THREE.Object3D[] = [meadow, roadside.group]
   const lake = createLake(opts, () => [...nearDetail, ...opts.hideFromLake()])
@@ -220,12 +265,17 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
   const forestReady = createForest({
     seed: 5,
     heightAt,
-    density: forestDensity,
+    layout,
     bushRoom: (x, z) => (opts.keepClear(x, z) || Math.abs(x) + Math.abs(z) <= 20 || forestDensity(x, z) >= 0.5 ? 0 : roomBelowView(x, z)),
     accents: ACCENTS,
   })
     .then(async (forest) => {
       outdoor.add(forest.group)
+      // the village gardens and the far ranges' woods share the forest's impostors
+      const greenery = createGreenery(town.houses, forest.impostors)
+      const rangeForest = createRangeForest(forest.impostors)
+      outdoor.add(greenery, rangeForest)
+      farDetail.push(greenery, rangeForest)
       // (and the trees and bushes just outside: in the deck's blurred mirror they're a smudge by the sill,
       // and their leaf cards cost a few ms in every pass that draws them)
       farDetail.push(...forest.mid, ...forest.far, ...forest.bushes, ...forest.accents)

@@ -197,6 +197,11 @@ export function heightAt(x: number, z: number): number {
   return h
 }
 
+/** 0–1: how much the land here is hillside woodland (the flanks, the far shore, the rise behind, high ground) */
+export function woodedness(x: number, z: number): number {
+  return Math.max(flank(x), farShore(z), behind(z), smoothstep(heightAt(x, z) - SITE.lakeLevel, 70, 140))
+}
+
 /** how thickly trees grow at a point, 0–1 — clumps and clearings, never uniform */
 export function forestDensity(x: number, z: number): number {
   const r = Math.hypot(x, z)
@@ -207,7 +212,7 @@ export function forestDensity(x: number, z: number): number {
   const ahead = z < 0 && Math.abs(Math.atan2(x, -z)) < 0.42 && r < 1400 ? 0.12 : 1
   const clumps = smoothstep(fbm(x / 230 + 11, z / 230 - 4, 3), 0.44, 0.6)
   // hillsides are wooded; the valley floor is farmland with stands of trees
-  const wooded = 0.35 + 0.65 * Math.max(flank(x), farShore(z), behind(z), smoothstep(heightAt(x, z) - SITE.lakeLevel, 70, 140))
+  const wooded = 0.35 + 0.65 * woodedness(x, z)
   return clumps * ahead * wooded
 }
 

@@ -1,6 +1,9 @@
 import * as THREE from 'three'
-import { fbm, noRaycast, ridged, smoothstep } from './landform'
-import { mapFar } from './site'
+import { fbm, noRaycast, ridged, seeded, smoothstep } from './landform'
+import type { ImpostorSet } from './impostors'
+import { EYE, SITE, farPlacement, farY, mapFar } from './site'
+import { plantImpostors } from './trees'
+import type { Plant } from './vegetation-layout'
 import { outdoorMaterial } from './terrain'
 
 /**
@@ -44,6 +47,11 @@ const forest = new THREE.Color().setHex(0x2d4628, THREE.SRGBColorSpace)
 const darkForest = new THREE.Color().setHex(0x1f3320, THREE.SRGBColorSpace)
 const rock = new THREE.Color().setHex(0x4c4a44, THREE.SRGBColorSpace)
 
+/** ranges nearer than this get trees on their crests and wooded slopes (farther, a tree is under a pixel) */
+const TREES_WITHIN = 14000
+/** trees on the ranges, in real metres (placed and scaled into the compression by createRangeForest) */
+const rangeTrees: { x: number; z: number; y: number; h: number; tone: number; pick: number; conifer: boolean }[] = []
+
 function createRange(range: Range): THREE.BufferGeometry {
   const deg = THREE.MathUtils.degToRad
   const [a0, a1] = range.span.map(deg)
@@ -83,6 +91,7 @@ function createRange(range: Range): THREE.BufferGeometry {
       index.push(p, q, p + 1, p + 1, q, q + 1)
     }
   }
+  if (range.real < TREES_WITHIN) plantRange(range, position, cols, rows)
   const g = new THREE.BufferGeometry()
   g.setAttribute('position', new THREE.BufferAttribute(position, 3))
   g.setAttribute('color', new THREE.BufferAttribute(color, 3))
@@ -98,7 +107,116 @@ function createRange(range: Range): THREE.BufferGeometry {
   return mapFar(g)
 }
 
+/**
+ * Trees for a range (real metres, before the mapping): a dense line along its
+ * silhouette — for each column, the point seen highest from the eye, where
+ * trees stand against the sky and give the ridge a ragged, wooded edge — and
+ * stands on its slopes, clumped by noise, below the rocky crests.
+ */
+function plantRange(range: Range, position: Float32Array, cols: number, rows: number): void {
+  const rand = seeded(90 + range.seed)
+  const eyeAboveLake = EYE - SITE.lakeLevel
+  const at = (i: number, j: number) => (j * (cols + 1) + i) * 3
+  for (let i = 0; i < cols; i++) {
+    // the silhouette row of this column: highest elevation angle from the eye
+    let best = 0
+    let bestAngle = -Infinity
+    for (let j = 0; j <= rows; j++) {
+      const k = at(i, j)
+      const angle = (position[k + 1] - eyeAboveLake) / Math.hypot(position[k], position[k + 2])
+      if (angle > bestAngle) {
+        bestAngle = angle
+        best = j
+      }
+    }
+    // a few trees along the crest, spread across the column (interpolated between its two vertices)
+    const a = at(i, best)
+    const b = at(i + 1, best)
+    const perColumn = 3 + Math.floor(rand() * 3)
+    for (let t = 0; t < perColumn; t++) {
+      if (rand() < 0.2) continue // gaps
+      const f = rand()
+      rangeTrees.push({
+        x: position[a] + (position[b] - position[a]) * f,
+        z: position[a + 2] + (position[b + 2] - position[a + 2]) * f,
+        y: position[a + 1] + (position[b + 1] - position[a + 1]) * f - 2,
+        h: 16 * Math.exp((rand() - 0.5) * 0.5),
+        tone: rand(),
+        pick: rand(),
+        conifer: rand() < 0.65,
+      })
+    }
+    // stands on the slopes: clumped, not on every vertex, not on the bare crests
+    for (let j = 1; j < rows; j++) {
+      const k = at(i, j)
+      const clump = fbm(i * 0.11 + range.seed * 3, j * 0.35, 3)
+      if (clump < 0.5 || rand() > 0.55) continue
+      const n = 1 + Math.floor(rand() * 3)
+      for (let t = 0; t < n; t++) {
+        const k2 = at(i + 1, j)
+        const f = rand()
+        rangeTrees.push({
+          x: position[k] + (position[k2] - position[k]) * f,
+          z: position[k + 2] + (position[k2 + 2] - position[k + 2]) * f,
+          y: position[k + 1] + (position[k2 + 1] - position[k + 1]) * f - 3,
+          h: 15 * Math.exp((rand() - 0.5) * 0.5),
+          tone: rand() * 0.6,
+          pick: rand(),
+          conifer: rand() < 0.6,
+        })
+      }
+    }
+  }
+}
+
+/** the ranges' trees as impostors (the forest's atlas), mapped into the far distance like the ranges themselves */
+export function createRangeForest(impostors: ImpostorSet): THREE.Group {
+  const group = new THREE.Group()
+  group.name = 'range-forest'
+  const plants: Plant[] = []
+  const where = new Map<Plant, { y: number; scale: number; real: number }>()
+  for (const t of rangeTrees) {
+    const real = Math.hypot(t.x, t.z)
+    const { distance, scale } = farPlacement(real)
+    const plan: Plant = {
+      x: (t.x * distance) / real,
+      z: (t.z * distance) / real,
+      kind: t.conifer ? 'conifer' : 'broadleaf',
+      height: t.h * scale,
+      width: 0.85 + t.tone * 0.4,
+      turn: t.pick * Math.PI * 2,
+      leanX: 0,
+      leanZ: 0,
+      tone: t.tone * 0.5, // distant woods: the darker end
+      pick: t.pick,
+    }
+    plants.push(plan)
+    where.set(plan, { y: farY(t.y, scale), scale, real })
+  }
+  const m = new THREE.Matrix4()
+  const q = new THREE.Quaternion()
+  const up = new THREE.Vector3(0, 1, 0)
+  plantImpostors(
+    impostors,
+    plants,
+    () => 0,
+    (spot, h) => {
+      const w = h * spot.plan.width
+      return m.compose(new THREE.Vector3(spot.plan.x, where.get(spot.plan)!.y, spot.plan.z), q.setFromAxisAngle(up, spot.plan.turn), new THREE.Vector3(w, h, w))
+    },
+    group,
+  )
+  // (the far shadow map is laid out for the real-scale land; the compressed ranges keep out of it)
+  group.traverse((o) => {
+    o.castShadow = false
+    o.raycast = () => {}
+  })
+  console.info(`[garage] range forest: ${plants.length} impostor trees on the ranges`)
+  return group
+}
+
 export function createRanges(): THREE.Group {
+  rangeTrees.length = 0 // a fresh visit to the garage plants afresh
   const material = outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }))
   const group = new THREE.Group()
   group.name = 'ranges'
