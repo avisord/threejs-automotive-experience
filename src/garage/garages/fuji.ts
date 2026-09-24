@@ -5,11 +5,14 @@ import { aimFarShadow, createFarShadowLight } from './far-shadow'
 import { createLandscape } from './landscape'
 import { GROUND, SITE } from './site'
 import { sunDirection, sunLight, type SunPosition } from './sky'
+import { createGlassMaterial, glassPane } from './glass'
 import { createWater } from './water'
 
 /** platform the pavilion stands on (x × z), and its roof height */
 const DECK = { w: 26, d: 22 }
-const ROOF_Y = 5.5
+const ROOF_Y = 8.25
+/** where the two rows of glass meet, a slim transom between them */
+const TRANSOM = 4.4
 /** skylight cut into the roof over the car (x × z) */
 const SKY = { w: 4, d: 9 }
 /** the lawn around the deck (site.ts lays out the land) */
@@ -133,29 +136,37 @@ function createFujiPavilion(): Room {
   group.add(wash)
 
   // ─── glass: floor to roof on the right and at the back ──────────────────
-  const glass = new THREE.MeshPhysicalMaterial({
-    color: 0xb9ccd4,
-    roughness: 0.04,
-    metalness: 0,
-    transparent: true,
-    opacity: 0.07, // clear: the view shouldn't sit behind a milky film
-    envMapIntensity: 1,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  })
+  // Two panes high, one per bay between the mullions, each hung a fraction of a degree off true
+  // (glass.ts): reflections step at every frame instead of running across the wall as one mirror.
+  const glass = createGlassMaterial()
   const glassX = w / 2 - 1.5
   const glassZ = -d / 2 + 1
-  const rightPane = new THREE.Mesh(new THREE.PlaneGeometry(d / 2 - 1 - glassZ, ROOF_Y), glass)
-  rightPane.rotation.y = -Math.PI / 2
-  rightPane.position.set(glassX, ROOF_Y / 2, (glassZ + d / 2 - 1) / 2)
-  group.add(rightPane)
-  const backPane = new THREE.Mesh(new THREE.PlaneGeometry(glassX - (-w / 2 + 1.75), ROOF_Y), glass)
-  backPane.position.set((glassX + (-w / 2 + 1.75)) / 2, ROOF_Y / 2, glassZ)
-  group.add(backPane)
+  const rows: [number, number][] = [
+    [0, TRANSOM],
+    [TRANSOM, ROOF_Y],
+  ]
+  let paneSeed = 1
+  /** a wall of panes from `a` to `b` (world points on the floor), one per bay */
+  const glassWall = (a: THREE.Vector3, b: THREE.Vector3, bays: number, turn: number) => {
+    const bay = a.distanceTo(b) / bays
+    for (let i = 0; i < bays; i++) {
+      for (const [y0, y1] of rows) {
+        const holder = new THREE.Object3D()
+        holder.position.lerpVectors(a, b, (i + 0.5) / bays).setY((y0 + y1) / 2)
+        holder.rotation.y = turn
+        holder.add(glassPane(glass, bay - 0.02, y1 - y0 - 0.02, paneSeed++))
+        group.add(holder)
+      }
+    }
+  }
+  glassWall(new THREE.Vector3(glassX, 0, glassZ), new THREE.Vector3(glassX, 0, d / 2 - 1), 7, -Math.PI / 2)
+  glassWall(new THREE.Vector3(glassX, 0, glassZ), new THREE.Vector3(-w / 2 + 1.75, 0, glassZ), 8, 0)
   // slim mullions and a floor channel; thin enough that the video camera ignores them (see main.ts)
   for (let z = glassZ; z <= d / 2 - 1 + 1e-3; z += (d - 2) / 7) box(group, [0.05, ROOF_Y, 0.12], darkSteel, [glassX, ROOF_Y / 2, z])
   for (let x = glassX; x >= -w / 2 + 1.75; x -= (glassX + w / 2 - 1.75) / 8) box(group, [0.12, ROOF_Y, 0.05], darkSteel, [x, ROOF_Y / 2, glassZ])
   box(group, [0.05, 0.05, d - 2], darkSteel, [glassX, 0.025, 0])
+  box(group, [0.07, 0.05, d - 2], darkSteel, [glassX, TRANSOM, 0])
+  box(group, [glassX + w / 2 - 1.75, 0.05, 0.07], darkSteel, [(glassX - w / 2 + 1.75) / 2, TRANSOM, glassZ])
   box(group, [glassX + w / 2 - 1.75, 0.05, 0.05], darkSteel, [(glassX - w / 2 + 1.75) / 2, 0.025, glassZ])
 
   // ─── the roof: a cantilevered slab with a skylight cut over the car ─────
@@ -169,7 +180,7 @@ function createFujiPavilion(): Room {
   cast([sideW, t, roofD], ceiling, [(SKY.w + sideW) / 2, y, 0])
   cast([SKY.w, t, endD], ceiling, [0, y, (SKY.d + endD) / 2])
   cast([SKY.w, t, endD], ceiling, [0, y, -(SKY.d + endD) / 2])
-  const skylight = new THREE.Mesh(new THREE.PlaneGeometry(SKY.w, SKY.d), glass)
+  const skylight = new THREE.Mesh(new THREE.PlaneGeometry(SKY.w, SKY.d), createGlassMaterial({ dirt: 0.6 }))
   skylight.rotation.x = Math.PI / 2
   skylight.position.set(0, ROOF_Y + t - 0.02, 0)
   group.add(skylight)
@@ -192,7 +203,8 @@ function createFujiPavilion(): Room {
     outer.position.set(side * (SKY.w / 2 + 4.5), ROOF_Y - 0.005, 0)
     group.add(outer)
   }
-  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 0.6, SKY.w + 9, roofD - 4)
+  // (the roof is 8 m up: area lights need about twice the output of the old 5.5 m ceiling)
+  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 1.2, SKY.w + 9, roofD - 4)
   ceilingLight.position.set(0, ROOF_Y - 0.05, 0)
   ceilingLight.up.set(0, 0, -1)
   ceilingLight.lookAt(0, 0, 0)
@@ -269,7 +281,7 @@ function createFujiPavilion(): Room {
     aimFarShadow(farShadow, dir)
     fill.intensity = 0.04 + 0.06 * day // bounce from the grass; the sky's own fill is the env map
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
-    skyLight.intensity = 3 + 1 * day // the key light: brighter by day, never off
+    skyLight.intensity = 6 + 2 * day // the key light: brighter by day, never off
     water.setSunDirection(dir)
     landscape.lake.setSunDirection(dir)
     atmosphere.sunDirection.copy(dir)
