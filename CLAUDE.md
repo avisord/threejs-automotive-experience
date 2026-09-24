@@ -127,7 +127,8 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - Open-air garages: `garages/site.ts` lays out the Fuji site (terrace → road → valley →
   lake → far shore → ranges → Fuji) and owns `heightAt`, `lakeShape`, `roadZ`,
   `forestDensity`; `landscape.ts` assembles `terrain.ts` (real scale to 3.3 km),
-  `roadside.ts` (road, poles, wires, guardrail, signs, cars), `town.ts` (~1,300
+  `roadside.ts` (road, poles, wires, guardrail, signs, cars), `greenery.ts` (garden trees
+  around houses and hedgerows on field boundaries, past 450 m), `town.ts` (~2,000
   instanced lakeside houses, hotels and farmsteads; windows drawn by a facade shader in
   building metres, fading to their average once smaller than ~2 px so towns don't
   shimmer; gable/hipped matte roofs), `canopy.ts` (a lumpy crown shell over thick woods —
@@ -200,6 +201,14 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   view. `ignoreBackground = true` (post.ts).
 - The Fuji deck's photographed concrete is already dark (~0.085 albedo): tint it near
   white, or the floor goes black and shows only the blue sky's reflection.
+- `envMapIntensity` only applies when a material has its **own** `envMap`; with
+  `scene.environment` three uses `scene.environmentIntensity`. `captureEnvironment()`
+  (main.ts) hands the room's map to room materials whose `envMapIntensity !== 1` — before
+  that the Fuji floor's sheen was full strength and turned it navy blue. The floor mirror
+  (`createFloor({ fresnel })`) has a Schlick falloff: ~5% straight down, strong at grazing.
+- Landscape materials (`receiveFarShadow`) compile three's point/spot/area light loops out:
+  every RectAreaLight otherwise cost ~1.6 ms on every landscape pixel. N8AO runs `halfRes`.
+  Fuji front view at 1080p ≈ 15–16 ms GPU (was 21.5).
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too (a shadow-casting light's map is a render target,
