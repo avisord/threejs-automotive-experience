@@ -54,6 +54,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
+| `lens-flare-effect.ts` | Sun lens flare (glare, starburst, streak, ghosts), visibility from depth samples round the sun, scaled ×6 to read over the HDR sky. Settings › Graphics › Lens flare; only where a room has `atmosphere` (a sun). |
 | `atmosphere-effect.ts` | Open-air rooms' air, first in the effect pass: aerial perspective (exponential height fog from depth, forward scattering toward the sun) and volumetric sun shafts (ray-marches the sun's `sampler2DShadow` map; a dust box makes beams read under a roof). Params come from `room.atmosphere`; Settings › Graphics › Atmosphere. |
 | `pathtrace.ts` | Wrapper around three-gpu-pathtracer: builds the scene through proxies (see gotchas), paces GPU work with fence syncs, denoises early samples. |
 | (lens) | Default Display › Field of view is 36° (~37 mm) with the start camera a little farther back — a photographer's lens, not a wide game camera. Saved settings keep their own value. |
@@ -196,6 +197,14 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   the floor, from behind the mountain Fuji's face was all shade. The haze stays blue at
   a low sun (the gold is only in forward scattering); indoor dust fades below ~20° or it
   veils the car with its own shadow streaks.
+- Glass (`garages/glass.ts`): premultiplied-alpha blending (reflection added, background
+  × (1 − absorption − Fresnel − dust)) — `opaque_fragment` and `premultiplied_alpha_fragment`
+  are replaced; normal-map float-glass waves at `normalScale` 0.06 (more reads as liquid);
+  dirt kept faint (wipe arcs read as circles). Panes from `glassPane()` each tilt ~0.1°.
+  Fuji roof is 8.25 m with a transom at 4.4 m; its area lights were doubled for the height.
+- Volumetric light is its own setting (`volumetric`: strength, quality = shaft ray-march
+  steps via the effect's `STEPS` define); the atmosphere effect is built when either haze or
+  volumetric is on and zeroes the other's strength.
 - Lights-only bloom (`SelectiveBloomEffect`) keeps far-plane pixels by default — the
   analytic sky is drawn there, and bloomed whole it laid a milky veil over every open-air
   view. `ignoreBackground = true` (post.ts).

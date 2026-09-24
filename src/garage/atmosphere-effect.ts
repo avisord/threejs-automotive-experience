@@ -54,6 +54,7 @@ uniform float uMistFalloff;
 uniform float uCompressStart;
 uniform float uCompressFactor;
 uniform float uStrength;
+uniform float uShaftStrength;
 uniform float uShaftDensity;
 uniform float uShaftRange;
 uniform float uShafts;
@@ -64,7 +65,6 @@ uniform vec3 uDustMin;
 uniform vec3 uDustMax;
 uniform float uDustDensity;
 
-#define STEPS 28
 
 // Henyey–Greenstein: how much light scatters toward the eye at angle cosTheta from the sun
 float phaseHG( float cosTheta, float g ) {
@@ -137,7 +137,7 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
       t += stepLen;
     }
     // dust scatters less directionally than haze: beams stay visible from the side, not only sunward
-    color += uSunColor * phaseHG( mu, 0.35 ) * scattered * stepLen * uStrength;
+    color += uSunColor * phaseHG( mu, 0.35 ) * scattered * stepLen * uShaftStrength;
   }
 
   outputColor = vec4( color, inputColor.a );
@@ -163,6 +163,7 @@ export class AtmosphereEffect extends Effect {
     super('AtmosphereEffect', fragmentShader, {
       blendFunction: BlendFunction.NORMAL,
       attributes: EffectAttribute.DEPTH,
+      defines: new Map([['STEPS', '28']]),
       uniforms: new Map<string, THREE.Uniform>([
         ['uProjectionInverse', new THREE.Uniform(new THREE.Matrix4())],
         ['uCameraWorld', new THREE.Uniform(new THREE.Matrix4())],
@@ -178,6 +179,7 @@ export class AtmosphereEffect extends Effect {
         ['uCompressStart', new THREE.Uniform(1e9)],
         ['uCompressFactor', new THREE.Uniform(1)],
         ['uStrength', new THREE.Uniform(1)],
+        ['uShaftStrength', new THREE.Uniform(1)],
         ['uShaftDensity', new THREE.Uniform(0)],
         ['uShaftRange', new THREE.Uniform(50)],
         ['uShafts', new THREE.Uniform(0)],
@@ -196,9 +198,21 @@ export class AtmosphereEffect extends Effect {
     this.params = params
   }
 
-  /** 0 = clear air, 1 = as the room describes it, more = thicker */
+  /** haze: 0 = clear air, 1 = as the room describes it, more = thicker */
   set strength(v: number) {
     this.uniforms.get('uStrength')!.value = v
+  }
+
+  /** light shafts (volumetric light): 0 = off, 1 = as the room describes it */
+  set shaftStrength(v: number) {
+    this.uniforms.get('uShaftStrength')!.value = v
+  }
+
+  /** ray-march steps for the shafts: fewer is cheaper and grainier */
+  set shaftSteps(n: number) {
+    if (this.defines.get('STEPS') === String(n)) return
+    this.defines.set('STEPS', String(n))
+    this.setChanged()
   }
 
   override update(): void {
@@ -232,7 +246,7 @@ export class AtmosphereEffect extends Effect {
       u.get('uDustMax')!.value.copy(p.dust.box.max)
     }
     const map = p.shaftLight?.shadow.map?.depthTexture ?? null
-    u.get('uShafts')!.value = map ? 1 : 0
+    u.get('uShafts')!.value = map && u.get('uShaftStrength')!.value > 0 ? 1 : 0
     if (map && p.shaftLight) {
       u.get('uShadowMap')!.value = map
       u.get('uShadowMatrix')!.value.copy(p.shaftLight.shadow.matrix)

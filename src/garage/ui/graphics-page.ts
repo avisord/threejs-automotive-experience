@@ -11,6 +11,7 @@ import {
   type Reflections,
   type Smaa,
   type ToneMapper,
+  type VolumetricQuality,
 } from '../post'
 import type { Page } from './panel'
 import { actionButton, el, section, segmented, slider, toggle } from './widgets'
@@ -35,6 +36,8 @@ const LOOK_LABEL: Record<GradeLook, string> = {
   cold: 'Cold',
   noir: 'Noir',
 }
+
+const VOLUMETRIC_LABEL: Record<VolumetricQuality, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 const PRESET_LABEL: Record<QualityPreset, string> = { low: 'Low', medium: 'Medium', high: 'High', ultra: 'Ultra' }
 
@@ -285,8 +288,45 @@ export function graphicsPage(post: PostProcessing): Page {
           slider('Strength', s.atmosphere.strength, { min: 0, max: 3, step: 0.05 }, fixed(2), (v) => post.set('atmosphere', { strength: v })),
         )
       }
-      air.append(el('p', 'cfg-note', 'Open-air garages: distance haze, and sunlight shafts through the air where the sun gets in.'))
+      air.append(el('p', 'cfg-note', 'Open-air garages: distance haze over the land, thinning with height.'))
       body.append(air)
+
+      // ─── volumetric light ───────────────────────────────────────────────
+      const shafts = section(
+        'Volumetric light',
+        toggle(s.volumetric.enabled, 'volumetric light', (on) => {
+          post.set('volumetric', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.volumetric.enabled) {
+        shafts.append(
+          slider('Strength', s.volumetric.strength, { min: 0, max: 4, step: 0.05 }, fixed(2), (v) => post.set('volumetric', { strength: v })),
+          el('div', 'cfg-label cfg-sub', 'Quality'),
+          segmented(Object.keys(VOLUMETRIC_LABEL) as VolumetricQuality[], VOLUMETRIC_LABEL, s.volumetric.quality, (quality) => {
+            post.set('volumetric', { quality })
+            structural() // redraw the page so the picked option shows
+          }),
+        )
+      }
+      shafts.append(el('p', 'cfg-note', 'Open-air garages: sunbeams through the air where the sun gets in — through the skylight, past the columns.'))
+      body.append(shafts)
+
+      // ─── lens flare ─────────────────────────────────────────────────────
+      const flare = section(
+        'Lens flare',
+        toggle(s.lensFlare.enabled, 'lens flare', (on) => {
+          post.set('lensFlare', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.lensFlare.enabled) {
+        flare.append(
+          slider('Intensity', s.lensFlare.intensity, { min: 0, max: 3, step: 0.05 }, fixed(2), (v) => post.set('lensFlare', { intensity: v })),
+        )
+      }
+      flare.append(el('p', 'cfg-note', 'Glare, starburst and ghosts when the sun is in view; anything in front of it puts them out.'))
+      body.append(flare)
 
       body.append(
         actionButton('Reset graphics', () => {

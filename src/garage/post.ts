@@ -17,6 +17,7 @@ import {
 import { N8AOPostPass } from 'n8ao'
 import { GradeEffect } from './grade-effect'
 import { AtmosphereEffect, type AtmosphereParams } from './atmosphere-effect'
+import { LensFlareEffect } from './lens-flare-effect'
 
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 export type ToneMapper = 'agx' | 'aces' | 'neutral'
@@ -26,6 +27,9 @@ export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
 /** floor mirror resolution relative to the canvas; 0 turns the mirror off */
 export type Reflections = 'off' | 'low' | 'medium' | 'high'
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra'
+export type VolumetricQuality = 'low' | 'medium' | 'high'
+/** ray-march steps per pixel for each volumetric quality */
+const VOLUMETRIC_STEPS: Record<VolumetricQuality, number> = { low: 14, medium: 28, high: 48 }
 
 export interface GraphicsSettings {
   ao: { enabled: boolean; intensity: number; radius: number; quality: AoQuality }
@@ -55,8 +59,12 @@ export interface GraphicsSettings {
     fov: number
     showFps: boolean
   }
-  /** haze and light shafts in open-air garages — see atmosphere-effect.ts */
+  /** distance haze in open-air garages — see atmosphere-effect.ts */
   atmosphere: { enabled: boolean; strength: number }
+  /** sunlight shafts through the air (ray-marched through the sun's shadow map), open-air garages */
+  volumetric: { enabled: boolean; strength: number; quality: VolumetricQuality }
+  /** glare, starburst and ghosts when the sun is in view — see lens-flare-effect.ts */
+  lensFlare: { enabled: boolean; intensity: number }
   /** progressive path tracing once the camera rests — see pathtrace.ts */
   pathTracing: {
     enabled: boolean
@@ -201,6 +209,8 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   // ~37 mm on full frame: a photographer's lens for a car, not a wide game camera
   display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 36, showFps: true },
   atmosphere: { enabled: true, strength: 1 },
+  volumetric: { enabled: true, strength: 1, quality: 'medium' },
+  lensFlare: { enabled: true, intensity: 1 },
   pathTracing: { enabled: false, bounces: 4, samples: 256, resolution: 0.75, denoise: true },
 }
 
@@ -287,6 +297,7 @@ export function createPostProcessing(
   let grade: GradeEffect | null = null
   let vignette: VignetteEffect | null = null
   let atmosphere: AtmosphereEffect | null = null
+  let lensFlare: LensFlareEffect | null = null
   let atmosphereParams: AtmosphereParams | null = null
   let structureKey = ''
 
@@ -299,12 +310,17 @@ export function createPostProcessing(
     smaaPass = null
     const s = settings
     const effects: Effect[] = []
-    bloom = grade = vignette = atmosphere = null
+    bloom = grade = vignette = atmosphere = lensFlare = null
     // the air goes first: haze and shafts are part of the scene's light, graded and tone mapped with it
-    if (s.atmosphere.enabled && atmosphereParams) {
+    if ((s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams) {
       atmosphere = new AtmosphereEffect(camera)
       atmosphere.setParams(atmosphereParams)
       effects.push(atmosphere)
+    }
+    // the lens sees the scene's light, air included, before it's graded
+    if (s.lensFlare.enabled && atmosphereParams) {
+      lensFlare = new LensFlareEffect(camera)
+      effects.push(lensFlare)
     }
     if (s.bloom.enabled) {
       const options = { mipmapBlur: true, blendFunction: BlendFunction.ADD, luminanceSmoothing: 0.1 }
@@ -343,7 +359,8 @@ export function createPostProcessing(
       s.grade.toneMapper,
       s.vignette.enabled,
       s.aa.smaa,
-      s.atmosphere.enabled && atmosphereParams !== null,
+      (s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams !== null,
+      s.lensFlare.enabled && atmosphereParams !== null,
     ].join()
     if (key !== structureKey) {
       structureKey = key
@@ -376,7 +393,13 @@ export function createPostProcessing(
     }
     if (atmosphere) {
       atmosphere.setParams(atmosphereParams)
-      atmosphere.strength = s.atmosphere.strength
+      atmosphere.strength = s.atmosphere.enabled ? s.atmosphere.strength : 0
+      atmosphere.shaftStrength = s.volumetric.enabled ? s.volumetric.strength : 0
+      atmosphere.shaftSteps = VOLUMETRIC_STEPS[s.volumetric.quality]
+    }
+    if (lensFlare) {
+      lensFlare.setSun(atmosphereParams?.sunDirection ?? null, atmosphereParams?.sunColor ?? null)
+      lensFlare.intensity = s.lensFlare.intensity
     }
   }
 
