@@ -305,6 +305,9 @@ export function createPostProcessing(
       const options = { mipmapBlur: true, blendFunction: BlendFunction.ADD, luminanceSmoothing: 0.1 }
       if (s.bloom.lightsOnly) {
         const selective = new SelectiveBloomEffect(scene, camera, options)
+        // by default it keeps whatever sits at the far plane — an analytic sky is drawn there, and
+        // bloomed whole it laid a milky veil over every open-air view
+        selective.ignoreBackground = true
         selective.selection.set(glowMeshes())
         bloom = selective
       } else {
