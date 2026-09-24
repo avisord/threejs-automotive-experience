@@ -22,14 +22,18 @@ export interface ForestOptions {
   heightAt(x: number, z: number): number
   /** how thickly trees grow at a point, 0–1 */
   density(x: number, z: number): number
-  /** where bushes may grow near the building */
-  bushAllowed(x: number, z: number): boolean
+  /** where bushes may grow near the building, and how tall they may be there (0 = none) */
+  bushRoom(x: number, z: number): number
+  /** trees placed by hand near the building: pines framing the view, a few cherries */
+  accents: { x: number; z: number; kind: 'pine' | 'sakura'; height: number }[]
   seed: number
 }
 
 export interface Forest {
   group: THREE.Group
   near: THREE.Object3D[]
+  /** the hand-placed trees by the building (also in `near`) */
+  accents: THREE.Object3D[]
   mid: THREE.Object3D[]
   far: THREE.Object3D[]
   bushes: THREE.Object3D[]
@@ -148,8 +152,8 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
   receiveFarShadow(barkMaterial)
   // one leaf material per leaf texture (species) and alpha threshold
   const leafMaterials = new Map<string, THREE.MeshStandardMaterial>()
-  const leafMaterial = (map: THREE.Texture | null, alphaTest: number) => {
-    const key = `${map?.uuid}|${alphaTest}`
+  const leafMaterial = (map: THREE.Texture | null, alphaTest: number, blossom = false) => {
+    const key = `${map?.uuid}|${alphaTest}|${blossom}`
     let material = leafMaterials.get(key)
     if (!material) {
       if (map) {
@@ -167,6 +171,18 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
         envMapIntensity: OUTDOOR_SKY_LIGHT,
       })
       receiveFarShadow(material) // crowns shade their own lower branches, and each other
+      if (blossom) {
+        // cherry blossom: the leaf cards' texture stripped of its green, so the instance colour (pink) shows
+        const base = material.onBeforeCompile
+        material.onBeforeCompile = (shader, renderer) => {
+          base.call(material, shader, renderer)
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <map_fragment>',
+            '#include <map_fragment>\n\tdiffuseColor.rgb = vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ) * 2.2;', // (the instance colour is multiplied in after, by color_fragment)
+          )
+        }
+        material.customProgramCacheKey = () => 'blossom'
+      }
       leafMaterials.set(key, material)
     }
     return material
@@ -184,21 +200,28 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
       ? c.setHSL(0.27 + t * 0.05, 0.3 + t * 0.2, 0.3 + t * 0.1, THREE.SRGBColorSpace)
       : c.setHSL(0.22 + t * 0.06, 0.4 + t * 0.2, 0.36 + t * 0.12, THREE.SRGBColorSpace)
 
-  const plant = (variants: Variant[], spots: { x: number; z: number }[], height: (v: Variant) => [number, number], alphaTest: number) => {
+  type Spot = { x: number; z: number; height?: number }
+  const plant = (
+    variants: Variant[],
+    spots: Spot[],
+    height: (v: Variant) => [number, number],
+    alphaTest: number,
+    blossom = false,
+  ) => {
     const planted: THREE.Object3D[] = []
     variants.forEach((variant, vi) => {
       const mine = spots.filter((_, i) => i % variants.length === vi)
       if (mine.length === 0) return
       const trunks = new THREE.InstancedMesh(variant.branches, barkMaterial, mine.length)
-      const crowns = new THREE.InstancedMesh(variant.leaves, leafMaterial(variant.leafMap, alphaTest), mine.length)
+      const crowns = new THREE.InstancedMesh(variant.leaves, leafMaterial(variant.leafMap, alphaTest, blossom), mine.length)
       const [lo, hi] = height(variant)
-      mine.forEach(({ x, z }, i) => {
-        const h = lo + rand() * (hi - lo)
+      mine.forEach(({ x, z, height: fixed }, i) => {
+        const h = fixed ?? lo + rand() * (hi - lo)
         q.setFromAxisAngle(up, rand() * Math.PI * 2)
         m.compose(new THREE.Vector3(x, opts.heightAt(x, z) - 0.2, z), q, new THREE.Vector3(h, h, h))
         trunks.setMatrixAt(i, m)
         crowns.setMatrixAt(i, m)
-        crowns.setColorAt(i, tint(variant.conifer, rand()))
+        crowns.setColorAt(i, blossom ? c.setHSL(0.94 + rand() * 0.03, 0.5, 0.8 + rand() * 0.06, THREE.SRGBColorSpace) : tint(variant.conifer, rand()))
       })
       for (const mesh of [trunks, crowns]) {
         mesh.castShadow = true
@@ -219,16 +242,28 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
   const midSpots = sample(rand, opts, 460, 240, 1100)
   const midMeshes = plant(mid, midSpots, treeHeight, 0.18)
 
-  // bushes around the lawn and along the edges of the grounds
-  const bushSpots: { x: number; z: number }[] = []
-  for (let tries = 0; bushSpots.length < 70 && tries < 3000; tries++) {
+  // pines framing the view and a few cherries, placed by hand
+  const accentPines = opts.accents.filter((a) => a.kind === 'pine')
+  // (the lighter pines: seen against the sky at 30–60 m they read the same, at a fraction of the leaf-card overdraw)
+  const accentMeshes = [
+    ...plant([mid[1], mid[0]], accentPines, treeHeight, 0.25),
+    ...plant([near[3]], opts.accents.filter((a) => a.kind === 'sakura'), treeHeight, 0.35, true),
+  ]
+  for (const o of accentMeshes) o.name = 'accent'
+  nearMeshes.push(...accentMeshes)
+
+  // bushes around the lawn and along the edges of the grounds, and low shrubs on the bank below the view
+  const bushSpots: Spot[] = []
+  for (let tries = 0; bushSpots.length < 80 && tries < 5000; tries++) {
     const r = 16 + rand() * 110
     const a = rand() * Math.PI * 2
     const x = Math.sin(a) * r
     const z = Math.cos(a) * r
-    if (opts.bushAllowed(x, z)) bushSpots.push({ x, z })
+    const room = opts.bushRoom(x, z)
+    if (room >= 0.7) bushSpots.push({ x, z, height: Math.min(room, 1.2 + rand() * 1.4) })
   }
   const bushMeshes = plant(bushes, bushSpots, () => [1.2, 2.6], 0.35)
+  for (const o of bushMeshes) o.name = 'bush'
 
   // the far woods: thousands of simple trees on the hillsides and the far shore
   const farSpots = sample(rand, opts, 9000, 1100, 3300)
@@ -242,7 +277,8 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
       const h = conifer ? 15 + rand() * 13 : 10 + rand() * 8
       q.setFromAxisAngle(up, rand() * Math.PI * 2)
       mesh.setMatrixAt(i, m.compose(new THREE.Vector3(x, opts.heightAt(x, z) - 0.3, z), q, new THREE.Vector3(h, h, h)))
-      mesh.setColorAt(i, tint(conifer, rand()))
+      // a shade darker than the near trees: seen against the canopy (canopy.ts), bright crowns sparkle like confetti
+      mesh.setColorAt(i, tint(conifer, rand()).multiplyScalar(0.55))
     })
     mesh.castShadow = true
     mesh.receiveShadow = true
@@ -257,5 +293,5 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
     `[garage] forest: ${nearSpots.length} near (~${tris(near)} tris each), ${midSpots.length} mid (~${tris(mid)}), ` +
       `${farSpots.length} far, ${bushSpots.length} bushes`,
   )
-  return { group, near: nearMeshes, mid: midMeshes, far: farMeshes, bushes: bushMeshes, ready: bark.ready }
+  return { group, near: nearMeshes, accents: accentMeshes, mid: midMeshes, far: farMeshes, bushes: bushMeshes, ready: bark.ready }
 }

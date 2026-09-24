@@ -211,3 +211,16 @@ export function forestDensity(x: number, z: number): number {
 export function inView(x: number, z: number): boolean {
   return z < 0 && Math.abs(Math.atan2(x, -z)) < 0.42
 }
+
+/**
+ * How tall something standing at (x, z) may grow before it rises into the
+ * view of the valley — above the line 3.9° below the design eye's horizon,
+ * where the road, the near shore's town and the lake begin. Out of the view
+ * there's no limit. Grass and shrubs just past the glass may fill the band
+ * below it: a foreground fringe along the window sill.
+ */
+export function roomBelowView(x: number, z: number): number {
+  if (!inView(x, z)) return Infinity
+  const d = Math.hypot(x, z - VIEW_EYE.z)
+  return VIEW_EYE.y - d * Math.tan(3.9 * THREE_DEG) - heightAt(x, z)
+}

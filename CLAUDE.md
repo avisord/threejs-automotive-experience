@@ -127,17 +127,22 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - Open-air garages: `garages/site.ts` lays out the Fuji site (terrace → road → valley →
   lake → far shore → ranges → Fuji) and owns `heightAt`, `lakeShape`, `roadZ`,
   `forestDensity`; `landscape.ts` assembles `terrain.ts` (real scale to 3.3 km),
-  `roadside.ts` (road, poles, wires, guardrail, signs, cars, houses), `trees.ts`,
-  `ranges.ts`, `fuji-mountain.ts`, the lake (`water.ts`, its own low-res mirror) and the
+  `roadside.ts` (road, poles, wires, guardrail, signs, cars, houses), `town.ts` (~1,300
+  instanced lakeside houses/hotels), `canopy.ts` (a lumpy crown shell over thick woods —
+  far instanced trees alone read as confetti), `trees.ts` (incl. hand-placed framing pines
+  and sakura, `ACCENTS` in landscape.ts), `ranges.ts`, `fuji-mountain.ts`, the lake (`water.ts`, its own low-res mirror) and the
   sky — all from fixed seeds so videos are repeatable. Past 3.3 km the far layers are
   **distance-compressed**: built in real metres (Fuji 2,950 m above the lake at 17 km)
   and mapped vertex by vertex (`site.mapFar`, normals from the real shape first) so each
   point keeps its exact direction from the eye and its depth order; the atmosphere
   effect's `compress` undoes the mapping to haze them for their real distance. (A 60 km
   far plane would leave metres of depth error near the lake shore.) The valley profile
-  is designed from **depression angles** seen from inside (`site.fall`): past the
-  terrace edge only ground < ~6.8° below the eye is visible, so each farther point must
-  appear a bit higher — a natural convex slope hid the lake. Land keeps ≥ 0.004 × r clear
+  is designed from **depression angles** seen by the orbit camera (`site.VIEW_EYE`, ~8 m
+  behind the car): the floor's edge hides everything > ~4.5° below its horizon, so the
+  far shore sits within ~1°, the lake (50 m below the deck) at 1.6–2.9°, road/near-shore
+  town at 3–4.5°; each farther point must appear a bit higher — a convex slope hid the
+  lake. Anything outside the back glass must stay under `site.roomBelowView` (the 3.9°
+  line) or it screens the lake; tall trees only at the window's sides. Land keeps ≥ 0.004 × r clear
   of the lake level for depth precision. Camera near/far 0.1 / 12000 m; PMREM far 12000.
   Three mirrors (deck, pool, lake) each hide the other two in their own pass. Optional
   `Room` hooks: `ready` (async assets; env re-captured after, video exports wait),
@@ -148,7 +153,9 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   which has `autoUpdate = false` so mirror passes don't re-render it every frame).
   Far meshes set `raycast = () => {}` so `clearLineOfSight` stays cheap.
 - Sky (`garages/sky.ts`): three's analytic `Sky` (Preetham) with a gain uniform patched in
-  (the stock shader has no exposure), clouds off. The sun disc is hidden during env
+  (the stock shader has no exposure) and its cloud block replaced (`CLOUD_GLSL`: a cloud
+  deck banked low over the horizon, lit toward the sun; brightness is scaled to the
+  sky's own luminance — the model's output is in large arbitrary units). The sun disc is hidden during env
   captures (its spike smears in the PMREM prefilter). The HDRI photo sky was dropped: its
   sun can't move. The path tracer gets a uniform sky-colour stand-in (`userData.pathTrace`).
 - Trees (`garages/trees.ts`): ez-tree grows 3 near + 3 light variants (pine presets),
@@ -157,7 +164,10 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   mipmapped alpha thins far trees to bare sticks). Import only the package entry (its
   `exports` hides `src/`); it bundles all its textures inline (~4 MB), hence lazy.
   ~29 near trees ≈ 0.6 M tris + ~490 far ≈ 4.5 M; far forests are left out of both mirror
-  passes (Fuji default view ~20 ms on the RX 7600, Hex Bay ~13 ms).
+  passes (Fuji front view ~22 ms GPU at 1600×900 on the RX 7600 — measure with
+  `EXT_disjoint_timer_query_webgl2`; wall-clock timings of `post.render` swing ±3 ms).
+  Near leaf cards are the expensive part: accents and bushes are kept out of the deck
+  and pool mirrors.
 - Far shadows (`garages/far-shadow.ts`): the sun's map only covers ±45 m, so beyond it
   sunlit and shaded land looked the same. A second directional light with intensity 0
   and a 3.2 km, 4096² shadow map (re-rendered on sun moves / when trees arrive) casts for
@@ -167,8 +177,16 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   Outdoor materials use `envMapIntensity = OUTDOOR_SKY_LIGHT` (0.3) and the sun is
   ×1.7 of `sunLight()`. Calibrated by rendering a white horizontal Lambert patch into a
   float target with only the sun / only the env / only the hemisphere lit: sun:sky must be
-  ~5:1 on a clear day (it was 2.6:1 and shade looked washed out). Default sun comes from
-  the side (az −100°, 30°): lit from behind the camera, Fuji has no shaded flank.
+  ~5:1 on a clear day (it was 2.6:1 and shade looked washed out). Default sun is late
+  afternoon from the right/west (az 70°, 14°): from the left the concrete wall kept it off
+  the floor, from behind the mountain Fuji's face was all shade. The haze stays blue at
+  a low sun (the gold is only in forward scattering); indoor dust fades below ~20° or it
+  veils the car with its own shadow streaks.
+- Lights-only bloom (`SelectiveBloomEffect`) keeps far-plane pixels by default — the
+  analytic sky is drawn there, and bloomed whole it laid a milky veil over every open-air
+  view. `ignoreBackground = true` (post.ts).
+- The Fuji deck's photographed concrete is already dark (~0.085 albedo): tint it near
+  white, or the floor goes black and shows only the blue sky's reflection.
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too (a shadow-casting light's map is a render target,

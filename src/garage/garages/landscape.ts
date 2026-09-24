@@ -5,9 +5,10 @@ import { createCanopy } from './canopy'
 import { fbm, noRaycast, seeded, smoothstep } from './landform'
 import { createRanges } from './ranges'
 import { createRoadside } from './roadside'
-import { SITE, forestDensity, heightAt, inView } from './site'
+import { SITE, forestDensity, heightAt, roomBelowView } from './site'
 import { createSky } from './sky'
 import { createTerrain, outdoorMaterial } from './terrain'
+import { createTown } from './town'
 import { createForest } from './trees'
 import { createWater, type WaterSurface } from './water'
 
@@ -31,6 +32,9 @@ export interface LandscapeOptions {
   hideFromLake(): THREE.Object3D[]
 }
 
+/** a tree placed by hand (see ACCENTS) */
+type Accent = { x: number; z: number; kind: 'pine' | 'sakura'; height: number }
+
 export interface Landscape {
   group: THREE.Group
   /** everything lit by the open sky (the room captures an outdoor environment map for it) */
@@ -42,6 +46,22 @@ export interface Landscape {
   /** resolves once the trees and their textures are in (never rejects) */
   ready: Promise<void>
 }
+
+/**
+ * Trees placed by hand beyond the back glass: tall pines at the edges of the
+ * view, framing it as the window's sides would, and a few cherries in bloom
+ * lower down on the bank. Kept off the line to the lake and the mountain.
+ */
+const ACCENTS: Accent[] = [
+  { x: -24, z: -34, kind: 'pine', height: 24 },
+  { x: -33, z: -52, kind: 'pine', height: 27 },
+  { x: -18, z: -27, kind: 'pine', height: 17 },
+  { x: 25, z: -35, kind: 'pine', height: 25 },
+  { x: 20, z: -26, kind: 'pine', height: 16 },
+  { x: -14, z: -22, kind: 'sakura', height: 7 },
+  { x: -20, z: -21, kind: 'sakura', height: 6 },
+  { x: 15, z: -21, kind: 'sakura', height: 6.5 },
+]
 
 /** three curved blades from one root — one instance of the meadow */
 function grassClump(): THREE.BufferGeometry {
@@ -103,15 +123,16 @@ function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.Instanced
     const a = rand() * Math.PI * 2
     p.set(Math.cos(a) * r, 0, Math.sin(a) * r)
     if (keepClear(p.x, p.z)) continue
-    // the lawn behind the pavilion, toward the view, is mown: no meadow grass there
-    if (p.z < -8) continue
     // thinner toward the edge, where the terrain's texture takes over
     if (rand() > 1 - 0.6 * smoothstep(r, OUTER * 0.6, OUTER)) continue
     p.y = heightAt(p.x, p.z)
     q.setFromAxisAngle(up, rand() * Math.PI * 2)
     // patches of taller, seeding grass
     const tall = smoothstep(fbm(p.x / 9 + 3, p.z / 9, 2), 0.55, 0.7)
-    const height = 0.3 + rand() * 0.4 + tall * (0.5 + rand() * 0.4)
+    // …kept below the view of the valley past the glass (a fringe along the sill, not a screen)
+    const room = roomBelowView(p.x, p.z)
+    if (room < 0.25) continue
+    const height = Math.min(room, 0.3 + rand() * 0.4 + tall * (0.5 + rand() * 0.4))
     s.set(0.8 + rand() * 0.5, height, 0.8 + rand() * 0.5)
     mesh.setMatrixAt(n, m.compose(p, q, s))
     c.setHSL(0.24 - tall * 0.05 + rand() * 0.04, 0.45 + rand() * 0.2, 0.25 + tall * 0.08 + rand() * 0.08, THREE.SRGBColorSpace)
@@ -152,9 +173,10 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
   const meadow = createMeadow(opts.keepClear)
   const roadside = createRoadside()
   const canopy = createCanopy()
-  outdoor.add(createTerrain(), canopy, createFujiMountain(), createRanges(), roadside.group, meadow)
+  const town = createTown()
+  outdoor.add(createTerrain(), canopy, town, createFujiMountain(), createRanges(), roadside.group, meadow)
 
-  const farDetail: THREE.Object3D[] = [...roadside.details, canopy]
+  const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town]
   // the lake can't show anything near the pavilion: skip it all in its mirror pass
   const nearDetail: THREE.Object3D[] = [meadow, roadside.group]
   const lake = createLake(opts, () => [...nearDetail, ...opts.hideFromLake()])
@@ -164,12 +186,14 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
     seed: 5,
     heightAt,
     density: forestDensity,
-    bushAllowed: (x, z) =>
-      !opts.keepClear(x, z) && !(z < -8 && inView(x, z)) && Math.abs(x) + Math.abs(z) > 20 && forestDensity(x, z) < 0.5,
+    bushRoom: (x, z) => (opts.keepClear(x, z) || Math.abs(x) + Math.abs(z) <= 20 || forestDensity(x, z) >= 0.5 ? 0 : roomBelowView(x, z)),
+    accents: ACCENTS,
   })
     .then(async (forest) => {
       outdoor.add(forest.group)
-      farDetail.push(...forest.mid, ...forest.far)
+      // (and the trees and bushes just outside: in the deck's blurred mirror they're a smudge by the sill,
+      // and their leaf cards cost a few ms in every pass that draws them)
+      farDetail.push(...forest.mid, ...forest.far, ...forest.bushes, ...forest.accents)
       nearDetail.push(...forest.near, ...forest.mid, ...forest.bushes)
       await forest.ready
     })
