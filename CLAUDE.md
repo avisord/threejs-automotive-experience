@@ -128,6 +128,12 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   exposes `ready` so the env map is re-captured once it's in, and video exports wait for it.
   Dome uv column u faces (cos 2πu, ·, sin 2πu) after `scale.x = -1`; rotating by φ maps
   angle a → a − φ. Far meshes set `raycast = () => {}` so `clearLineOfSight` stays cheap.
+- Photographed surfaces: `kit.SURFACES` + `pbrMaps()` load 2k Poly Haven (CC0) colour /
+  normal / roughness maps from `public/textures/<name>/` (WebP, AO baked into colour —
+  bake with `blend` on **planar** `gbrp`; on packed `rgb24` it silently turns the result
+  green). `boxUV()` puts box uvs in metres so one map set covers boxes of any size;
+  share one set per surface per room (2k RGBA ≈ 22 MB of GPU memory each with mips).
+  Fuji uses them; the other garages still use the procedural canvas textures.
 - Water (`garages/water.ts`): its own `Reflector` with a ripple/Fresnel/sun-glint shader.
   Two mirrors must not render inside each other — the water hides the deck mirror during
   its pass and sits in `floorLayers` for the deck's. Ripples advance through the optional

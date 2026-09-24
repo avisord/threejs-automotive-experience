@@ -146,6 +146,72 @@ export function floorTileTexture(repeat: [number, number], seam = '#3a3a3a'): TH
   return texture
 }
 
+/**
+ * Photographed PBR surfaces in `public/textures/<name>/`: 2k colour (ambient
+ * occlusion baked in), OpenGL normal and roughness maps, from Poly Haven (CC0).
+ * `tile` is how many metres one copy of the texture covers.
+ */
+export const SURFACES = {
+  /** polished grey concrete floor — Poly Haven "Concrete Floor Worn 001" */
+  concreteFloor: { dir: 'concrete-floor', tile: 3 },
+  /** cast concrete panels with seams and pores — Poly Haven "Concrete" */
+  concretePanels: { dir: 'concrete-panels', tile: 4 },
+} as const
+
+export interface PbrMaps {
+  /** spread into a MeshStandardMaterial */
+  maps: { map: THREE.Texture; normalMap: THREE.Texture; roughnessMap: THREE.Texture }
+  /** resolves when all three are in (never rejects — a failed map just stays blank) */
+  ready: Promise<void>
+}
+
+/**
+ * Load a surface's maps, repeated `repeat` times across the geometry's uv 0–1
+ * (pass [1, 1] for geometry whose uvs are already in tiles, see boxUV). Each
+ * call loads its own textures — a room disposes everything it made.
+ */
+export function pbrMaps(surface: { dir: string }, repeat: [number, number] = [1, 1]): PbrMaps {
+  const loader = new THREE.TextureLoader()
+  const pending: Promise<unknown>[] = []
+  const load = (file: string, color: boolean) => {
+    const url = `/textures/${surface.dir}/${file}.webp`
+    let done!: () => void
+    pending.push(new Promise<void>((resolve) => (done = resolve)))
+    const texture = loader.load(url, () => done(), undefined, (err) => {
+      console.error(`[garage] texture failed: ${url}`, err)
+      done()
+    })
+    texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping
+    texture.repeat.set(...repeat)
+    texture.anisotropy = 8
+    return texture
+  }
+  const maps = { map: load('color', true), normalMap: load('normal', false), roughnessMap: load('rough', false) }
+  return { maps, ready: Promise.all(pending).then(() => {}) }
+}
+
+/**
+ * Give a box geometry uvs in world units (one unit = `tile` metres) instead of
+ * 0–1 per face, so boxes of any size share one texture scale — a long roof
+ * slab and a short rim look like the same concrete.
+ */
+export function boxUV(geometry: THREE.BufferGeometry, tile: number): THREE.BufferGeometry {
+  const pos = geometry.attributes.position
+  const nrm = geometry.attributes.normal
+  const uv = geometry.attributes.uv
+  for (let i = 0; i < pos.count; i++) {
+    const ax = Math.abs(nrm.getX(i))
+    const ay = Math.abs(nrm.getY(i))
+    const az = Math.abs(nrm.getZ(i))
+    const [u, v] =
+      ax >= ay && ax >= az ? [pos.getZ(i), pos.getY(i)] : ay >= az ? [pos.getX(i), pos.getZ(i)] : [pos.getX(i), pos.getY(i)]
+    uv.setXY(i, u / tile, v / tile)
+  }
+  uv.needsUpdate = true
+  return geometry
+}
+
 /** Tileable blotchy noise for concrete and plaster: white-ish, tint it with the material colour. */
 export function concreteTexture(repeat: [number, number], contrast = 1): THREE.CanvasTexture {
   const size = 512

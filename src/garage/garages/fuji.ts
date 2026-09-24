@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { assembleRoom, box, concreteTexture, createFloor, glowMaterial, type GarageDef, type Room } from './kit'
+import { SURFACES, assembleRoom, box, boxUV, createFloor, glowMaterial, pbrMaps, type GarageDef, type Room } from './kit'
 import { createLandscape } from './landscape'
 import { createWater } from './water'
 
@@ -14,46 +14,8 @@ const GROUND_Y = -0.6
 const POOL = { d: 8, water: -0.28 }
 
 /**
- * Board-formed concrete: blotchy concrete cast against planks, with the
- * seams of the formwork panels and the round tie holes Tadao Ando made his
- * signature. One texture tile = one 1.8 × 0.9 m panel.
- */
-function boardFormedTexture(repeat: [number, number]): THREE.CanvasTexture {
-  const texture = concreteTexture(repeat, 0.8)
-  const canvas = texture.image as HTMLCanvasElement
-  const g = canvas.getContext('2d')!
-  const W = canvas.width
-  const H = canvas.height
-  // plank grain: faint horizontal bands
-  for (let y = 0; y < H; y += 32) {
-    g.fillStyle = `rgba(0,0,0,${0.02 + Math.random() * 0.03})`
-    g.fillRect(0, y, W, 32)
-  }
-  // panel seams on the tile edges (so they line up across tiles)
-  g.fillStyle = 'rgba(40,40,40,0.55)'
-  g.fillRect(0, 0, W, 3)
-  g.fillRect(0, 0, 3, H)
-  // 3 × 2 tie holes, a dark cone with a light rim
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 2; j++) {
-      const x = (W / 3) * (i + 0.5)
-      const y = (H / 2) * (j + 0.5)
-      const hole = g.createRadialGradient(x, y, 0, x, y, 11)
-      hole.addColorStop(0, 'rgba(30,30,30,0.9)')
-      hole.addColorStop(0.6, 'rgba(70,70,70,0.6)')
-      hole.addColorStop(0.8, 'rgba(235,235,235,0.5)')
-      hole.addColorStop(1, 'rgba(200,200,200,0)')
-      g.fillStyle = hole
-      g.fillRect(x - 12, y - 12, 24, 24)
-    }
-  }
-  texture.needsUpdate = true
-  return texture
-}
-
-/**
  * An open concrete-and-glass pavilion on grassland below Mount Fuji, under a
- * clear sky. A board-formed concrete wall on one side, floor-to-ceiling glass
+ * clear sky. A cast concrete wall on one side, floor-to-ceiling glass
  * on two others, the front open to a reflecting pool — and a cantilevered
  * roof slab with a skylight over the car. The world around it is landscape.ts.
  */
@@ -72,23 +34,41 @@ function createFujiPavilion(): Room {
   })
   group.add(landscape.group)
 
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x9a9894, map: concreteTexture([4, 4], 0.7), roughness: 0.85 })
+  // photographed concrete (kit SURFACES): polished floor concrete for the deck and everything
+  // at ground level, cast panels for the wall and the roof slab. UVs are in metres (boxUV),
+  // so each set of maps is loaded once and shared by every piece it covers.
+  const floorMaps = pbrMaps(SURFACES.concreteFloor)
+  const panelMaps = pbrMaps(SURFACES.concretePanels)
+  const concrete = new THREE.MeshStandardMaterial({ ...floorMaps.maps, color: 0xffffff, roughness: 1, normalScale: new THREE.Vector2(0.8, 0.8) })
+  const panels = new THREE.MeshStandardMaterial({ ...panelMaps.maps, color: 0xe4e2de, roughness: 1 })
+  /** a concrete box, textured at true scale */
+  const cast = (size: [number, number, number], material: THREE.MeshStandardMaterial, at: [number, number, number]) => {
+    const mesh = box(group, size, material, at)
+    boxUV(mesh.geometry, material === panels ? SURFACES.concretePanels.tile : SURFACES.concreteFloor.tile)
+    return mesh
+  }
   const darkSteel = new THREE.MeshStandardMaterial({ color: 0x141517, roughness: 0.4, metalness: 0.8 })
 
   // ─── the platform: polished concrete over a soft mirror ─────────────────
-  box(group, [w, -GROUND_Y, d], concrete, [0, GROUND_Y / 2 - 0.01, 0]) // its edge, top just under the floor
+  cast([w, -GROUND_Y, d], concrete, [0, GROUND_Y / 2 - 0.01, 0]) // its edge, top just under the floor
+  // uvs in tiles of the floor texture, so the deck shares its maps with the edges
+  const deck = new THREE.PlaneGeometry(w, d)
+  const deckUV = deck.attributes.uv
+  for (let k = 0; k < deckUV.count; k++) deckUV.setXY(k, (deckUV.getX(k) * w) / SURFACES.concreteFloor.tile, (deckUV.getY(k) * d) / SURFACES.concreteFloor.tile)
   const floor = createFloor(group, {
-    geometry: new THREE.PlaneGeometry(w, d),
+    geometry: deck,
     tint: 0x8a8a8a,
     blur: 0.016,
     surface: new THREE.MeshStandardMaterial({
-      color: 0x8c8a86,
-      map: concreteTexture([w / 4, d / 4], 0.5),
-      roughness: 0.32,
+      ...floorMaps.maps,
+      color: 0xffffff,
+      roughness: 0.75, // × the map: polished, with duller patches
+      normalScale: new THREE.Vector2(0.6, 0.6),
       metalness: 0.02,
       opacity: 0.8,
     }),
   })
+
 
   // ─── the reflecting pool in front, with stepping stones ─────────────────
   const water = createWater(new THREE.PlaneGeometry(w, POOL.d), {
@@ -100,17 +80,16 @@ function createFujiPavilion(): Room {
   // …and the other way round: the deck's mirror doesn't need to see the pool below its edge
   floor.floorLayers.push(water.mesh)
   const rimH = POOL.water - GROUND_Y + 0.06
-  box(group, [w + 0.6, rimH, 0.3], concrete, [0, GROUND_Y + rimH / 2, d / 2 + POOL.d + 0.15])
-  for (const side of [-1, 1]) box(group, [0.3, rimH, POOL.d], concrete, [side * (w / 2 + 0.15), GROUND_Y + rimH / 2, d / 2 + POOL.d / 2])
+  cast([w + 0.6, rimH, 0.3], concrete, [0, GROUND_Y + rimH / 2, d / 2 + POOL.d + 0.15])
+  for (const side of [-1, 1]) cast([0.3, rimH, POOL.d], concrete, [side * (w / 2 + 0.15), GROUND_Y + rimH / 2, d / 2 + POOL.d / 2])
   for (let i = 0; i < 5; i++) {
-    const stone = box(group, [1.3, 0.3, 0.7], concrete, [1.4 + (i % 2) * 0.7, POOL.water + 0.02, d / 2 + 1.1 + i * 1.5])
+    const stone = cast([1.3, 0.3, 0.7], concrete, [1.4 + (i % 2) * 0.7, POOL.water + 0.02, d / 2 + 1.1 + i * 1.5])
     stone.rotation.y = (i % 2 ? 1 : -1) * 0.08
   }
   const OUT_FRONT = 10 // how far past the deck, over the pool, the camera may go
 
   // ─── the concrete wall (left) ────────────────────────────────────────────
-  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xa6a39d, map: boardFormedTexture([d / 1.8, ROOF_Y / 0.9]), roughness: 0.9 })
-  box(group, [0.5, ROOF_Y, d], wallMaterial, [-w / 2 + 1.5, ROOF_Y / 2, 0])
+  cast([0.5, ROOF_Y, d], panels, [-w / 2 + 1.5, ROOF_Y / 2, 0])
   // a warm cove light washing up the wall from a slot in the floor
   const cove = new THREE.Mesh(new THREE.PlaneGeometry(d - 1, 0.06), glowMaterial(0xffd2a0, 4))
   cove.rotation.set(-Math.PI / 2, 0, Math.PI / 2)
@@ -154,10 +133,10 @@ function createFujiPavilion(): Room {
   const y = ROOF_Y + t / 2
   const sideW = (roofW - SKY.w) / 2
   const endD = (roofD - SKY.d) / 2
-  box(group, [sideW, t, roofD], concrete, [-(SKY.w + sideW) / 2, y, 0])
-  box(group, [sideW, t, roofD], concrete, [(SKY.w + sideW) / 2, y, 0])
-  box(group, [SKY.w, t, endD], concrete, [0, y, (SKY.d + endD) / 2])
-  box(group, [SKY.w, t, endD], concrete, [0, y, -(SKY.d + endD) / 2])
+  cast([sideW, t, roofD], panels, [-(SKY.w + sideW) / 2, y, 0])
+  cast([sideW, t, roofD], panels, [(SKY.w + sideW) / 2, y, 0])
+  cast([SKY.w, t, endD], panels, [0, y, (SKY.d + endD) / 2])
+  cast([SKY.w, t, endD], panels, [0, y, -(SKY.d + endD) / 2])
   const skylight = new THREE.Mesh(new THREE.PlaneGeometry(SKY.w, SKY.d), glass)
   skylight.rotation.x = Math.PI / 2
   skylight.position.set(0, ROOF_Y + t - 0.02, 0)
@@ -205,7 +184,7 @@ function createFujiPavilion(): Room {
     ],
     background: 0xa7bdd8, // only until the sky is in
     environmentIntensity: 1,
-    ready: landscape.ready,
+    ready: Promise.all([landscape.ready, floorMaps.ready, panelMaps.ready]).then(() => {}),
   })
   return {
     ...room,
