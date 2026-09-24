@@ -17,11 +17,12 @@ const GROUND_Y = GROUND
 /** the reflecting pool in front of the open side (z extent past the deck) */
 const POOL = { d: 8, water: -0.28 }
 /**
- * From the right, mid-morning: side light, so the mountain has a sunlit and a
- * shaded flank and the car's shape reads — a sun behind the camera lights
- * everything flat.
+ * Late afternoon, low from the left and a little toward the camera: golden
+ * side light, so Fuji's face and its snow catch the sun while its right flank
+ * falls into shade, and the car's shape reads. (Straight behind the camera
+ * lights everything flat; from beyond the mountain its face is all shadow.)
  */
-const DEFAULT_SUN: SunPosition = { azimuth: -100, elevation: 30 }
+const DEFAULT_SUN: SunPosition = { azimuth: -72, elevation: 14 }
 
 /**
  * An open concrete-and-glass pavilion on a lawn terrace above a lake, with
@@ -227,7 +228,7 @@ function createFujiPavilion(): Room {
     shaftDensity: 0.006, // clear open air: a faint glow toward the sun
     shaftRange: 40,
     // under the roof the air is dustier: sunbeams through the skylight and the open front read clearly
-    dust: { box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)), density: 0.07 },
+    dust: { box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)), density: 0.025 },
   }
   const noonAir = new THREE.Color(0.5, 0.62, 0.8)
   const lowAir = new THREE.Color(0.75, 0.52, 0.42)
@@ -252,7 +253,9 @@ function createFujiPavilion(): Room {
     landscape.lake.setSunDirection(dir)
     atmosphere.sunDirection.copy(dir)
     atmosphere.sunColor.copy(light.color).multiplyScalar(light.intensity * 0.35)
-    atmosphere.airColor.copy(lowAir).lerp(noonAir, day).multiplyScalar(0.35 + 0.65 * day)
+    // the air is lit by the whole sky, so it stays blue at a low sun, only a little warmer and dimmer;
+    // the gold is in the forward scattering toward the sun (sunColor)
+    atmosphere.airColor.copy(noonAir).lerp(lowAir, 0.35 * (1 - day)).multiplyScalar(0.4 + 0.6 * day)
     // the lake mirrors hills kilometres off: give their reflection the air they're seen through
     landscape.lake.setHaze(atmosphere.airColor, 0.35)
   }
