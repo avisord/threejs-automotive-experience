@@ -222,11 +222,13 @@ function createFujiPavilion(): Room {
     sunDirection: new THREE.Vector3(),
     sunColor: new THREE.Color(),
     airColor: new THREE.Color(),
-    // A clear day: ~100 km visibility at the lake (extinction 3.9 / 100 km), thinning with a ~1.2 km
-    // scale height. The road is crisp, the far shore softens, the ranges step back ridge by ridge,
-    // and Fuji at 17 km is veiled but its dark lower slopes still stand apart from the snow.
-    density: 4e-5,
+    // Late-afternoon air: ~55 km visibility at the lake (extinction 3.9 / 55 km), thinning with a
+    // ~1.2 km scale height, and a low mist in the valleys. The road is crisp, the far shore softens,
+    // each range stands paler than the one in front with its foot in the mist, and Fuji at 17 km
+    // is veiled blue low down while its snow still stands clear.
+    density: 7e-5,
     falloff: 1 / 1200,
+    mist: { density: 5e-5, falloff: 1 / 220 },
     groundY: SITE.lakeLevel,
     compress: SITE.compress, // far layers are drawn closer than they are (site.ts): haze them for their real distance
     shaftLight: sun,
@@ -235,8 +237,10 @@ function createFujiPavilion(): Room {
     // under the roof the air is dustier: sunbeams through the skylight read clearly (density set in applySun)
     dust: { box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)), density: 0 },
   }
-  const noonAir = new THREE.Color(0.5, 0.62, 0.8)
-  const lowAir = new THREE.Color(0.75, 0.52, 0.42)
+  // a touch darker and bluer than the horizon sky: far ridges sit just below it in value, so each
+  // one reads against the sky and against the paler one behind (brighter haze washed them all out)
+  const noonAir = new THREE.Color(0.27, 0.35, 0.52)
+  const lowAir = new THREE.Color(0.42, 0.33, 0.32)
 
   let sunAt: SunPosition = { ...DEFAULT_SUN }
   function applySun(next: SunPosition): void {

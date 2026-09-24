@@ -16,6 +16,12 @@ export interface AtmosphereParams {
   /** ground level the haze sits on */
   groundY: number
   /**
+   * A second, low layer: mist lying in the valleys (per metre at ground level, thinning per
+   * metre of height). Ridge bases sit in it and their crests rise out of it, so ranges stacked
+   * one behind another each read as their own layer.
+   */
+  mist?: { density: number; falloff: number }
+  /**
    * Far layers drawn closer than they are (a distance-compressed backdrop):
    * past `start` metres, a drawn distance d stands for start + (d − start) × factor.
    */
@@ -43,6 +49,8 @@ uniform vec3 uAirColor;
 uniform float uDensity;
 uniform float uFalloff;
 uniform float uGroundY;
+uniform float uMistDensity;
+uniform float uMistFalloff;
 uniform float uCompressStart;
 uniform float uCompressFactor;
 uniform float uStrength;
@@ -64,6 +72,16 @@ float phaseHG( float cosTheta, float g ) {
   return ( 1.0 - g2 ) / ( 12.566371 * pow( 1.0 + g2 - 2.0 * g * cosTheta, 1.5 ) );
 }
 
+// optical depth of exponential height fog along a ray: ∫ density·exp(−falloff·(h0 + rd.y·s)) ds, s ∈ [0, dist].
+// = dist · (1 − e^−x) / x, x = falloff·rd.y·dist; near x = 0 the series stands in for the division.
+// (Switching to plain dist at a fixed |falloff·rd.y| put a step in the haze at one elevation angle —
+// ~7° with a 1.2 km scale height — that cut across the mountain as a hard line.)
+float fogDepth( float density, float falloff, float h0, float rdy, float dist ) {
+  float x = falloff * rdy * dist;
+  float shape = abs( x ) > 1e-3 ? ( 1.0 - exp( -x ) ) / x : 1.0 - 0.5 * x + x * x / 6.0;
+  return density * exp( -falloff * h0 ) * dist * shape;
+}
+
 // interleaved gradient noise: a per-pixel offset that turns banding into fine grain
 float ign( vec2 p ) {
   return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) );
@@ -80,7 +98,9 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
   // the view ray through this pixel, and how far along it the surface is
   vec4 far = uProjectionInverse * vec4( uv * 2.0 - 1.0, 1.0, 1.0 );
   vec3 viewDir = far.xyz / far.w;
-  bool sky = depth >= 0.99999;
+  // the sky is pinned to the far plane (depth 1). A looser test (0.99999) took everything drawn past
+  // ~5.4 km for sky with a 0.1 m / 12 km camera — the far ranges and Fuji's upper cone went unhazed
+  bool sky = depth >= 0.9999999;
   float viewZ = sky ? -1e6 : getViewZ( depth );
   vec3 viewPos = viewDir * ( viewZ / viewDir.z );
   vec3 rd = normalize( ( uCameraWorld * vec4( viewDir, 0.0 ) ).xyz );
@@ -95,13 +115,8 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
   // the sky already carries its own atmosphere, so it gets none added
   if ( !sky ) {
     float h0 = max( uCameraPosition.y - uGroundY, 0.0 );
-    // ∫ exp(-falloff·rd.y·s) ds over the ray = dist · (1 − e^−x) / x, x = falloff·rd.y·dist. Near x = 0
-    // the series stands in for the division. (Switching to plain dist at a fixed |falloff·rd.y|
-    // put a step in the haze at one elevation angle — ~7° with a 1.2 km scale height — that cut
-    // across the mountain as a hard line.)
-    float x = uFalloff * rd.y * dist;
-    float integral = dist * ( abs( x ) > 1e-3 ? ( 1.0 - exp( -x ) ) / x : 1.0 - 0.5 * x + x * x / 6.0 );
-    float opticalDepth = uDensity * exp( -uFalloff * h0 ) * integral * uStrength;
+    float opticalDepth =
+      ( fogDepth( uDensity, uFalloff, h0, rd.y, dist ) + fogDepth( uMistDensity, uMistFalloff, h0, rd.y, dist ) ) * uStrength;
     float transmittance = exp( -opticalDepth );
     // the air's own glow, brighter toward the sun (forward scattering) — kept modest: at 0.7+ and full
     // strength a sunward view washes out to white within a hundred metres
@@ -158,6 +173,8 @@ export class AtmosphereEffect extends Effect {
         ['uDensity', new THREE.Uniform(0)],
         ['uFalloff', new THREE.Uniform(0.01)],
         ['uGroundY', new THREE.Uniform(0)],
+        ['uMistDensity', new THREE.Uniform(0)],
+        ['uMistFalloff', new THREE.Uniform(0.01)],
         ['uCompressStart', new THREE.Uniform(1e9)],
         ['uCompressFactor', new THREE.Uniform(1)],
         ['uStrength', new THREE.Uniform(1)],
@@ -193,6 +210,7 @@ export class AtmosphereEffect extends Effect {
     u.get('uCameraPosition')!.value.setFromMatrixPosition(camera.matrixWorld)
     if (!p) {
       u.get('uDensity')!.value = 0
+      u.get('uMistDensity')!.value = 0
       u.get('uShafts')!.value = 0
       return
     }
@@ -202,6 +220,8 @@ export class AtmosphereEffect extends Effect {
     u.get('uDensity')!.value = p.density
     u.get('uFalloff')!.value = p.falloff
     u.get('uGroundY')!.value = p.groundY
+    u.get('uMistDensity')!.value = p.mist?.density ?? 0
+    u.get('uMistFalloff')!.value = p.mist?.falloff ?? 0.01
     u.get('uCompressStart')!.value = p.compress?.start ?? 1e9
     u.get('uCompressFactor')!.value = p.compress?.factor ?? 1
     u.get('uShaftDensity')!.value = p.shaftDensity
