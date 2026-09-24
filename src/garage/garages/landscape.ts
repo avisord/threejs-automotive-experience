@@ -66,23 +66,32 @@ const ACCENTS: Accent[] = [
   { x: 15, z: -21, kind: 'sakura', height: 6.5 },
 ]
 
-/** three curved blades from one root — one instance of the meadow */
+/**
+ * Seven curved blades from one root, of different heights and leans, their tips
+ * paler and yellower than their bases — one instance of the meadow.
+ */
 function grassClump(): THREE.BufferGeometry {
   const blades: THREE.BufferGeometry[] = []
   const levels = [0, 0.35, 0.7, 1]
-  const widths = [0.024, 0.02, 0.012, 0]
-  for (let b = 0; b < 3; b++) {
-    const turn = (b / 3) * Math.PI * 2 + b * 0.7
-    const lean = 0.18 + b * 0.07
+  const widths = [0.012, 0.01, 0.006, 0]
+  const rand = seeded(3)
+  for (let b = 0; b < 7; b++) {
+    const turn = (b / 7) * Math.PI * 2 + rand() * 0.9
+    const lean = 0.12 + rand() * 0.3
+    const tall = 0.55 + rand() * 0.45
+    // blades stand a little apart at the root
+    const ox = (rand() - 0.5) * 0.06
+    const oz = (rand() - 0.5) * 0.06
     const positions: number[] = []
     const colors: number[] = []
     for (const [k, y] of levels.entries()) {
       const bend = y * y * lean // curls over toward the tip
       for (const side of widths[k] ? [-1, 1] : [0]) {
         const lx = side * widths[k]
-        positions.push(Math.cos(turn) * lx - Math.sin(turn) * bend, y, Math.sin(turn) * lx + Math.cos(turn) * bend)
-        const shade = 0.45 + 0.55 * y // darker at the root
-        colors.push(shade, shade, shade)
+        positions.push(ox + Math.cos(turn) * lx - Math.sin(turn) * bend, y * tall, oz + Math.sin(turn) * lx + Math.cos(turn) * bend)
+        // darker at the root, paler and yellower toward the tip
+        const shade = 0.6 + 0.6 * y
+        colors.push(shade * (1 + 0.25 * y), shade * (1 + 0.1 * y), shade * (1 - 0.25 * y))
       }
     }
     const g = new THREE.BufferGeometry()
@@ -104,7 +113,7 @@ function grassClump(): THREE.BufferGeometry {
  * patches of taller grass.
  */
 function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.InstancedMesh {
-  const COUNT = 38000
+  const COUNT = 42000
   const INNER = 2
   const OUTER = 44
   const mesh = new THREE.InstancedMesh(
@@ -143,7 +152,7 @@ function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.Instanced
     c.setHSL(
       THREE.MathUtils.lerp(0.23 - tall * 0.04 + rand() * 0.04, 0.12 + rand() * 0.02, dry),
       THREE.MathUtils.lerp(0.4 + rand() * 0.2, 0.42, dry),
-      THREE.MathUtils.lerp(0.22 + tall * 0.06 + rand() * 0.08, 0.4 + rand() * 0.08, dry),
+      THREE.MathUtils.lerp(0.27 + tall * 0.06 + rand() * 0.1, 0.42 + rand() * 0.08, dry),
       THREE.SRGBColorSpace,
     )
     mesh.setColorAt(n, c)
@@ -185,7 +194,8 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
   const canopy = createCanopy()
   const town = createTown()
   const greenery = createGreenery(town.houses)
-  outdoor.add(createTerrain(), canopy, town.group, greenery, createFujiMountain(), createRanges(), roadside.group, meadow)
+  const terrain = createTerrain()
+  outdoor.add(terrain.mesh, canopy, town.group, greenery, createFujiMountain(), createRanges(), roadside.group, meadow)
 
   const farDetail: THREE.Object3D[] = [...roadside.details, canopy, town.group, greenery]
   // the lake can't show anything near the pavilion: skip it all in its mirror pass
@@ -193,7 +203,7 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
   const lake = createLake(opts, () => [...nearDetail, ...opts.hideFromLake()])
   group.add(sky.mesh, outdoor, lake.mesh)
 
-  const ready = createForest({
+  const forestReady = createForest({
     seed: 5,
     heightAt,
     density: forestDensity,
@@ -209,5 +219,6 @@ export function createLandscape(opts: LandscapeOptions): Landscape {
       await forest.ready
     })
     .catch((err: unknown) => console.error('[garage] forest failed', err))
+  const ready = Promise.all([forestReady, terrain.ready]).then(() => {})
   return { group, outdoor, sky, lake, farDetail, ready, setEvening: town.setEvening }
 }

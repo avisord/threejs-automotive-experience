@@ -181,6 +181,8 @@ export const SURFACES = {
   concretePanels: { dir: 'concrete-panels', tile: 4 },
   /** fibrous Japanese cedar (sugi) bark, 1 × 2 m — Poly Haven "Japanese Cedar Bark" */
   cedarBark: { dir: 'japanese-cedar-bark', tile: 1 },
+  /** short grass over soil, 2 × 2 m — Poly Haven "Sparse Grass" (the terrain uses it for detail, not colour) */
+  sparseGrass: { dir: 'sparse-grass', tile: 2 },
 } as const
 
 export interface PbrMaps {
