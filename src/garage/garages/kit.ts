@@ -183,6 +183,8 @@ export const SURFACES = {
   cedarBark: { dir: 'japanese-cedar-bark', tile: 1 },
   /** short grass over soil, 2 × 2 m — Poly Haven "Sparse Grass" (the terrain uses it for detail, not colour) */
   sparseGrass: { dir: 'sparse-grass', tile: 2 },
+  /** dry river pebbles, 2 × 2 m — Poly Haven "Dry River Pebbles" */
+  riverPebbles: { dir: 'river-pebbles', tile: 2 },
 } as const
 
 export interface PbrMaps {
@@ -445,7 +447,8 @@ export function assembleRoom(group: THREE.Group, floor: Floor, opts: RoomOptions
   }
 }
 
-function disposeTree(root: THREE.Object3D): void {
+/** free every geometry, material, texture, light and mirror under `root` */
+export function disposeTree(root: THREE.Object3D): void {
   root.traverse((obj) => {
     if (obj instanceof Reflector) {
       obj.dispose() // render target and material, not the geometry

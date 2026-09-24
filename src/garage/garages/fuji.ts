@@ -1,10 +1,8 @@
 import * as THREE from 'three'
 import { SURFACES, assembleRoom, box, boxUV, createFloor, glowMaterial, pbrMaps, type GarageDef, type Room } from './kit'
-import type { AtmosphereParams } from '../atmosphere-effect'
-import { aimFarShadow, createFarShadowLight } from './far-shadow'
-import { createLandscape } from './landscape'
-import { GROUND, SITE } from './site'
-import { sunDirection, sunLight, type SunPosition } from './sky'
+import { DEFAULT_SUN, createFujiWorld } from './fuji-world'
+import { GROUND } from './site'
+import { sunDirection } from './sky'
 import { createGlassMaterial, glassPane } from './glass'
 import { createWater } from './water'
 
@@ -19,15 +17,6 @@ const SKY = { w: 4, d: 9 }
 const GROUND_Y = GROUND
 /** the reflecting pool in front of the open side (z extent past the deck) */
 const POOL = { d: 8, water: -0.28 }
-/**
- * Late afternoon, low from the right (west, looking south to Fuji from its
- * northern lakes) and a little toward the camera: golden side light, so Fuji's
- * face and snow catch the sun while its left flank falls into shade, and it
- * streams in through the glass across the floor and the car. (Straight behind
- * the camera lights everything flat; from beyond the mountain its face is all
- * shadow; from the left the concrete wall keeps it off the floor.)
- */
-const DEFAULT_SUN: SunPosition = { azimuth: 70, elevation: 14 }
 
 /**
  * An open concrete-and-glass pavilion on a lawn terrace above a lake, with
@@ -41,17 +30,28 @@ function createFujiPavilion(): Room {
   const group = new THREE.Group()
   group.name = 'fuji-pavilion'
 
-  // ─── the world outside ───────────────────────────────────────────────────
+  // ─── the world outside (fuji-world.ts) ──────────────────────────────────
   const inPool = (x: number, z: number) => Math.abs(x) < w / 2 + 0.4 && z > d / 2 - 0.1 && z < d / 2 + POOL.d + 0.5
   const underDeck = (x: number, z: number) => Math.abs(x) < w / 2 + 0.15 && Math.abs(z) < d / 2 + 0.15
   /** the pavilion itself: nothing the lake's mirror could show (filled once it's built) */
   const pavilionParts: THREE.Object3D[] = []
-  const landscape = createLandscape({
+  // the pavilion's own reactions to the sun, wired once they exist (applySun runs before they do)
+  let skyLight: THREE.RectAreaLight | null = null
+  let water: ReturnType<typeof createWater> | null = null
+  const world = createFujiWorld(group, {
     keepClear: (x, z) => underDeck(x, z) || inPool(x, z),
-    sunDirection: sunDirection(DEFAULT_SUN),
     hideFromLake: () => pavilionParts,
+    // under the roof the air is dustier: sunbeams through the skylight read clearly
+    dust: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)),
+    onSun({ direction, elevation, day, atmosphere }) {
+      if (skyLight) skyLight.intensity = 6 + 2 * day // the key light: brighter by day, never off
+      water?.setSunDirection(direction)
+      // a high sun drops a beam through the skylight; a low one floods the whole floor sideways, and
+      // lit dust there is a veil over the car streaked with its shadow — so the dust fades with the sun
+      atmosphere.dust!.density = 0.004 + 0.066 * THREE.MathUtils.smoothstep(elevation, 20, 45)
+    },
   })
-  group.add(landscape.group)
+  const landscape = world.landscape
 
   // photographed concrete (kit SURFACES): polished floor concrete for the deck and everything
   // at ground level, cast panels for the wall and the roof slab. UVs are in metres (boxUV),
@@ -104,7 +104,7 @@ function createFujiPavilion(): Room {
   })
 
   // ─── the reflecting pool in front, with stepping stones ─────────────────
-  const water = createWater(new THREE.PlaneGeometry(w, POOL.d), {
+  water = createWater(new THREE.PlaneGeometry(w, POOL.d), {
     sunDirection: sunDirection(DEFAULT_SUN),
     // the deck's own mirror would render again inside this one; far forests are a few pixels in the pool
     // (and no mirror renders another inside its own pass: that would double the work)
@@ -186,7 +186,7 @@ function createFujiPavilion(): Room {
   group.add(skylight)
   // daylight falling through it — and a diffuser in the well: the showroom's key light on the car,
   // whatever the sun is doing (scaled with the sun, see applySun)
-  const skyLight = new THREE.RectAreaLight(0xf2f4ff, 4, SKY.w, SKY.d)
+  skyLight = new THREE.RectAreaLight(0xf2f4ff, 4, SKY.w, SKY.d)
   skyLight.position.set(0, ROOF_Y + 0.1, 0)
   skyLight.up.set(0, 0, -1)
   skyLight.lookAt(0, 0, 0)
@@ -216,87 +216,13 @@ function createFujiPavilion(): Room {
     group.add(column)
   }
 
-  // ─── the sun, and the sky and grass filling in ──────────────────────────
-  // Its shadow covers the pavilion and the ground around it; the map is only
-  // re-rendered when the sun moves or a car comes or goes (shadowsChanged),
-  // not in every mirror pass of every frame.
-  const sun = new THREE.DirectionalLight(0xffffff, 2.2)
-  sun.castShadow = true
-  sun.shadow.mapSize.set(4096, 4096)
-  Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 300 })
-  sun.shadow.camera.updateProjectionMatrix()
-  sun.shadow.bias = -0.0002
-  sun.shadow.normalBias = 0.03
-  sun.shadow.autoUpdate = false
-  group.add(sun) // aims at the origin by default
-  // …and the whole landscape's shadows, coarser (far-shadow.ts) — must come right after the sun
-  const farShadow = createFarShadowLight()
-  group.add(farShadow)
-  const fill = new THREE.HemisphereLight(0xbcd2f0, 0x5a6a3c, 0.45)
-  group.add(fill)
   // the pavilion's structure casts the sun's shadow; glass and light strips don't
   for (const obj of group.children) {
     const mesh = obj as THREE.Mesh
     if (mesh.isMesh && [concrete, panels, ceiling, darkSteel].includes(mesh.material as THREE.MeshStandardMaterial)) mesh.castShadow = true
   }
   pavilionParts.push(...group.children.filter((o) => o !== landscape.group && !(o as THREE.Light).isLight))
-
-  // the air: distance haze and light shafts, kept in step with the sun (atmosphere-effect.ts)
-  const atmosphere: AtmosphereParams = {
-    sunDirection: new THREE.Vector3(),
-    sunColor: new THREE.Color(),
-    airColor: new THREE.Color(),
-    // Late-afternoon air: ~55 km visibility at the lake (extinction 3.9 / 55 km), thinning with a
-    // ~1.2 km scale height, and a low mist in the valleys. The road is crisp, the far shore softens,
-    // each range stands paler than the one in front with its foot in the mist, and Fuji at 17 km
-    // is veiled blue low down while its snow still stands clear.
-    density: 7e-5,
-    falloff: 1 / 1200,
-    mist: { density: 5e-5, falloff: 1 / 220 },
-    groundY: SITE.lakeLevel,
-    compress: SITE.compress, // far layers are drawn closer than they are (site.ts): haze them for their real distance
-    shaftLight: sun,
-    shaftDensity: 0.006, // clear open air: a faint glow toward the sun
-    shaftRange: 40,
-    // under the roof the air is dustier: sunbeams through the skylight read clearly (density set in applySun)
-    dust: { box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)), density: 0 },
-  }
-  // a touch darker and bluer than the horizon sky: far ridges sit just below it in value, so each
-  // one reads against the sky and against the paler one behind (brighter haze washed them all out)
-  const noonAir = new THREE.Color(0.27, 0.35, 0.52)
-  const lowAir = new THREE.Color(0.42, 0.33, 0.32)
-
-  let sunAt: SunPosition = { ...DEFAULT_SUN }
-  function applySun(next: SunPosition): void {
-    sunAt = { ...next }
-    const dir = sunDirection(sunAt)
-    const light = sunLight(sunAt.elevation)
-    const day = THREE.MathUtils.smoothstep(sunAt.elevation, 0, 25) // 0 at the horizon, 1 in full day
-    landscape.sky.setSun(dir)
-    sun.position.copy(dir).multiplyScalar(150)
-    sun.color.copy(light.color)
-    // a clear day's sun outshines the sky several times over — that contrast is what reads as sunlight
-    sun.intensity = light.intensity * 1.7
-    sun.shadow.needsUpdate = true
-    aimFarShadow(farShadow, dir)
-    fill.intensity = 0.04 + 0.06 * day // bounce from the grass; the sky's own fill is the env map
-    fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
-    skyLight.intensity = 6 + 2 * day // the key light: brighter by day, never off
-    water.setSunDirection(dir)
-    landscape.lake.setSunDirection(dir)
-    atmosphere.sunDirection.copy(dir)
-    // a high sun drops a beam through the skylight; a low one floods the whole floor sideways, and
-    // lit dust there is a veil over the car streaked with its shadow — so the dust fades with the sun
-    atmosphere.dust!.density = 0.004 + 0.066 * THREE.MathUtils.smoothstep(sunAt.elevation, 20, 45)
-    atmosphere.sunColor.copy(light.color).multiplyScalar(light.intensity * 0.35)
-    // the air is lit by the whole sky, so it stays blue at a low sun, only a little warmer and dimmer;
-    // the gold is in the forward scattering toward the sun (sunColor)
-    atmosphere.airColor.copy(noonAir).lerp(lowAir, 0.35 * (1 - day)).multiplyScalar(0.4 + 0.6 * day)
-    // the lake mirrors hills kilometres off: give their reflection the air they're seen through
-    landscape.lake.setHaze(atmosphere.airColor, 0.35)
-    landscape.setEvening(1 - THREE.MathUtils.smoothstep(sunAt.elevation, 4, 22))
-  }
-  applySun(sunAt)
+  world.hooks.sun!.set(world.hooks.sun!.get()) // again, now the pavilion's lights and pool are here
 
   const room = assembleRoom(group, floor, {
     bounds: [
@@ -305,41 +231,27 @@ function createFujiPavilion(): Room {
     ],
     background: 0xa7bdd8, // only until the sky is in
     environmentIntensity: 1,
-    ready: Promise.all([landscape.ready, floorMaps.ready, panelMaps.ready]).then(() => {
-      sun.shadow.needsUpdate = true // the trees are in: they cast too
-      farShadow.shadow.needsUpdate = true
-      floor.floorLayers.push(...landscape.farDetail) // and the deck's mirror can skip the far ones
+    ready: Promise.all([world.ready, floorMaps.ready, panelMaps.ready]).then(() => {
+      floor.floorLayers.push(...landscape.farDetail) // the deck's mirror can skip the far ones
     }),
   })
+  const pool = water
   return {
     ...room,
+    ...world.hooks,
     resize(width, height, pixelRatio) {
       room.resize(width, height, pixelRatio)
-      water.resize(width, height, pixelRatio)
-      landscape.lake.resize(width, height, pixelRatio)
+      pool.resize(width, height, pixelRatio)
+      world.resize(width, height, pixelRatio)
     },
     setReflectionScale(scale) {
       room.setReflectionScale(scale)
-      water.setReflectionScale(scale)
-      landscape.lake.setReflectionScale(scale)
+      pool.setReflectionScale(scale)
+      world.setReflectionScale(scale)
     },
     update(dt) {
-      water.update(dt)
-      landscape.lake.update(dt)
-    },
-    outdoor: {
-      root: landscape.outdoor,
-      probe: new THREE.Vector3(0, 30, 70), // out front, above the roof: open sky, the land below
-      beforeCapture: () => landscape.sky.showSunDisc(false),
-      afterCapture: () => landscape.sky.showSunDisc(true),
-    },
-    sun: {
-      get: () => ({ ...sunAt }),
-      set: applySun,
-    },
-    atmosphere,
-    shadowsChanged: () => {
-      sun.shadow.needsUpdate = true
+      pool.update(dt)
+      world.update(dt)
     },
   }
 }

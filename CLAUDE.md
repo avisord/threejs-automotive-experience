@@ -51,7 +51,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `groups.ts` + `highlight.ts` | Parts editor: user picks meshes, groups them, one material per group (per-source clones keep normal maps/cut-outs). See-through overlay copies for hover/selection/focus. Saved per car by mesh name. |
 | `lights.ts` | Head/tail lamps: lens emissive clones + real **spot** lights (tails aim back/down) with one-shot baked shadow maps, optional beam cone shader. Per car. |
 | `contact-shadow.ts` | Baked soft ground shadow per car (depth from below + blur). |
-| `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
+| `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji, fuji-meadow) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
 | `lens-flare-effect.ts` | Sun lens flare (glare, starburst, streak, ghosts), visibility from depth samples round the sun, scaled ×6 to read over the HDR sky. Settings › Graphics › Lens flare; only where a room has `atmosphere` (a sun). |
@@ -171,6 +171,12 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   sky's own luminance — the model's output is in large arbitrary units). The sun disc is hidden during env
   captures (its spike smears in the PMREM prefilter). The HDRI photo sky was dropped: its
   sun can't move. The path tracer gets a uniform sky-colour stand-in (`userData.pathTrace`).
+- The two Fuji garages share `fuji-world.ts` (landscape, sun + far shadow, fill, atmosphere,
+  sun control, open-air Room hooks; room-specific sun reactions via `onSun`). `fuji-meadow.ts`
+  has no building: the landscape is lifted (`lift`) so the lawn sits at the car's y = 0, the
+  car stands on a Poly Haven "Dry River Pebbles" pad with edging stones, and a pebble ribbon
+  (CatmullRom course, draped on `heightAt`, wound to face up, polygonOffset) runs to the road;
+  `keepClear` keeps grass/trees off both. No floor mirror: an invisible stand-in Reflector.
 - Vegetation (Fuji): `vegetation-layout.ts` plans every tree/shrub up front (`VEGETATION`
   tunables: cluster count/radius/density, lone trees, shrubs, clearings, size log-normal,
   veterans, crown width, lean, LOD bands/caps) — clustered Gaussian stands weighted by
