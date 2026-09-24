@@ -127,21 +127,32 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - Open-air garages: `garages/site.ts` lays out the Fuji site (terrace → road → valley →
   lake → far shore → ranges → Fuji) and owns `heightAt`, `lakeShape`, `roadZ`,
   `forestDensity`; `landscape.ts` assembles `terrain.ts` (real scale to 3.3 km),
-  `roadside.ts` (road, poles, wires, guardrail, signs, cars, houses), `town.ts` (~1,300
-  instanced lakeside houses/hotels), `canopy.ts` (a lumpy crown shell over thick woods —
-  far instanced trees alone read as confetti), `trees.ts` (incl. hand-placed framing pines
+  `roadside.ts` (road, poles, wires, guardrail, signs, cars), `town.ts` (~1,300
+  instanced lakeside houses, hotels and farmsteads; windows drawn by a facade shader in
+  building metres, fading to their average once smaller than ~2 px so towns don't
+  shimmer; gable/hipped matte roofs), `canopy.ts` (a lumpy crown shell over thick woods —
+  far instanced trees alone read as confetti; built on `terrain.TERRAIN_GRID` so it lies
+  exactly 3 m under bare ground at every vertex — on its own grid it poked through steep
+  slopes and z-fought), `trees.ts` (incl. hand-placed framing pines
   and sakura, `ACCENTS` in landscape.ts), `ranges.ts`, `fuji-mountain.ts`, the lake (`water.ts`, its own low-res mirror) and the
   sky — all from fixed seeds so videos are repeatable. Past 3.3 km the far layers are
   **distance-compressed**: built in real metres (Fuji 2,950 m above the lake at 17 km)
   and mapped vertex by vertex (`site.mapFar`, normals from the real shape first) so each
   point keeps its exact direction from the eye and its depth order; the atmosphere
-  effect's `compress` undoes the mapping to haze them for their real distance. (A 60 km
+  effect's `compress` undoes the mapping to haze them for their real distance. Haze is
+  two exponential height layers (1.2 km scale + a ~220 m valley `mist`), so each range's
+  foot is paler than its crest; ranges run out to 27 km (`ranges.ts`). The haze colour is
+  set a little darker/bluer than the horizon sky, or far ridges wash out. Two shader bugs
+  fixed there: the fog integral must not switch formulas at a fixed |falloff·rd.y| (it
+  drew a hard line across Fuji at ~7° elevation), and "sky" is depth ≥ 0.9999999 — at
+  0.99999 everything drawn past ~5.4 km (Fuji's cone, far ranges) went unhazed. (A 60 km
   far plane would leave metres of depth error near the lake shore.) The valley profile
   is designed from **depression angles** seen by the orbit camera (`site.VIEW_EYE`, ~8 m
   behind the car): the floor's edge hides everything > ~4.5° below its horizon, so the
   far shore sits within ~1°, the lake (50 m below the deck) at 1.6–2.9°, road/near-shore
   town at 3–4.5°; each farther point must appear a bit higher — a convex slope hid the
-  lake. Anything outside the back glass must stay under `site.roomBelowView` (the 3.9°
+  lake. The flanks and far shore rise from the water over a few hundred metres
+  (`rise` in `heightAt`) — at full height right at the shore they stood as cliffs. Anything outside the back glass must stay under `site.roomBelowView` (the 3.9°
   line) or it screens the lake; tall trees only at the window's sides. Land keeps ≥ 0.004 × r clear
   of the lake level for depth precision. Camera near/far 0.1 / 12000 m; PMREM far 12000.
   Three mirrors (deck, pool, lake) each hide the other two in their own pass. Optional
@@ -167,7 +178,9 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   passes (Fuji front view ~22 ms GPU at 1600×900 on the RX 7600 — measure with
   `EXT_disjoint_timer_query_webgl2`; wall-clock timings of `post.render` swing ±3 ms).
   Near leaf cards are the expensive part: accents and bushes are kept out of the deck
-  and pool mirrors.
+  and pool mirrors. three evaluates every RectAreaLight on every lit pixel, landscape
+  included (~1.6 ms each here) — fake cheap interior light (the roof slab's faint emissive
+  "bounce") rather than adding area lights.
 - Far shadows (`garages/far-shadow.ts`): the sun's map only covers ±45 m, so beyond it
   sunlit and shaded land looked the same. A second directional light with intensity 0
   and a 3.2 km, 4096² shadow map (re-rendered on sun moves / when trees arrive) casts for
