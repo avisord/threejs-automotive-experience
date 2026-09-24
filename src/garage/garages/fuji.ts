@@ -17,12 +17,14 @@ const GROUND_Y = GROUND
 /** the reflecting pool in front of the open side (z extent past the deck) */
 const POOL = { d: 8, water: -0.28 }
 /**
- * Late afternoon, low from the left and a little toward the camera: golden
- * side light, so Fuji's face and its snow catch the sun while its right flank
- * falls into shade, and the car's shape reads. (Straight behind the camera
- * lights everything flat; from beyond the mountain its face is all shadow.)
+ * Late afternoon, low from the right (west, looking south to Fuji from its
+ * northern lakes) and a little toward the camera: golden side light, so Fuji's
+ * face and snow catch the sun while its left flank falls into shade, and it
+ * streams in through the glass across the floor and the car. (Straight behind
+ * the camera lights everything flat; from beyond the mountain its face is all
+ * shadow; from the left the concrete wall keeps it off the floor.)
  */
-const DEFAULT_SUN: SunPosition = { azimuth: -72, elevation: 14 }
+const DEFAULT_SUN: SunPosition = { azimuth: 70, elevation: 14 }
 
 /**
  * An open concrete-and-glass pavilion on a lawn terrace above a lake, with
@@ -69,20 +71,23 @@ function createFujiPavilion(): Room {
   const deck = new THREE.PlaneGeometry(w, d)
   const deckUV = deck.attributes.uv
   for (let k = 0; k < deckUV.count; k++) deckUV.setXY(k, (deckUV.getX(k) * w) / SURFACES.concreteFloor.tile, (deckUV.getY(k) * d) / SURFACES.concreteFloor.tile)
-  const floor = createFloor(group, {
-    geometry: deck,
-    tint: 0x8a8a8a,
-    blur: 0.016,
-    surface: new THREE.MeshStandardMaterial({
-      ...floorMaps.maps,
-      color: 0xffffff,
-      roughness: 0.75, // × the map: polished, with duller patches
-      normalScale: new THREE.Vector2(0.6, 0.6),
-      metalness: 0.02,
-      opacity: 0.8,
-    }),
+  // dark polished concrete: the view, the car and the light strips show in it
+  const floorSurface = new THREE.MeshStandardMaterial({
+    ...floorMaps.maps,
+    color: 0xfff6ea, // the photographed concrete is already dark (~0.085 albedo): only warm it a touch
+    roughness: 0.6, // × the map: polished, with duller patches
+    normalScale: new THREE.Vector2(0.6, 0.6),
+    metalness: 0.02,
+    opacity: 0.68,
+    // the mirror under it does the sharp reflections; a rough sheen of the whole bright sky
+    // on top turned the floor navy blue
+    envMapIntensity: 0.35,
   })
-
+  const floor = createFloor(group, { geometry: deck, tint: 0x9a9a9a, blur: 0.009, surface: floorSurface })
+  // sunlight falling in through the glass lies on the floor in patches, with the car's shadow
+  group.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === floorSurface) o.receiveShadow = true
+  })
 
   // ─── the reflecting pool in front, with stepping stones ─────────────────
   const water = createWater(new THREE.PlaneGeometry(w, POOL.d), {
@@ -122,8 +127,8 @@ function createFujiPavilion(): Room {
     roughness: 0.04,
     metalness: 0,
     transparent: true,
-    opacity: 0.14,
-    envMapIntensity: 1.4,
+    opacity: 0.07, // clear: the view shouldn't sit behind a milky film
+    envMapIntensity: 1,
     side: THREE.DoubleSide,
     depthWrite: false,
   })
@@ -175,7 +180,7 @@ function createFujiPavilion(): Room {
     outer.position.set(side * (SKY.w / 2 + 4.5), ROOF_Y - 0.005, 0)
     group.add(outer)
   }
-  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 1.4, SKY.w + 9, roofD - 4)
+  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 0.6, SKY.w + 9, roofD - 4)
   ceilingLight.position.set(0, ROOF_Y - 0.05, 0)
   ceilingLight.up.set(0, 0, -1)
   ceilingLight.lookAt(0, 0, 0)
@@ -227,8 +232,8 @@ function createFujiPavilion(): Room {
     shaftLight: sun,
     shaftDensity: 0.006, // clear open air: a faint glow toward the sun
     shaftRange: 40,
-    // under the roof the air is dustier: sunbeams through the skylight and the open front read clearly
-    dust: { box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)), density: 0.025 },
+    // under the roof the air is dustier: sunbeams through the skylight read clearly (density set in applySun)
+    dust: { box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)), density: 0 },
   }
   const noonAir = new THREE.Color(0.5, 0.62, 0.8)
   const lowAir = new THREE.Color(0.75, 0.52, 0.42)
@@ -248,10 +253,13 @@ function createFujiPavilion(): Room {
     aimFarShadow(farShadow, dir)
     fill.intensity = 0.04 + 0.06 * day // bounce from the grass; the sky's own fill is the env map
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
-    skyLight.intensity = 1 + 3 * day
+    skyLight.intensity = 0.5 + 1.5 * day // the pavilion stays a little darker than the day outside
     water.setSunDirection(dir)
     landscape.lake.setSunDirection(dir)
     atmosphere.sunDirection.copy(dir)
+    // a high sun drops a beam through the skylight; a low one floods the whole floor sideways, and
+    // lit dust there is a veil over the car streaked with its shadow — so the dust fades with the sun
+    atmosphere.dust!.density = 0.004 + 0.066 * THREE.MathUtils.smoothstep(sunAt.elevation, 20, 45)
     atmosphere.sunColor.copy(light.color).multiplyScalar(light.intensity * 0.35)
     // the air is lit by the whole sky, so it stays blue at a low sun, only a little warmer and dimmer;
     // the gold is in the forward scattering toward the sun (sunColor)
