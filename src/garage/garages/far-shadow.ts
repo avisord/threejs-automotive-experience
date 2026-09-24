@@ -38,15 +38,30 @@ export function aimFarShadow(light: THREE.DirectionalLight, sunDirection: THREE.
 const fragmentHook = '#include <lights_fragment_end>'
 
 /**
+ * three's light loop with the point, spot and area lights compiled out. Out in
+ * the landscape they light nothing — the pavilion's area lights and the car's
+ * lamp spots are metres away and aimed inside — yet every landscape pixel paid
+ * for them: an area light costs ~1.6 ms a frame at 1080p on an RX 7600, and each
+ * lamp spot a shadow-map lookup. Only the sun, the far shadow, the hemisphere
+ * and the sky's environment light the land.
+ */
+const outdoorLightLoop = THREE.ShaderChunk.lights_fragment_begin
+  .replace('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )', '#if 0')
+  .replace('#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )', '#if 0')
+  .replace('#if ( NUM_RECT_AREA_LIGHTS > 0 ) && defined( RE_Direct_RectArea )', '#if 0')
+if ((outdoorLightLoop.match(/#if 0/g) ?? []).length !== 3) console.warn('[garage] three light loop changed: landscape still evaluates indoor lights')
+
+/**
  * Let a landscape material take its shadow from the far map where the near
  * one doesn't reach. Inside the near map's footprint the near shadow (already
- * applied by three) rules; toward its edge the far one fades in.
+ * applied by three) rules; toward its edge the far one fades in. The material
+ * also stops evaluating the indoor lights (see outdoorLightLoop).
  */
 export function receiveFarShadow(material: THREE.Material): void {
   const previous = material.onBeforeCompile
   material.onBeforeCompile = (shader, renderer) => {
     previous?.call(material, shader, renderer)
-    shader.fragmentShader = shader.fragmentShader.replace(
+    shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', outdoorLightLoop).replace(
       fragmentHook,
       `${fragmentHook}
       #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 1

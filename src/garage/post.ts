@@ -270,6 +270,9 @@ export function createPostProcessing(
 
   const ao = new N8AOPostPass(scene, camera, window.innerWidth, window.innerHeight)
   ao.configuration.gammaCorrection = false // the effect pass after it handles output colour
+  // half resolution, upsampled along depth edges: contact shadows under a car are soft anyway, and
+  // at full resolution AO was the single most expensive pass (~5 ms at 1080p on an RX 7600)
+  ao.configuration.halfRes = true
   composer.addPass(ao)
 
   const listeners: ((sections: GraphicsSection[]) => void)[] = []
