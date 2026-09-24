@@ -57,10 +57,17 @@ function createFujiPavilion(): Room {
   const panelMaps = pbrMaps(SURFACES.concretePanels)
   const concrete = new THREE.MeshStandardMaterial({ ...floorMaps.maps, color: 0xffffff, roughness: 1, normalScale: new THREE.Vector2(0.8, 0.8) })
   const panels = new THREE.MeshStandardMaterial({ ...panelMaps.maps, color: 0xe4e2de, roughness: 1 })
+  // the roof slab: the same concrete, glowing faintly with the light bounced up off the floor and
+  // the car — lifts the ceiling out of black. (An up-facing area light did it at ~1.6 ms a frame:
+  // three evaluates every area light on every lit pixel, the whole landscape included.)
+  const ceiling = panels.clone()
+  ceiling.emissive.setHex(0xe8dccb, THREE.SRGBColorSpace)
+  ceiling.emissiveMap = panelMaps.maps.map ?? null
+  ceiling.emissiveIntensity = 0.1
   /** a concrete box, textured at true scale */
   const cast = (size: [number, number, number], material: THREE.MeshStandardMaterial, at: [number, number, number]) => {
     const mesh = box(group, size, material, at)
-    boxUV(mesh.geometry, material === panels ? SURFACES.concretePanels.tile : SURFACES.concreteFloor.tile)
+    boxUV(mesh.geometry, material === concrete ? SURFACES.concreteFloor.tile : SURFACES.concretePanels.tile)
     return mesh
   }
   const darkSteel = new THREE.MeshStandardMaterial({ color: 0x141517, roughness: 0.4, metalness: 0.8 })
@@ -154,16 +161,17 @@ function createFujiPavilion(): Room {
   const y = ROOF_Y + t / 2
   const sideW = (roofW - SKY.w) / 2
   const endD = (roofD - SKY.d) / 2
-  cast([sideW, t, roofD], panels, [-(SKY.w + sideW) / 2, y, 0])
-  cast([sideW, t, roofD], panels, [(SKY.w + sideW) / 2, y, 0])
-  cast([SKY.w, t, endD], panels, [0, y, (SKY.d + endD) / 2])
-  cast([SKY.w, t, endD], panels, [0, y, -(SKY.d + endD) / 2])
+  cast([sideW, t, roofD], ceiling, [-(SKY.w + sideW) / 2, y, 0])
+  cast([sideW, t, roofD], ceiling, [(SKY.w + sideW) / 2, y, 0])
+  cast([SKY.w, t, endD], ceiling, [0, y, (SKY.d + endD) / 2])
+  cast([SKY.w, t, endD], ceiling, [0, y, -(SKY.d + endD) / 2])
   const skylight = new THREE.Mesh(new THREE.PlaneGeometry(SKY.w, SKY.d), glass)
   skylight.rotation.x = Math.PI / 2
   skylight.position.set(0, ROOF_Y + t - 0.02, 0)
   group.add(skylight)
-  // daylight falling through it (scaled with the sun, see applySun)
-  const skyLight = new THREE.RectAreaLight(0xdce8ff, 4, SKY.w, SKY.d)
+  // daylight falling through it — and a diffuser in the well: the showroom's key light on the car,
+  // whatever the sun is doing (scaled with the sun, see applySun)
+  const skyLight = new THREE.RectAreaLight(0xf2f4ff, 4, SKY.w, SKY.d)
   skyLight.position.set(0, ROOF_Y + 0.1, 0)
   skyLight.up.set(0, 0, -1)
   skyLight.lookAt(0, 0, 0)
@@ -180,7 +188,7 @@ function createFujiPavilion(): Room {
     outer.position.set(side * (SKY.w / 2 + 4.5), ROOF_Y - 0.005, 0)
     group.add(outer)
   }
-  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 0.6, SKY.w + 9, roofD - 4)
+  const ceilingLight = new THREE.RectAreaLight(0xfff0dc, 1.2, SKY.w + 9, roofD - 4)
   ceilingLight.position.set(0, ROOF_Y - 0.05, 0)
   ceilingLight.up.set(0, 0, -1)
   ceilingLight.lookAt(0, 0, 0)
@@ -213,7 +221,7 @@ function createFujiPavilion(): Room {
   // the pavilion's structure casts the sun's shadow; glass and light strips don't
   for (const obj of group.children) {
     const mesh = obj as THREE.Mesh
-    if (mesh.isMesh && [concrete, panels, darkSteel].includes(mesh.material as THREE.MeshStandardMaterial)) mesh.castShadow = true
+    if (mesh.isMesh && [concrete, panels, ceiling, darkSteel].includes(mesh.material as THREE.MeshStandardMaterial)) mesh.castShadow = true
   }
   pavilionParts.push(...group.children.filter((o) => o !== landscape.group && !(o as THREE.Light).isLight))
 
@@ -257,7 +265,7 @@ function createFujiPavilion(): Room {
     aimFarShadow(farShadow, dir)
     fill.intensity = 0.04 + 0.06 * day // bounce from the grass; the sky's own fill is the env map
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
-    skyLight.intensity = 0.5 + 1.5 * day // the pavilion stays a little darker than the day outside
+    skyLight.intensity = 3 + 1 * day // the key light: brighter by day, never off
     water.setSunDirection(dir)
     landscape.lake.setSunDirection(dir)
     atmosphere.sunDirection.copy(dir)
