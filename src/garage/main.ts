@@ -18,6 +18,7 @@ import { createGroupEditor, type GroupEditor } from './groups'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
 import type { PathTracer } from './pathtrace'
+import type { InteriorSettings } from './garages/interior'
 import type { SunPosition } from './garages/sky'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { DEFAULT_CAR_SIZE, type CameraPose } from './camera-moves'
@@ -151,6 +152,14 @@ try {
 } catch {
   // defaults
 }
+const INTERIOR_KEY = 'garage.interior.v1'
+/** interior light settings picked per garage */
+let savedInteriors: Record<string, InteriorSettings> = {}
+try {
+  savedInteriors = JSON.parse(localStorage.getItem(INTERIOR_KEY) ?? '{}') as Record<string, InteriorSettings>
+} catch {
+  // defaults
+}
 installRoom()
 
 /** put `room` in the scene and light the car with it */
@@ -164,6 +173,8 @@ function installRoom(): void {
   scene.environmentIntensity = room.environmentIntensity
   const sun = savedSuns[garageDef.id]
   if (room.sun && sun) room.sun.set(sun)
+  const interior = savedInteriors[garageDef.id]
+  if (room.interior && interior) room.interior.set(interior)
   captureEnvironment()
   // a sky still loading: capture again once it's in, if this room is still up
   const installed = room
@@ -239,6 +250,24 @@ function setSun(sun: SunPosition): void {
   } catch {
     // not remembered — fine
   }
+  lightingChanged()
+}
+
+/** switch, dim or warm the room's own lights; the car's reflections catch up once the slider rests */
+function setInterior(settings: InteriorSettings): void {
+  if (!room.interior) return
+  room.interior.set(settings)
+  savedInteriors[garageDef.id] = room.interior.get()
+  try {
+    localStorage.setItem(INTERIOR_KEY, JSON.stringify(savedInteriors))
+  } catch {
+    // not remembered — fine
+  }
+  lightingChanged()
+}
+
+/** the room's light changed: draw now, re-capture the environment (and restart a trace) once it settles */
+function lightingChanged(): void {
   invalidate(2)
   clearTimeout(recaptureTimer)
   recaptureTimer = window.setTimeout(() => {
@@ -674,6 +703,8 @@ const pages: Record<string, Page> = {
     select: (id) => void showGarage(id),
     sun: () => room.sun?.get() ?? null,
     setSun,
+    interior: () => (room.interior ? { groups: room.interior.groups, settings: room.interior.get(), defaults: room.interior.defaults() } : null),
+    setInterior,
   }),
   collection: collectionPage({
     current: () => bay?.id ?? (loadingId ? null : NO_CAR),

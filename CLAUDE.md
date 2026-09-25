@@ -50,6 +50,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `configurator.ts` | Per-car part paint (body, wing, rims, calipers, cage, glass tint), presets, saved per car (`garage.car-config.v3.<id>`). |
 | `groups.ts` + `highlight.ts` | Parts editor: user picks meshes, groups them, one material per group (per-source clones keep normal maps/cut-outs). See-through overlay copies for hover/selection/focus. Saved per car by mesh name. |
 | `lights.ts` | Head/tail lamps: lens emissive clones + real **spot** lights (tails aim back/down) with one-shot baked shadow maps, optional beam cone shader. Per car. |
+| `garages/interior.ts` | A room's own light fittings in user-settable groups (`Room.interior`): on/off, intensity, colour temperature (blackbody ratio against the group's design kelvin, so defaults look as built) + a master dimmer; drives real lights, glow strips and emissive surfaces. Fuji Pavilion: Skylight (follows the sun), Ceiling LEDs, Wall cove. Menu › Garage › Interior lights; saved per garage in `garage.interior.v1`; changes re-capture the env map (debounced, like the sun). Area lights are dimmed to 0, never removed (a light-count change recompiles every material). |
 | `garages/fields.ts` | Farmland layout + per-pixel field shading, shared by the terrain, the far terrain and the hedgerows (see gotchas). |
 | `contact-shadow.ts` | Baked soft ground shadow per car (depth from below + blur). |
 | `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji, fuji-meadow) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
@@ -343,7 +344,8 @@ the real GPU and looking at screenshots:
   afterwards. Wait for `.loader.done` and `window.garage.configurator` before measuring.
 - Useful levers: `?car=<id>`, `localStorage` keys `garage.venue.v1` (garage),
   `garage.car.v1`, `garage.graphics.v1`, `garage.reel.v1` (video shot list),
-  `garage.panel-path.v1` (open panel page), `garage.sun.v1` (sun per open-air garage); `renderer.info` for leaks and draw counts;
+  `garage.panel-path.v1` (open panel page), `garage.sun.v1` (sun per open-air garage),
+  `garage.interior.v1` (interior lights per garage); `renderer.info` for leaks and draw counts;
   `/sys/class/drm/card1/device/gpu_busy_percent` for GPU load (it's a smoothed value).
 - Note: setting the garage via localStorage skips its grade look — pick it through the
   UI when judging colour.

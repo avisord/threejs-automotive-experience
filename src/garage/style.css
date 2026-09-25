@@ -804,3 +804,20 @@ body,
 .rec-stop:hover {
   border-color: #35e0ff;
 }
+
+/* Menu › Garage › Interior lights: a dot of the light's colour by its warmth, dimmed groups that are off */
+.cfg-kelvin {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: 0 0 6px var(--swatch);
+  vertical-align: -1px;
+}
+
+.cfg-part.is-off .cfg-slider,
+.cfg-part.is-off .cfg-note {
+  opacity: 0.4;
+}

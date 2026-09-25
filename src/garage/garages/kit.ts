@@ -3,6 +3,7 @@ import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
 import type { AtmosphereParams } from '../atmosphere-effect'
 import type { GradeLook } from '../post'
 import type { SunPosition } from './sky'
+import type { InteriorLights } from './interior'
 
 /**
  * A garage: the room around the car and everything that lights it. Swapping
@@ -71,6 +72,8 @@ export interface Room {
   atmosphere?: AtmosphereParams
   /** something that casts the sun's shadow changed (a car arrived or left): re-render its shadow map */
   shadowsChanged?(): void
+  /** the room's own light fittings, in groups the user can switch, dim and warm (Menu › Garage) */
+  interior?: InteriorLights
 }
 
 /**

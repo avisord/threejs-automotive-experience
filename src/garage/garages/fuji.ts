@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { SURFACES, assembleRoom, box, boxUV, createFloor, glowMaterial, pbrMaps, type GarageDef, type Room } from './kit'
 import { DEFAULT_SUN, createFujiWorld } from './fuji-world'
+import { createInteriorLights } from './interior'
 import { GROUND } from './site'
 import { sunDirection } from './sky'
 import { createGlassMaterial, glassPane } from './glass'
@@ -37,6 +38,9 @@ function createFujiPavilion(): Room {
   const pavilionParts: THREE.Object3D[] = []
   // the pavilion's own reactions to the sun, wired once they exist (applySun runs before they do)
   let skyLight: THREE.RectAreaLight | null = null
+  /** the skylight's designed output, following the sun; the user's dimmer scales it (interior) */
+  let skyOutput = 6
+  let interior: ReturnType<typeof createInteriorLights> | null = null
   let water: ReturnType<typeof createWater> | null = null
   const world = createFujiWorld(group, {
     keepClear: (x, z) => underDeck(x, z) || inPool(x, z),
@@ -44,7 +48,9 @@ function createFujiPavilion(): Room {
     // under the roof the air is dustier: sunbeams through the skylight read clearly
     dust: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, ROOF_Y, d / 2 + 1)),
     onSun({ direction, elevation, day, atmosphere }) {
-      if (skyLight) skyLight.intensity = 6 + 2 * day // the key light: brighter by day, never off
+      skyOutput = 6 + 2 * day // the key light: brighter by day, never off (unless the user switches it off)
+      if (skyLight) skyLight.intensity = skyOutput
+      interior?.refresh()
       water?.setSunDirection(direction)
       // a high sun drops a beam through the skylight; a low one floods the whole floor sideways, and
       // lit dust there is a veil over the car streaked with its shadow — so the dust fades with the sun
@@ -126,7 +132,8 @@ function createFujiPavilion(): Room {
   // ─── the concrete wall (left) ────────────────────────────────────────────
   cast([0.5, ROOF_Y, d], panels, [-w / 2 + 1.5, ROOF_Y / 2, 0])
   // a warm cove light washing up the wall from a slot in the floor
-  const cove = new THREE.Mesh(new THREE.PlaneGeometry(d - 1, 0.06), glowMaterial(0xffd2a0, 4))
+  const coveGlow = glowMaterial(0xffd2a0, 4)
+  const cove = new THREE.Mesh(new THREE.PlaneGeometry(d - 1, 0.06), coveGlow)
   cove.rotation.set(-Math.PI / 2, 0, Math.PI / 2)
   cove.position.set(-w / 2 + 1.85, 0.005, 0)
   group.add(cove)
@@ -216,6 +223,32 @@ function createFujiPavilion(): Room {
     group.add(column)
   }
 
+  // the fittings the user can switch, dim and warm (Menu › Garage › Interior lights); each group's
+  // design temperature is roughly its fittings' own colour, so the defaults look as built
+  interior = createInteriorLights([
+    {
+      id: 'skylight',
+      name: 'Skylight',
+      hint: 'The diffuser over the car: its key light, brighter by day',
+      kelvin: 7000,
+      members: [{ light: skyLight, intensity: () => skyOutput }],
+    },
+    {
+      id: 'ceiling',
+      name: 'Ceiling LEDs',
+      hint: 'The recessed slots and the soft light they spread over the room',
+      kelvin: 4800,
+      members: [{ glow: led }, { light: ceilingLight }, { emissive: ceiling }],
+    },
+    {
+      id: 'cove',
+      name: 'Wall cove',
+      hint: 'The warm strip in the floor washing up the concrete wall',
+      kelvin: 3200,
+      members: [{ glow: coveGlow }, { light: wash }],
+    },
+  ])
+
   // the pavilion's structure casts the sun's shadow; glass and light strips don't
   for (const obj of group.children) {
     const mesh = obj as THREE.Mesh
@@ -239,6 +272,7 @@ function createFujiPavilion(): Room {
   return {
     ...room,
     ...world.hooks,
+    interior,
     resize(width, height, pixelRatio) {
       room.resize(width, height, pixelRatio)
       pool.resize(width, height, pixelRatio)
