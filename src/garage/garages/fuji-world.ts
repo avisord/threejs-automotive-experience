@@ -82,16 +82,19 @@ export function createFujiWorld(group: THREE.Group, opts: FujiWorldOptions): Fuj
     airColor: new THREE.Color(),
     mistColor: new THREE.Color(),
     // Late-afternoon air: ~55 km visibility at the lake (extinction 3.9 / 55 km), thinning with a
-    // ~1.2 km scale height, and mist lying in the valleys. The road is crisp, the far shore softens,
+    // ~650 m scale height, and mist lying in the valleys. (Height is from the lake, groundY; the
+    // scale heights set how much clearer the air is up high: at 1.2 km for this layer and 8 km for
+    // the next, the ray to Fuji's summit crossed nearly as much haze as the one to its foot.) The road is crisp, the far shore softens,
     // each range stands paler than the one in front with its foot in the mist, and Fuji at 17 km
     // is veiled blue low down while its snow still stands clear.
     density: 7e-5,
-    falloff: 1 / 1200,
-    // the mist follows the land (its floor is each valley's own, ranges.ts): ~150 m deep, thinner
+    falloff: 1 / 650,
+    // the mist follows the land (its floor is each valley's own, ranges.ts): ~110 m deep, thinner
     // high up, patchy across the valley, and none over the first few hundred metres
     mist: { density: 2.6e-4, falloff: 1 / 110, top: 1 / 1500, near: 900, ...createMistFloor() },
-    // and the clear air, kilometres deep: the ranges 20–30 km off pale into it, their crests included
-    air: { density: 3.5e-5, falloff: 1 / 8000 },
+    // and the clear air above, thinning over 1.5 km: the ranges 20–30 km off, seen low over the
+    // land, pale into it; the rays up to Fuji's upper cone leave most of it below them
+    air: { density: 5e-5, falloff: 1 / 1500 },
     groundY: SITE.lakeLevel + lift,
     compress: SITE.compress, // far layers are drawn closer than they are (site.ts): haze them for their real distance
     shaftLight: sun,
