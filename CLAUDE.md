@@ -284,7 +284,10 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   cancelled; a width or spacing that differs per piece, or a steep-side flag that flips
   behind a ridge's end, left steps. Colour/cover from elevation, slope, aspect and moisture
   (gullies, valley floors); per-pixel crown/clearing detail from a real-metre `realXZ`
-  attribute. Cast shadows: an 8-direction horizon map per vertex (from a 180 m height raster
+  attribute, incl. `crownField` (11/30 m crown relief that tilts the normal, so low sun lights
+  one side of each crown — a flat forest colour read as painted green, "no vegetation").
+  Range trees are planted by area (650/km² < 8 km, 320/km² to 14 km, ~150 k impostors,
+  ~1–1.5 ms); at a few per vertex (~75/km²) the slopes looked bare. Cast shadows: an 8-direction horizon map per vertex (from a 180 m height raster
   of the whole land incl. `fujiSurface`), compared with the sun in the shader (`horizonShadow`,
   applied before `aomap_fragment`, after translucency). Land under Fuji's skirts is pushed
   well below them (depth precision). ~0.95 s to build; GPU cost no higher than the old bands.

@@ -468,6 +468,8 @@ const RINGS = 170
 /** a vertex every 0.25° all round */
 const SEGMENTS = 1440
 const ringRadius = (i: number) => INNER * (OUTER / INNER) ** (i / RINGS)
+/** one ring's radius over the one inside it */
+const RING_RATIO = (OUTER / INNER) ** (1 / RINGS)
 
 const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace)
 const TONES = {
@@ -698,18 +700,25 @@ function createFarTerrain(): THREE.BufferGeometry {
     c.lerp(TONES.scree, rocky * 0.55).lerp(TONES.rock, smoothstep(rocky, 0.55, 1) * 0.8)
     color.set([c.r, c.g, c.b], k * 3)
 
-    // trees on the nearer ranges, in the stands: a few per vertex (vertices are tens of metres apart)
-    if (r > 3600 && r < TREES_WITHIN && forest > 0.5) {
-      const chance = (forest - 0.5) * 0.8 * (r < 7000 ? 1 : 0.6)
-      if (rand() < chance) {
-        const nt = 1 + Math.floor(rand() * 2)
-        const cell = (r * Math.PI * 2) / SEGMENTS
-        for (let t = 0; t < nt; t++) {
+    // Trees on the nearer ranges, in the stands, by area: a vertex's cell is ~20–60 m across and
+    // ~70–200 m deep. (At a few per vertex they came to ~75 a km² — a real wood's crowns seen
+    // from afar number many hundreds — and the slopes read as painted green, not forest.)
+    if (r > 3600 && r < TREES_WITHIN && forest > 0.3) {
+      const across = (r * Math.PI * 2) / SEGMENTS
+      const deep = r * (RING_RATIO - 1)
+      const perKm2 = r < 8000 ? 650 : 320
+      const expected = smoothstep(forest, 0.3, 0.8) * across * deep * perKm2 * 1e-6
+      const nt = Math.floor(expected + rand())
+      for (let t = 0; t < nt; t++) {
+        {
+          // scattered over the cell: across (tangentially) and back (radially)
+          const dt = (rand() - 0.5) * across
+          const dr = (rand() - 0.5) * deep
           rangeTrees.push({
-            x: x + (rand() - 0.5) * cell,
-            z: z + (rand() - 0.5) * cell,
+            x: x + (x / r) * dr - (z / r) * dt,
+            z: z + (z / r) * dr + (x / r) * dt,
             y: h - 3,
-            h: 15 * Math.exp((rand() - 0.5) * 0.5),
+            h: 18 * Math.exp((rand() - 0.5) * 0.5),
             tone: rand() * 0.6,
             pick: rand(),
             // cedar, cypress and pine plantations and conifers up high; broadleaf stands low and in the gullies
@@ -895,6 +904,23 @@ function rangeMaterial(): THREE.MeshStandardMaterial {
           vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f * f * ( 3.0 - 2.0 * f );
           return mix( mix( rHash( i ), rHash( i + vec2( 1, 0 ) ), u.x ), mix( rHash( i + vec2( 0, 1 ) ), rHash( i + 1.0 ), u.x ), u.y );
         }
+        // A wood seen from kilometres off is a field of rounded crowns, each lit on the sun's side
+        // with a dark gap around it — that texture, not the green, is what reads as forest. Crowns
+        // (~11 m) and clumps of them (~30 m) as a height field in real metres, faded as they drop
+        // under ~2 pixels. Returns the height (0–1, 0.5 once faded) and its ground-plane gradient.
+        vec3 crownField( vec2 p ) {
+          vec3 sum = vec3( 0.0 );
+          for ( int i = 0; i < 2; i ++ ) {
+            float scale = i == 0 ? 11.0 : 30.0;
+            vec2 q = p / scale + ( i == 0 ? vec2( 3.1, 7.7 ) : vec2( -5.3, 1.9 ) );
+            float fade = 1.0 - smoothstep( 0.3, 0.8, length( fwidth( q ) ) );
+            float h = rNoise( q );
+            vec2 grad = vec2( rNoise( q + vec2( 0.25, 0.0 ) ) - h, rNoise( q + vec2( 0.0, 0.25 ) ) - h ) / ( 0.25 * scale );
+            float w = i == 0 ? 0.6 : 0.4;
+            sum += vec3( mix( 0.5, h, fade ), grad * fade * scale ) * w;
+          }
+          return sum;
+        }
         // noise at a scale in real metres, faded to its mean once a cell is under ~2 pixels
         float rDetail( vec2 p, float scale ) {
           vec2 q = p / scale;
@@ -903,8 +929,16 @@ function rangeMaterial(): THREE.MeshStandardMaterial {
         }`,
       )
       .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        // tilt the normal over each crown's rounded top (world x/z = real x/z directions)
+        normal = normalize( normal + ( viewMatrix * vec4( -crown.y, 0.0, -crown.z, 0.0 ) ).xyz * 1.6 * vCover );`,
+      )
+      .replace(
         '#include <color_fragment>',
-        `float fieldAmount = 0.0;
+        `vec3 crown = crownField( vReal ); // (also tilts the normal below)
+        float crownShade = crown.x;
+        float fieldAmount = 0.0;
         #if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
           diffuseColor.rgb *= max( fieldShade( vColor.rgb, vReal, vFarm, fieldAmount ), 0.0 );
         #endif
@@ -914,7 +948,7 @@ function rangeMaterial(): THREE.MeshStandardMaterial {
           // than a few cells — far off it all averages out to the vertex colour.
           float clumps = rDetail( vReal + 13.0, 70.0 );
           float crowns = rDetail( vReal - 7.0, 24.0 );
-          float woods = mix( 1.0, ( 0.62 + 0.55 * clumps ) * ( 0.7 + 0.6 * crowns ), vCover );
+          float woods = mix( 1.0, ( 0.62 + 0.55 * clumps ) * ( 0.7 + 0.6 * crowns ) * ( 0.55 + 0.9 * crownShade ), vCover );
           float open = mix( 0.86 + 0.28 * rDetail( vReal + 41.0, 55.0 ), 1.0, max( vCover, fieldAmount ) );
           diffuseColor.rgb *= woods * open;
         }`,
