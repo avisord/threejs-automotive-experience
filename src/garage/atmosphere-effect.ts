@@ -9,6 +9,8 @@ export interface AtmosphereParams {
   sunColor: THREE.Color
   /** the colour of the air toward the horizon, away from the sun */
   airColor: THREE.Color
+  /** the valley mist's own colour, away from the sun (paler and greyer than the air); defaults to airColor */
+  mistColor?: THREE.Color
   /** haze extinction at ground level, per metre */
   density: number
   /** how fast the haze thins with height, per metre */
@@ -16,11 +18,15 @@ export interface AtmosphereParams {
   /** ground level the haze sits on */
   groundY: number
   /**
-   * A second, low layer: mist lying in the valleys (per metre at ground level, thinning per
-   * metre of height). Ridge bases sit in it and their crests rise out of it, so ranges stacked
-   * one behind another each read as their own layer.
+   * Mist lying in the valleys, following the terrain: thickest on each valley's own floor
+   * (`floor`: a texture over the land in real metres, r = floor height above `groundY`,
+   * g = how thick the mist lies there), thinning per metre above it (`falloff`) and with
+   * absolute height (`top`, per metre). Every ridge's foot sits in it and its crest rises
+   * out, so ranges stacked one behind another each read as their own layer — a mist
+   * measured from one global level lay as a single flat band at the lake. It starts
+   * `near` metres out, so the foreground stays crisp. Ray-marched in a few steps.
    */
-  mist?: { density: number; falloff: number }
+  mist?: { density: number; falloff: number; top: number; near: number; floor: THREE.Texture; rect: THREE.Vector4 }
   /**
    * A thin, tall layer (the clear air itself, kilometres deep): little over a
    * few kilometres, but it keeps paling ranges 20–30 km off whose crests stand
@@ -58,6 +64,11 @@ uniform float uFalloff;
 uniform float uGroundY;
 uniform float uMistDensity;
 uniform float uMistFalloff;
+uniform float uMistTop;
+uniform float uMistNear;
+uniform sampler2D uMistFloor;
+uniform vec4 uMistRect;
+uniform vec3 uMistColor;
 uniform float uAirDensity;
 uniform float uAirFalloff;
 uniform float uCompressStart;
@@ -89,6 +100,31 @@ float fogDepth( float density, float falloff, float h0, float rdy, float dist ) 
   float x = falloff * rdy * dist;
   float shape = abs( x ) > 1e-3 ? ( 1.0 - exp( -x ) ) / x : 1.0 - 0.5 * x + x * x / 6.0;
   return density * exp( -falloff * h0 ) * dist * shape;
+}
+
+// optical depth of the valley mist along the view ray out to real distance dist: marched in MIST_STEPS,
+// each sample's density from its height above the local valley floor. Samples are spread by
+// distance squared from the camera side, so the near valley (where the land changes fastest)
+// gets more of them; smooth enough that no jitter is needed.
+float valleyMist( vec3 ro, float h0, vec3 rd, float dist ) {
+  float a = 0.25 * uMistNear;
+  if ( uMistDensity <= 0.0 || dist <= a ) return 0.0;
+  float sum = 0.0;
+  float prev = a;
+  for ( int i = 1; i <= MIST_STEPS; i ++ ) {
+    float f = float( i ) / float( MIST_STEPS );
+    float s = a + ( dist - a ) * f * f;
+    float mid = 0.5 * ( s + prev );
+    vec2 xz = ro.xz + rd.xz * mid;
+    float h = h0 + rd.y * mid;
+    vec2 floorAt = texture( uMistFloor, ( xz - uMistRect.xy ) * uMistRect.zw ).rg;
+    float above = max( h - floorAt.r, 0.0 );
+    // no hard start: the mist fades in over the first stretch of the ray
+    float fade = smoothstep( a, uMistNear, mid );
+    sum += exp( -above * uMistFalloff - max( h, 0.0 ) * uMistTop ) * floorAt.g * fade * ( s - prev );
+    prev = s;
+  }
+  return sum * uMistDensity;
 }
 
 // interleaved gradient noise: a per-pixel offset that turns banding into fine grain
@@ -124,13 +160,16 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
   // the sky already carries its own atmosphere, so it gets none added
   if ( !sky ) {
     float h0 = max( uCameraPosition.y - uGroundY, 0.0 );
-    float opticalDepth =
-      ( fogDepth( uDensity, uFalloff, h0, rd.y, dist ) + fogDepth( uMistDensity, uMistFalloff, h0, rd.y, dist ) +
-        fogDepth( uAirDensity, uAirFalloff, h0, rd.y, dist ) ) * uStrength;
+    float haze = ( fogDepth( uDensity, uFalloff, h0, rd.y, dist ) + fogDepth( uAirDensity, uAirFalloff, h0, rd.y, dist ) ) * uStrength;
+    float mist = valleyMist( uCameraPosition, h0, rd, dist ) * uStrength;
+    float opticalDepth = haze + mist;
     float transmittance = exp( -opticalDepth );
     // the air's own glow, brighter toward the sun (forward scattering) — kept modest: at 0.7+ and full
     // strength a sunward view washes out to white within a hundred metres
-    vec3 inscatter = uAirColor + uSunColor * phaseHG( mu, 0.6 ) * 0.4;
+    vec3 hazeLight = uAirColor + uSunColor * phaseHG( mu, 0.6 ) * 0.4;
+    // mist droplets scatter white, and more of it straight on toward the sun
+    vec3 mistLight = uMistColor + uSunColor * phaseHG( mu, 0.75 ) * 0.5;
+    vec3 inscatter = ( hazeLight * haze + mistLight * mist ) / max( opticalDepth, 1e-6 );
     color = color * transmittance + inscatter * ( 1.0 - transmittance );
   }
 
@@ -173,7 +212,10 @@ export class AtmosphereEffect extends Effect {
     super('AtmosphereEffect', fragmentShader, {
       blendFunction: BlendFunction.NORMAL,
       attributes: EffectAttribute.DEPTH,
-      defines: new Map([['STEPS', '28']]),
+      defines: new Map([
+        ['STEPS', '28'],
+        ['MIST_STEPS', '12'],
+      ]),
       uniforms: new Map<string, THREE.Uniform>([
         ['uProjectionInverse', new THREE.Uniform(new THREE.Matrix4())],
         ['uCameraWorld', new THREE.Uniform(new THREE.Matrix4())],
@@ -186,6 +228,11 @@ export class AtmosphereEffect extends Effect {
         ['uGroundY', new THREE.Uniform(0)],
         ['uMistDensity', new THREE.Uniform(0)],
         ['uMistFalloff', new THREE.Uniform(0.01)],
+        ['uMistTop', new THREE.Uniform(0)],
+        ['uMistNear', new THREE.Uniform(0)],
+        ['uMistFloor', new THREE.Uniform(null)],
+        ['uMistRect', new THREE.Uniform(new THREE.Vector4(0, 0, 1, 1))],
+        ['uMistColor', new THREE.Uniform(new THREE.Color())],
         ['uAirDensity', new THREE.Uniform(0)],
         ['uAirFalloff', new THREE.Uniform(0.001)],
         ['uCompressStart', new THREE.Uniform(1e9)],
@@ -248,7 +295,14 @@ export class AtmosphereEffect extends Effect {
     u.get('uFalloff')!.value = p.falloff
     u.get('uGroundY')!.value = p.groundY
     u.get('uMistDensity')!.value = p.mist?.density ?? 0
-    u.get('uMistFalloff')!.value = p.mist?.falloff ?? 0.01
+    if (p.mist) {
+      u.get('uMistFalloff')!.value = p.mist.falloff
+      u.get('uMistTop')!.value = p.mist.top
+      u.get('uMistNear')!.value = p.mist.near
+      u.get('uMistFloor')!.value = p.mist.floor
+      u.get('uMistRect')!.value.copy(p.mist.rect)
+      u.get('uMistColor')!.value.copy(p.mistColor ?? p.airColor)
+    }
     u.get('uAirDensity')!.value = p.air?.density ?? 0
     u.get('uAirFalloff')!.value = p.air?.falloff ?? 0.001
     u.get('uCompressStart')!.value = p.compress?.start ?? 1e9

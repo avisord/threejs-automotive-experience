@@ -499,7 +499,20 @@ let terrainHorizon: Uint8Array | null = null
 const HORIZON_MAX = 0.6
 const RASTER = { half: 36000, cell: 180 }
 
-function heightRaster(): { get: (x: number, z: number) => number } {
+interface HeightRaster {
+  n: number
+  data: Float32Array
+  get(x: number, z: number): number
+}
+// the land doesn't change between visits (fixed seeds): built once, shared by the horizon map and the mist floor
+let raster: HeightRaster | null = null
+
+function heightRaster(): HeightRaster {
+  if (!raster) raster = buildHeightRaster()
+  return raster
+}
+
+function buildHeightRaster(): HeightRaster {
   const n = Math.round((RASTER.half * 2) / RASTER.cell) + 1
   const data = new Float32Array(n * n)
   for (let j = 0; j < n; j++) {
@@ -512,6 +525,8 @@ function heightRaster(): { get: (x: number, z: number) => number } {
     }
   }
   return {
+    n,
+    data,
     get(x, z) {
       const fx = (x + RASTER.half) / RASTER.cell
       const fz = (z + RASTER.half) / RASTER.cell
@@ -524,6 +539,65 @@ function heightRaster(): { get: (x: number, z: number) => number } {
       return (data[k] * (1 - u) + data[k + 1] * u) * (1 - v) + (data[k + n] * (1 - u) + data[k + n + 1] * u) * v
     },
   }
+}
+
+/**
+ * Where valley mist pools, for the atmosphere effect (`AtmosphereParams.mist`):
+ * a texture over the whole land in real metres (the lake at 0), r = the local
+ * valley floor — the land's minimum within ~2.5 km, softened — and g = how
+ * thick the mist lies there (0.3–1.5, broad patches a few km across). Mist
+ * thins with height above this floor, so it follows the terrain: it lies on
+ * the lake and in each valley between the ranges, veils every ridge's foot
+ * and leaves its crest clear, instead of one flat layer at lake level.
+ */
+let mistFloor: { floor: THREE.DataTexture; rect: THREE.Vector4 } | null = null
+// kept for the page's life, like the raster (one 401² half-float texture): the land never changes
+export function createMistFloor(): { floor: THREE.DataTexture; rect: THREE.Vector4 } {
+  if (mistFloor) return mistFloor
+  const { n, data } = heightRaster()
+  const R = 14 // cells (180 m): ~2.5 km
+  // min over a box is separable: rows, then columns
+  const pass = (src: Float32Array, op: (a: number, b: number) => number, init: number, horizontal: boolean, mean: boolean) => {
+    const out = new Float32Array(n * n)
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        let acc = init
+        let count = 0
+        for (let k = -R; k <= R; k++) {
+          const a = horizontal ? i + k : i
+          const b = horizontal ? j : j + k
+          if (a < 0 || b < 0 || a >= n || b >= n) continue
+          acc = op(acc, src[b * n + a])
+          count++
+        }
+        out[j * n + i] = mean ? acc / count : acc
+      }
+    }
+    return out
+  }
+  const add = (a: number, b: number) => a + b
+  let floor = pass(pass(data, Math.min, Infinity, true, false), Math.min, Infinity, false, false)
+  floor = pass(pass(floor, add, 0, true, true), add, 0, false, true)
+  const texel = new Uint16Array(n * n * 2)
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const k = j * n + i
+      const x = -RASTER.half + i * RASTER.cell
+      const z = -RASTER.half + j * RASTER.cell
+      const patch = smoothstep(fbm(x / 3200 + 41.7, z / 3200 - 12.3, 3), 0.28, 0.72)
+      texel[k * 2] = THREE.DataUtils.toHalfFloat(floor[k])
+      texel[k * 2 + 1] = THREE.DataUtils.toHalfFloat(0.3 + 1.2 * patch)
+    }
+  }
+  const texture = new THREE.DataTexture(texel, n, n, THREE.RGFormat, THREE.HalfFloatType)
+  texture.minFilter = texture.magFilter = THREE.LinearFilter
+  texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping
+  texture.needsUpdate = true
+  // texel centres sit on the raster's samples
+  const size = n * RASTER.cell
+  const corner = -RASTER.half - RASTER.cell / 2
+  mistFloor = { floor: texture, rect: new THREE.Vector4(corner, corner, 1 / size, 1 / size) }
+  return mistFloor
 }
 
 function createFarTerrain(): THREE.BufferGeometry {

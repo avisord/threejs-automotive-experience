@@ -4,6 +4,7 @@ import { aimFarShadow, createFarShadowLight } from './far-shadow'
 import type { Room } from './kit'
 import { WIND } from './foliage'
 import { createLandscape, type Landscape } from './landscape'
+import { createMistFloor } from './ranges'
 import { SITE } from './site'
 import { sunDirection, sunLight, type SunPosition } from './sky'
 
@@ -79,15 +80,18 @@ export function createFujiWorld(group: THREE.Group, opts: FujiWorldOptions): Fuj
     sunDirection: new THREE.Vector3(),
     sunColor: new THREE.Color(),
     airColor: new THREE.Color(),
+    mistColor: new THREE.Color(),
     // Late-afternoon air: ~55 km visibility at the lake (extinction 3.9 / 55 km), thinning with a
-    // ~1.2 km scale height, and a low mist in the valleys. The road is crisp, the far shore softens,
+    // ~1.2 km scale height, and mist lying in the valleys. The road is crisp, the far shore softens,
     // each range stands paler than the one in front with its foot in the mist, and Fuji at 17 km
     // is veiled blue low down while its snow still stands clear.
     density: 7e-5,
     falloff: 1 / 1200,
-    mist: { density: 5e-5, falloff: 1 / 220 },
+    // the mist follows the land (its floor is each valley's own, ranges.ts): ~150 m deep, thinner
+    // high up, patchy across the valley, and none over the first few hundred metres
+    mist: { density: 2.6e-4, falloff: 1 / 110, top: 1 / 1500, near: 900, ...createMistFloor() },
     // and the clear air, kilometres deep: the ranges 20–30 km off pale into it, their crests included
-    air: { density: 1.5e-5, falloff: 1 / 8000 },
+    air: { density: 3.5e-5, falloff: 1 / 8000 },
     groundY: SITE.lakeLevel + lift,
     compress: SITE.compress, // far layers are drawn closer than they are (site.ts): haze them for their real distance
     shaftLight: sun,
@@ -97,8 +101,11 @@ export function createFujiWorld(group: THREE.Group, opts: FujiWorldOptions): Fuj
   }
   // a touch darker and bluer than the horizon sky: far ridges sit just below it in value, so each
   // one reads against the sky and against the paler one behind (brighter haze washed them all out)
-  const noonAir = new THREE.Color(0.27, 0.35, 0.52)
+  const noonAir = new THREE.Color(0.3, 0.4, 0.6)
   const lowAir = new THREE.Color(0.42, 0.33, 0.32)
+  // the mist is paler and greyer than the air (droplets scatter every colour alike)
+  const noonMist = new THREE.Color(0.4, 0.5, 0.7)
+  const lowMist = new THREE.Color(0.5, 0.47, 0.5)
 
   let sunAt: SunPosition = { ...DEFAULT_SUN }
   function applySun(next: SunPosition): void {
@@ -121,6 +128,7 @@ export function createFujiWorld(group: THREE.Group, opts: FujiWorldOptions): Fuj
     // the air is lit by the whole sky, so it stays blue at a low sun, only a little warmer and dimmer;
     // the gold is in the forward scattering toward the sun (sunColor)
     atmosphere.airColor.copy(noonAir).lerp(lowAir, 0.35 * (1 - day)).multiplyScalar(0.4 + 0.6 * day)
+    atmosphere.mistColor!.copy(noonMist).lerp(lowMist, 0.5 * (1 - day)).multiplyScalar(0.4 + 0.6 * day)
     // the lake mirrors hills kilometres off: give their reflection the air they're seen through
     landscape.lake.setHaze(atmosphere.airColor, 0.35)
     landscape.setEvening(1 - THREE.MathUtils.smoothstep(sunAt.elevation, 4, 22))

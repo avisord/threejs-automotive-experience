@@ -142,10 +142,14 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   and mapped vertex by vertex (`site.mapFar`, normals from the real shape first) so each
   point keeps its exact direction from the eye and its depth order; the atmosphere
   effect's `compress` undoes the mapping to haze them for their real distance. Haze is
-  three exponential height layers (1.2 km scale + a ~220 m valley `mist` + a thin 8 km
-  `air` layer — without it the 20–30 km ranges, whose crests rise out of the haze, kept the
-  contrast of the 9 km ones and the layers didn't recede), so each range's foot is paler
-  than its crest; the far terrain runs out to 34 km (`ranges.ts`). The haze colour is
+  two exponential height layers (1.2 km scale + a thin 8 km `air` layer — without it the
+  20–30 km ranges, whose crests rise out of the haze, kept the contrast of the 9 km ones and
+  the layers didn't recede) plus a terrain-following valley `mist`: ray-marched in 12 steps
+  against `ranges.createMistFloor()` (the land raster's local minimum within ~2.5 km, i.e.
+  each valley's own floor, + a patchiness channel), ~110 m deep, starting ~900 m out. A mist
+  measured from the lake level (the old third layer) lay as one flat band at the water and
+  gave every range the same veil; now each range's foot is paler than its crest and Fuji's
+  skirts sit in it while the summit stays clear. ~0.05 ms; the far terrain runs out to 34 km (`ranges.ts`). The haze colour is
   set a little darker/bluer than the horizon sky, or far ridges wash out. Two shader bugs
   fixed there: the fog integral must not switch formulas at a fixed |falloff·rd.y| (it
   drew a hard line across Fuji at ~7° elevation), and "sky" is depth ≥ 0.9999999 — at
