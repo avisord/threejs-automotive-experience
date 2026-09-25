@@ -2,7 +2,7 @@ import { GARAGES } from '../garages'
 import { KELVIN, type InteriorLights, type InteriorSettings, kelvinToRGB } from '../garages/interior'
 import { SUN_LIMITS, type SunPosition } from '../garages/sky'
 import type { Page } from './panel'
-import { actionButton, el, section, segmented, slider, toggle } from './widgets'
+import { actionButton, colorField, el, section, segmented, slider, toggle } from './widgets'
 
 const SUN_PRESETS = {
   morning: { azimuth: 70, elevation: 22 },
@@ -119,22 +119,33 @@ export function garagePage(state: GarageState): Page {
             nav.refresh()
           })
           const block = section(group.name, sw)
-          const swatch = el('span', 'cfg-kelvin')
-          const paint = (k: number) => swatch.style.setProperty('--swatch', `#${kelvinToRGB(k).getHexString()}`)
-          paint(g.kelvin)
-          const warm = slider('Warmth', g.kelvin, { min: KELVIN.min, max: KELVIN.max, step: 50 }, warmth, (v) => {
-            g.kelvin = v
-            paint(v)
-            apply()
-          })
-          warm.querySelector('.cfg-label span')?.prepend(swatch)
+          // white light is set by its warmth; coloured light (neon, accents) by any colour
+          let tint: HTMLElement
+          if (group.tint === 'kelvin') {
+            const kelvin = g.kelvin ?? 5000
+            const swatch = el('span', 'cfg-kelvin')
+            const paint = (k: number) => swatch.style.setProperty('--swatch', `#${kelvinToRGB(k).getHexString()}`)
+            paint(kelvin)
+            tint = slider('Warmth', kelvin, { min: KELVIN.min, max: KELVIN.max, step: 50 }, warmth, (v) => {
+              g.kelvin = v
+              paint(v)
+              apply()
+            })
+            tint.querySelector('.cfg-label span')?.prepend(swatch)
+          } else {
+            tint = colorField('Colour', g.color ?? '#ffffff', (hex, commit) => {
+              g.color = hex
+              apply()
+              if (commit) nav.refresh()
+            })
+          }
           block.append(
             el('p', 'cfg-note', group.hint),
             slider('Intensity', g.intensity, { min: 0, max: 3, step: 0.05 }, (v) => `${Math.round(v * 100)}%`, (v) => {
               g.intensity = v
               apply()
             }),
-            warm,
+            tint,
           )
           if (!g.on) block.classList.add('is-off')
           body.append(block)

@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { createHexLights } from './hex-lights'
+import { createInteriorLights, fixtureMembers, type InteriorMember } from './interior'
 import { assembleRoom, box, createFloor, floorTileTexture, glowMaterial, type GarageDef, type Room } from './kit'
 
 /** bay dimensions (metres): x = width, y = height, z = depth. Car sits at the origin, nose to +z. */
@@ -239,6 +240,7 @@ function createHexBay(): Room {
 
   // wall washers along the long walls: linear LEDs near the ceiling edge,
   // tilted toward the panels so the walls read instead of falling to black
+  const washers: InteriorMember[] = [{ glow: m.led }]
   for (const side of [-1, 1]) {
     const x = side * (w / 2 - 1.2)
     box(group, [0.12, 0.05, d - 3], m.led, [x, h - 0.05, 0])
@@ -246,11 +248,21 @@ function createHexBay(): Room {
     washer.position.set(x, h - 0.15, 0)
     washer.lookAt(side * (w / 2), h * 0.35, 0)
     group.add(washer)
+    washers.push({ light: washer })
   }
 
-  group.add(new THREE.HemisphereLight(0xbfd6ff, 0x0a0b0d, 0.25))
+  const ambient = new THREE.HemisphereLight(0xbfd6ff, 0x0a0b0d, 0.25)
+  group.add(ambient)
 
-  return assembleRoom(group, floor, {
+  // the fittings the user can switch, dim and warm or recolour (Menu › Garage › Interior lights)
+  const interior = createInteriorLights([
+    { id: 'hex', name: 'Hex ceiling', hint: 'The honeycomb LED grid over the car: its key light', kelvin: 7200, members: fixtureMembers(hex) },
+    { id: 'washers', name: 'Wall washers', hint: 'The linear LEDs along the ceiling edge, the panel seams and the frieze', kelvin: 8000, members: washers },
+    { id: 'accent', name: 'Accent trim', hint: 'The cyan skirting, door frame and hexagon on the floor', color: ACCENT, members: [{ glow: m.accent }, { glow: markingMat }] },
+    { id: 'ambient', name: 'Ambient fill', hint: 'Soft light from everywhere: lifts the shadows', kelvin: 7500, members: fixtureMembers(ambient) },
+  ])
+
+  const room = assembleRoom(group, floor, {
     bounds: [
       [-w / 2 + 0.6, 0.3, -d / 2 + 0.6],
       [w / 2 - 0.6, h - 0.45, d / 2 - 0.6],
@@ -258,6 +270,7 @@ function createHexBay(): Room {
     background: 0x050608,
     environmentIntensity: 1,
   })
+  return { ...room, interior }
 }
 
 export const hexBay: GarageDef = {

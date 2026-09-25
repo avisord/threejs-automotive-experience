@@ -5,8 +5,10 @@ export interface InteriorGroupSetting {
   on: boolean
   /** × the room's designed output */
   intensity: number
-  /** colour temperature, kelvin */
-  kelvin: number
+  /** colour temperature, kelvin (white-light groups) */
+  kelvin?: number
+  /** colour, '#rrggbb' sRGB (coloured groups: neon, accents) */
+  color?: string
 }
 
 export interface InteriorSettings {
@@ -17,7 +19,8 @@ export interface InteriorSettings {
 
 /** what a room exposes: its light groups and their settings */
 export interface InteriorLights {
-  groups: { id: string; name: string; hint: string }[]
+  /** `tint` says how a group's colour is set: a colour temperature, or any colour */
+  groups: { id: string; name: string; hint: string; tint: 'kelvin' | 'color' }[]
   defaults(): InteriorSettings
   get(): InteriorSettings
   set(settings: InteriorSettings): void
@@ -32,16 +35,47 @@ export type InteriorMember =
   /** a surface's faint emissive glow */
   | { emissive: THREE.MeshStandardMaterial }
 
-export interface InteriorGroupDef {
+export type InteriorGroupDef = {
   id: string
   name: string
   hint: string
-  /** the colour temperature the group was designed at: its members keep their own colours there */
-  kelvin: number
   members: InteriorMember[]
+} & (
+  | {
+      /** white light: the colour temperature it was designed at, where its members keep their own colours */
+      kelvin: number
+    }
+  | {
+      /** coloured light (sRGB hex): picked colours replace it, each member keeping its own brightness */
+      color: number
+    }
+)
+
+export const KELVIN = { min: 2200, max: 10000 }
+
+/** the light and the glowing panel of a kit.softbox */
+export function softboxMembers(light: THREE.RectAreaLight): InteriorMember[] {
+  return fixtureMembers(light)
 }
 
-export const KELVIN = { min: 2200, max: 7500 }
+/** every light and glow material in a fixture (a softbox, the hex ceiling): what a group dims together */
+export function fixtureMembers(root: THREE.Object3D): InteriorMember[] {
+  const members: InteriorMember[] = []
+  const seen = new Set<THREE.Material>()
+  root.traverse((obj) => {
+    if ((obj as THREE.Light).isLight) members.push({ light: obj as THREE.Light })
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    const material = mesh.material as THREE.Material
+    if ((material as THREE.MeshBasicMaterial).isMeshBasicMaterial && !seen.has(material)) {
+      seen.add(material)
+      members.push({ glow: material as THREE.MeshBasicMaterial })
+    }
+  })
+  return members
+}
+
+const LUMA = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
 /**
  * Blackbody colour (sRGB, 0–1) for a temperature — Tanner Helland's fit,
@@ -75,31 +109,50 @@ export function createInteriorLights(defs: InteriorGroupDef[]): InteriorLights &
       return { ...m, color: m.emissive.emissive.clone(), level: m.emissive.emissiveIntensity }
     }),
   }))
+  const designSetting = (d: InteriorGroupDef): InteriorGroupSetting =>
+    'kelvin' in d
+      ? { on: true, intensity: 1, kelvin: d.kelvin }
+      : { on: true, intensity: 1, color: `#${new THREE.Color().setHex(d.color, THREE.SRGBColorSpace).getHexString(THREE.SRGBColorSpace)}` }
   const defaults = (): InteriorSettings => ({
     master: 1,
-    groups: Object.fromEntries(defs.map((d) => [d.id, { on: true, intensity: 1, kelvin: d.kelvin }])),
+    groups: Object.fromEntries(defs.map((d) => [d.id, designSetting(d)])),
   })
   let current = defaults()
   const tint = new THREE.Color()
   const design = new THREE.Color()
+  const picked = new THREE.Color()
+  const colour = new THREE.Color()
 
   function refresh(): void {
     for (const { def, members } of captured) {
-      const s = current.groups[def.id] ?? { on: true, intensity: 1, kelvin: def.kelvin }
+      const s = current.groups[def.id] ?? designSetting(def)
       const level = s.on ? s.intensity * current.master : 0
-      kelvinToRGB(s.kelvin, tint)
-      kelvinToRGB(def.kelvin, design)
-      tint.setRGB(tint.r / Math.max(design.r, 1e-3), tint.g / Math.max(design.g, 1e-3), tint.b / Math.max(design.b, 1e-3))
+      if ('kelvin' in def) {
+        // white light: tint each member by the ratio of the two blackbody colours
+        kelvinToRGB(s.kelvin ?? def.kelvin, tint)
+        kelvinToRGB(def.kelvin, design)
+        tint.setRGB(tint.r / Math.max(design.r, 1e-3), tint.g / Math.max(design.g, 1e-3), tint.b / Math.max(design.b, 1e-3))
+      } else {
+        // coloured light: the picked colour at the member's own brightness (a ratio would blow up
+        // the channels a saturated neon hardly has)
+        picked.set(s.color ?? def.color)
+        design.setHex(def.color, THREE.SRGBColorSpace)
+      }
+      const paint = (base: THREE.Color, out: THREE.Color) =>
+        'kelvin' in def
+          ? out.copy(base).multiply(tint)
+          : // (a very dark pick isn't pushed up to full brightness: it would blow out one channel)
+            out.copy(picked).multiplyScalar(LUMA(base) / Math.max(LUMA(picked), 0.25 * LUMA(design), 1e-4))
       for (const m of members) {
         if ('light' in m) {
           // (an area light switched off keeps its place in the shaders: intensity 0, never removed,
           // or every material in the scene would recompile)
           m.light.intensity = m.intensity() * level
-          m.light.color.copy(m.color).multiply(tint)
+          paint(m.color, m.light.color)
         } else if ('glow' in m) {
-          m.glow.color.copy(m.color).multiply(tint).multiplyScalar(level)
+          m.glow.color.copy(paint(m.color, colour)).multiplyScalar(level)
         } else {
-          m.emissive.emissive.copy(m.color).multiply(tint)
+          paint(m.color, m.emissive.emissive)
           m.emissive.emissiveIntensity = m.level * level
         }
       }
@@ -107,7 +160,7 @@ export function createInteriorLights(defs: InteriorGroupDef[]): InteriorLights &
   }
 
   return {
-    groups: defs.map(({ id, name, hint }) => ({ id, name, hint })),
+    groups: defs.map((d) => ({ id: d.id, name: d.name, hint: d.hint, tint: 'kelvin' in d ? ('kelvin' as const) : ('color' as const) })),
     defaults,
     get: () => structuredClone(current),
     set(settings) {
