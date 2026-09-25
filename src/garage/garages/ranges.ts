@@ -5,6 +5,7 @@ import type { ImpostorSet } from './impostors'
 import { EYE, SITE, farPlacement, farY, heightAt, mapFar } from './site'
 import { plantImpostors } from './trees'
 import type { Plant } from './vegetation-layout'
+import { FIELD_GLSL, FIELD_SHADE_GLSL } from './fields'
 import { outdoorMaterial } from './terrain'
 
 /**
@@ -647,6 +648,7 @@ function createFarTerrain(): THREE.BufferGeometry {
   // ─── cover and colour, from what each point is like ───
   const color = new Float32Array(count * 3)
   const cover = new Float32Array(count)
+  const farm = new Float32Array(count)
   const real = new Float32Array(count * 2)
   const c = new THREE.Color()
   const wood = new THREE.Color()
@@ -671,7 +673,15 @@ function createFarTerrain(): THREE.BufferGeometry {
     const zone = 1 - smoothstep(h, 650 + 250 * moist, 1350 + 200 * moist)
     const steepness = 1 - smoothstep(slope, deg(32), deg(44))
     const stands = fbm(x / 1700 + 3, z / 1700 - 8, 3) + 0.35 * moist - 0.18 * Math.max(0, sunward) + 0.12 * (1 - smoothstep(h, 200, 700))
-    const forest = zone * steepness * smoothstep(stands, 0.36, 0.44)
+    // Farmland on the flat, low ground — the valley corridors and the foothills' feet — cleared out
+    // of the woods; drawn per pixel by the same fields as the valley (fields.ts), fading to its
+    // districts' crop mix with distance. Without it the far valleys were forest wall to wall.
+    farm[k] =
+      (1 - smoothstep(slope, deg(5), deg(11))) *
+      (1 - smoothstep(r, 12000, 16000)) *
+      Math.max(smoothstep(valley, 0.3, 0.8), 1 - smoothstep(h, 150, 380)) *
+      smoothstep(noise(x / 900 + 2, z / 900), 0.28, 0.42)
+    const forest = zone * steepness * smoothstep(stands, 0.36, 0.44) * (1 - farm[k])
     cover[k] = forest
     // bare rock: cliffs, and the steeper ground on the high crests; scree below it
     const rocky = Math.max(smoothstep(slope, deg(33), deg(46)), smoothstep(h, 950, 1350) * smoothstep(slope, deg(16), deg(30)))
@@ -684,13 +694,7 @@ function createFarTerrain(): THREE.BufferGeometry {
     wood.copy(TONES.forest).lerp(TONES.darkForest, Math.min(1, moist * 0.8 + smoothstep(-sunward, 0, 0.4) * 0.5))
     wood.lerp(TONES.youngForest, (1 - smoothstep(stands, 0.44, 0.52)) * 0.7 * (1 - moist))
     c.lerp(wood, forest)
-    // valley floors: fields and meadows in patches along the corridor
-    // (between the woods along the streams; at this distance a field is a few pixels of lighter green)
-    if (valley > 0.3) {
-      const fields =
-        smoothstep(noise(x / 380, z / 380), 0.4, 0.6) * smoothstep(valley, 0.4, 0.9) * (1 - smoothstep(slope, deg(8), deg(16))) * (1 - forest)
-      c.lerp(TONES.field, fields * 0.6 * noise(x / 150 + 5, z / 150))
-    }
+
     c.lerp(TONES.scree, rocky * 0.55).lerp(TONES.rock, smoothstep(rocky, 0.55, 1) * 0.8)
     color.set([c.r, c.g, c.b], k * 3)
 
@@ -717,6 +721,7 @@ function createFarTerrain(): THREE.BufferGeometry {
     }
   }
   g.setAttribute('cover', new THREE.BufferAttribute(cover, 1))
+  g.setAttribute('farm', new THREE.BufferAttribute(farm, 1))
   g.setAttribute('realXZ', new THREE.BufferAttribute(real, 2))
   plantSkylines(position, cover)
   g.setAttribute('color', new THREE.BufferAttribute(color, 3))
@@ -869,17 +874,22 @@ function rangeMaterial(): THREE.MeshStandardMaterial {
         '#include <common>',
         `#include <common>
         attribute float cover;
+        attribute float farm;
         attribute vec2 realXZ;
         varying float vCover;
+        varying float vFarm;
         varying vec2 vReal;`,
       )
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCover = cover;\nvReal = realXZ;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCover = cover;\nvFarm = farm;\nvReal = realXZ;')
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
         varying float vCover;
+        varying float vFarm;
         varying vec2 vReal;
+        ${FIELD_GLSL}
+        ${FIELD_SHADE_GLSL}
         float rHash( vec2 p ) { p = fract( p * vec2( 123.34, 456.21 ) ); p += dot( p, p + 45.32 ); return fract( p.x * p.y ); }
         float rNoise( vec2 p ) {
           vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f * f * ( 3.0 - 2.0 * f );
@@ -894,7 +904,10 @@ function rangeMaterial(): THREE.MeshStandardMaterial {
       )
       .replace(
         '#include <color_fragment>',
-        `#include <color_fragment>
+        `float fieldAmount = 0.0;
+        #if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
+          diffuseColor.rgb *= max( fieldShade( vColor.rgb, vReal, vFarm, fieldAmount ), 0.0 );
+        #endif
         {
           // Texture the vertex colours can't carry: in the woods, crowns in clumps with darker gaps
           // between them; on open ground, patchy grass and scrub. Only where a pixel covers less
@@ -902,7 +915,7 @@ function rangeMaterial(): THREE.MeshStandardMaterial {
           float clumps = rDetail( vReal + 13.0, 70.0 );
           float crowns = rDetail( vReal - 7.0, 24.0 );
           float woods = mix( 1.0, ( 0.62 + 0.55 * clumps ) * ( 0.7 + 0.6 * crowns ), vCover );
-          float open = mix( 0.86 + 0.28 * rDetail( vReal + 41.0, 55.0 ), 1.0, vCover );
+          float open = mix( 0.86 + 0.28 * rDetail( vReal + 41.0, 55.0 ), 1.0, max( vCover, fieldAmount ) );
           diffuseColor.rgb *= woods * open;
         }`,
       )

@@ -6,7 +6,7 @@ import { createRanges } from './ranges'
 import { createRoadside } from './roadside'
 import { SITE, forestDensity, heightAt, inView, lakeShape, onRoad, roadZ, roomBelowView, woodedness } from './site'
 import { createSky } from './sky'
-import { createTerrain, farmland, outdoorMaterial } from './terrain'
+import { createTerrain, orchardFarmland, outdoorMaterial } from './terrain'
 import { createGreenery } from './greenery'
 import { createTown, type House } from './town'
 import { layoutVegetation, type VegetationLayout } from './vegetation-layout'
@@ -255,7 +255,7 @@ function planVegetation(opts: LandscapeOptions, houses: House[]): VegetationLayo
     {
       radius: [40, SITE.realRadius - 30],
       // hillsides are woods; the valley floor is fields with copses and hedgerow trees
-      wood: (x, z) => Math.max(0.1, woodedness(x, z)) * (1 - 0.6 * farmland(x, z)),
+      wood: (x, z) => Math.max(0.1, woodedness(x, z)) * (1 - 0.6 * orchardFarmland(x, z)),
       conifers: (x, z) => 0.4 + 0.45 * smoothstep(heightAt(x, z) - SITE.lakeLevel, 40, 220),
       allowed(x, z, height) {
         const r = Math.hypot(x, z)

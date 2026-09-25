@@ -1,7 +1,8 @@
 import * as THREE from 'three'
+import { FIELD_GLSL, FIELD_SHADE_GLSL } from './fields'
 import { receiveFarShadow } from './far-shadow'
 import { SURFACES, pbrMaps } from './kit'
-import { fbm, noRaycast, noise, polarGrid, smoothstep } from './landform'
+import { fbm, noRaycast, polarGrid, smoothstep } from './landform'
 import { GROUND, SITE, forestDensity, heightAt, lakeShape, onRoad } from './site'
 import { OUTDOOR_SKY_LIGHT } from './sky'
 
@@ -16,21 +17,24 @@ export function outdoorMaterial<M extends THREE.MeshStandardMaterial>(material: 
 const GRASS_MEAN = 0.0357
 
 const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace)
-/** field colours: young rice, deep greens, stubble, bare earth, vegetable rows */
-const CROPS = [0x7a9a3c, 0x456d28, 0xb3a45e, 0x7a6146, 0x93a84a, 0x5b7a30, 0xc2b36e, 0x8c7a52].map(srgb)
 
-/** width of a field across the valley's grain, metres */
-export const PARCEL = 55
-
-/** how much of a point is farmland, 0–1: the valley floor in patches, away from the pavilion */
+/**
+ * How much of a point is farmland, 0–1: most of the valley floor past the
+ * meadow, with the odd unfarmed tract (the fields themselves are fields.ts,
+ * drawn per pixel; steep and wooded ground is taken out per vertex below).
+ */
 export function farmland(x: number, z: number): number {
   const r = Math.hypot(x, z)
-  return smoothstep(r, 140, 260) * (1 - smoothstep(r, 2600, 3000)) * smoothstep(fbm(x / 350 - 5, z / 350 + 9, 2), 0.38, 0.5)
+  return smoothstep(r, 110, 200) * (1 - smoothstep(r, 3000, 3250)) * smoothstep(fbm(x / 350 - 5, z / 350 + 9, 2), 0.3, 0.4)
 }
 
-/** field coordinates: fields run along the valley (v), turned a little, PARCEL wide across it (u) */
-export function parcelSpace(x: number, z: number): { u: number; v: number } {
-  return { u: x * 0.956 + z * 0.292, v: -x * 0.292 + z * 0.956 }
+/**
+ * The narrower farmland the valley's planned trees were laid out on (landscape.ts): the tree
+ * layout — near trees included — stays as it was when the fields spread wider.
+ */
+export function orchardFarmland(x: number, z: number): number {
+  const r = Math.hypot(x, z)
+  return smoothstep(r, 140, 260) * (1 - smoothstep(r, 2600, 3000)) * smoothstep(fbm(x / 350 - 5, z / 350 + 9, 2), 0.38, 0.5)
 }
 
 /** the terrain's grid — shared by anything draped over it (canopy.ts), so their vertices coincide */
@@ -44,9 +48,9 @@ export const TERRAIN_GRID = { rings: 240, segments: 720, spacing: (t: number) =>
  *  - patches at 25 m, 7 m and 2 m: drier straw-coloured grass, deep clover-green
  *    hollows, fine mottling — faded to their average where they'd shimmer
  *  - the grass texture sampled at a second, larger scale so its 3 m tile doesn't repeat
- *  - crop rows in the fields (the `farm` attribute), running along each field
- *    with a pitch and a share of bare soil that differ field to field; they
- *    fade out where a row gets narrower than a pixel
+ *  - the farmland (the `farm` attribute) drawn per pixel at every distance —
+ *    fields, crops, rows, boundaries, farm roads (fields.ts), each level of
+ *    detail giving way to the next coarser one as it shrinks under a pixel
  */
 function groundDetail<M extends THREE.MeshStandardMaterial>(material: M): M {
   const base = material.onBeforeCompile
@@ -64,6 +68,8 @@ function groundDetail<M extends THREE.MeshStandardMaterial>(material: M): M {
         `#include <common>
         varying float vFarm;
         varying vec3 vGround;
+        ${FIELD_GLSL}
+        ${FIELD_SHADE_GLSL}
         float gHash( vec2 p ) { p = fract( p * vec2( 123.34, 456.21 ) ); p += dot( p, p + 45.32 ); return fract( p.x * p.y ); }
         float gNoise( vec2 p ) {
           vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f * f * ( 3.0 - 2.0 * f );
@@ -95,7 +101,11 @@ function groundDetail<M extends THREE.MeshStandardMaterial>(material: M): M {
       )
       .replace(
         '#include <color_fragment>',
-        `#include <color_fragment>
+        `// the land's colours, with the farmland's fields drawn over them (fields.ts)
+        float fieldAmount = 0.0;
+        #if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
+          diffuseColor.rgb *= fieldShade( vColor.rgb, vGround.xz, vFarm, fieldAmount );
+        #endif
         {
           vec2 p = vGround.xz;
           float near = 1.0 - smoothstep( 500.0, 1100.0, length( vGround - cameraPosition ) );
@@ -112,29 +122,17 @@ function groundDetail<M extends THREE.MeshStandardMaterial>(material: M): M {
             // (value noise sits near 0.5: the thresholds are set so a third or so of the ground is each)
             float dry = smoothstep( 0.45, 0.66, broad * 0.35 + big * 0.45 + mid * 0.2 );
             float wet = smoothstep( 0.48, 0.66, mid * 0.55 + ( 1.0 - big ) * 0.45 ) * ( 1.0 - dry );
-            c = mix( c, straw, dry * 0.5 );
-            c = mix( c, lush, wet * 0.65 );
+            // (less of it on the fields, which have their own crops, rows and stripes)
+            float grassy = 1.0 - 0.7 * fieldAmount;
+            c = mix( c, straw, dry * 0.5 * grassy );
+            c = mix( c, lush, wet * 0.65 * grassy );
             // tufts and bare scuffs, and a broad light/dark swell (mown and unmown, thin and thick sward)
             c *= ( 0.68 + 0.64 * fine ) * ( 0.8 + 0.4 * broad );
-            // crop rows: along each field (the valley's grain), pitch and bare-soil share per field
-            if ( vFarm > 0.01 ) {
-              float u = p.x * 0.956 + p.y * 0.292;
-              float v = -p.x * 0.292 + p.y * 0.956;
-              float strip = floor( u / ${PARCEL.toFixed(1)} );
-              float pick = gHash( vec2( strip, floor( v / 47.0 ) ) );
-              float pitch = 0.75 + 1.1 * pick;
-              float rows = u / pitch;
-              float w = max( fwidth( rows ), 1e-5 );
-              float row = 0.5 + 0.5 * cos( 6.2831853 * rows );
-              row = mix( row, 0.5, smoothstep( 0.12, 0.35, w ) ); // before rows alias into bands
-              float bare = step( 0.35, fract( pick * 7.31 ) ) * 0.75;
-              vec3 soil = vec3( 0.075, 0.055, 0.038 );
-              vec3 crop = c * ( 0.8 + 0.4 * row );
-              vec3 field = mix( crop, soil, ( 1.0 - row ) * bare );
-              c = mix( c, field, vFarm );
-            }
             diffuseColor.rgb = mix( diffuseColor.rgb, c, near );
           }
+          // (a negative albedo anywhere — the fields' blends can overshoot on dark ground — turns
+          // into a magenta spark in the lake's half-float mirror)
+          diffuseColor.rgb = max( diffuseColor.rgb, 0.0 );
         }`,
       )
   }
@@ -172,18 +170,7 @@ export function createTerrain(cover: (x: number, z: number) => number = () => 0)
       c.lerp(soil, smoothstep(fbm(x / 18 + 40, z / 18), 0.66, 0.78) * smoothstep(r, 35, 60) * (1 - smoothstep(r, 900, 1400)) * 0.8)
       // gravel shoulders along the road
       c.lerp(gravel, smoothstep(onRoad(x, z), 0.05, 0.4) * 0.8)
-      // farmland on the valley floor: a patchwork of parcels — rice, vegetables, stubble, bare earth
-      const farm = farmland(x, z)
-      if (farm > 0) {
-        const { u, v } = parcelSpace(x, z)
-        const pu = Math.floor(u / PARCEL)
-        const pv = Math.floor(v / (30 + 25 * noise(pu * 0.7, 3.1)))
-        const pick = noise(pu * 1.37 + 0.5, pv * 2.11 + 0.5)
-        const crop = CROPS[Math.min(CROPS.length - 1, Math.floor(pick * CROPS.length * 1.3) % CROPS.length)]
-        // hedges and paths between parcels
-        const edge = Math.min((u / PARCEL) % 1, 1 - ((u / PARCEL) % 1)) < 0.05 ? 0.6 : 1
-        c.lerp(crop, farm * 0.85).multiplyScalar(1 - (1 - edge) * farm * 0.5)
-      }
+      // (the farmland's fields are drawn per pixel over these colours: fields.ts)
       // darker ground under woodland
       if (r > 60 && r < SITE.realRadius) c.lerp(woodland, smoothstep(forestDensity(x, z), 0.1, 0.6) * 0.7)
       // under the trees themselves: shaded, leaf-littered ground, darkest at the trunks — grounds them

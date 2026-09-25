@@ -50,6 +50,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `configurator.ts` | Per-car part paint (body, wing, rims, calipers, cage, glass tint), presets, saved per car (`garage.car-config.v3.<id>`). |
 | `groups.ts` + `highlight.ts` | Parts editor: user picks meshes, groups them, one material per group (per-source clones keep normal maps/cut-outs). See-through overlay copies for hover/selection/focus. Saved per car by mesh name. |
 | `lights.ts` | Head/tail lamps: lens emissive clones + real **spot** lights (tails aim back/down) with one-shot baked shadow maps, optional beam cone shader. Per car. |
+| `garages/fields.ts` | Farmland layout + per-pixel field shading, shared by the terrain, the far terrain and the hedgerows (see gotchas). |
 | `contact-shadow.ts` | Baked soft ground shadow per car (depth from below + blur). |
 | `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji, fuji-meadow) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
@@ -292,8 +293,20 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   is ~5:1 wide:tall. The erosion/snow detail is still written in units of 7 km (`t`).
 - Near ground (`terrain.groundDetail`): Poly Haven "Sparse Grass" (`public/textures/sparse-grass`)
   used for luminance + normal detail only (relative to its mean `GRASS_MEAN`), per-pixel
-  patches (straw / lush / mottling) that fade out past ~1 km, and crop rows in fields from the
-  terrain's `farm` attribute, faded before they alias.
+  patches (straw / lush / mottling) that fade out past ~1 km.
+- Farmland (`garages/fields.ts`): one field layout in GLSL and TS (PCG integer hashes, 24-bit
+  floats so a hash never reaches 1.0 — `int(h * 8.0)` indexed past a const array). Warped
+  Voronoi districts (~380 m, own orientation/strip width/crop mix; their edges are farm roads
+  or ditches), jittered strips cut into offset fields. `fieldShade()` draws it per pixel on the
+  terrain (`farm` attribute, from `farmland()`) and on the far terrain's flat low ground
+  (`realXZ`, farm clears the forest there), by pixel footprint: rows/furrows/mowing stripes and
+  antialiased boundary lines (`fLine`, box-filtered) → a field's crop colour → its district's
+  mix → the valley mean. `greenery.ts` puts hedgerows, tree lines, ditch belts and corner copses
+  on the same boundaries (`unlocal` + `unwarp` back to the ground). The planned tree layout
+  still uses the old, narrower `orchardFarmland()` so the valley's trees didn't move. ~+1 ms
+  GPU at 1600×900. The terrain clamps its albedo ≥ 0 (a negative one sparked in the lake's
+  half-float mirror); a faint coloured dot on the lake near the far shore predates this (Fuji
+  writes a negative texel into the lake mirror — not traced further).
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too (a shadow-casting light's map is a render target,

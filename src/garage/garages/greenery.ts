@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import type { ImpostorSet } from './impostors'
 import { noise, seeded } from './landform'
-import { SITE, heightAt, lakeShape, onRoad, roadZ } from './site'
-import { PARCEL, farmland } from './terrain'
+import { heightAt, lakeShape, onRoad, roadZ } from './site'
+import { DISTRICT, type District, district, districtBoundary, fHash, fieldAt, segmentLength, stripBoundary, stripEdge, unlocal, unwarp } from './fields'
+import { farmland } from './terrain'
 import type { House } from './town'
 import { plantImpostors } from './trees'
 import type { Plant } from './vegetation-layout'
@@ -28,13 +29,13 @@ export function createGreenery(houses: House[], impostors: ImpostorSet): THREE.G
   const clear = (x: number, z: number) =>
     lakeShape(x, z) > 1.03 && onRoad(x, z) === 0 && Math.abs(z - roadZ(x)) > 9 && Math.hypot(x, z) > NEAREST
   const onHouse = (x: number, z: number, near: House[]) => near.some((h) => Math.hypot(h.x - x, h.z - z) < Math.max(h.w, h.d) * 0.55 + 1)
-  const add = (x: number, z: number, kind: Plant['kind'], height: number, tone: number) =>
+  const add = (x: number, z: number, kind: Plant['kind'], height: number, tone: number, width = 0.8 + rand() * 0.5) =>
     plants.push({
       x,
       z,
       kind,
       height,
-      width: 0.8 + rand() * 0.5,
+      width,
       turn: rand() * Math.PI * 2,
       leanX: (rand() - 0.5) * 0.08,
       leanZ: (rand() - 0.5) * 0.08,
@@ -68,20 +69,82 @@ export function createGreenery(houses: House[], impostors: ImpostorSet): THREE.G
     }
   })
 
-  // hedgerows and tree lines on some of the field boundaries (across the grain, every PARCEL metres),
-  // in runs with gaps: a shrub every few metres, now and then a taller tree standing out of the line
-  const R = SITE.realRadius
-  for (let k = Math.floor(-R / PARCEL); k <= R / PARCEL; k++) {
-    const u = k * PARCEL
-    const tone = rand()
-    for (let v = -R; v <= R; v += 3.5 + rand() * 2.5) {
-      if (noise(k * 0.9 + 0.3, v / 90) < 0.52) continue // runs and gaps
-      // back to the ground plane (the inverse of terrain.parcelSpace, a rotation)
-      const x = u * 0.956 - v * 0.292 + (rand() - 0.5) * 1.5
-      const z = u * 0.292 + v * 0.956 + (rand() - 0.5) * 1.5
-      if (Math.hypot(x, z) > 2700 || farmland(x, z) < 0.5 || !clear(x, z)) continue
-      const tall = rand() < 0.13
-      add(x, z, tall ? (rand() < 0.4 ? 'conifer' : 'broadleaf') : 'shrub', tall ? 9 + rand() * 7 : 2.5 + rand() * 2, tone)
+  // The farmland's boundaries (fields.ts — the same layout the terrain draws): hedgerows in runs
+  // with gaps, tree lines, tree belts along the ditches between districts, copses in field corners.
+  // Trees gather where the land is divided, not scattered evenly over it.
+  const farmed = (x: number, z: number) => {
+    const r = Math.hypot(x, z)
+    return r < 2950 && farmland(x, z) > 0.5 && clear(x, z)
+  }
+  const same = (a: District, b: District) => a.i === b.i && a.j === b.j
+  const reach = DISTRICT * 1.2
+  const cells = Math.ceil(3100 / DISTRICT) + 1
+  let hedges = 0
+  for (let i = -cells; i <= cells; i++) {
+    for (let j = -cells; j <= cells; j++) {
+      const d = district(i, j)
+      if (Math.hypot(d.sx, d.sz) > 3100 + DISTRICT) continue
+      // back from the district's frame to the ground, kept only if it's really inside this district
+      const ground = (u: number, v: number): [number, number] | null => {
+        const [x, z] = unwarp(...unlocal(d, u, v))
+        return same(fieldAt(x, z).district, d) && farmed(x, z) ? [x, z] : null
+      }
+      for (let k = Math.floor(-reach / d.width); k <= Math.ceil(reach / d.width); k++) {
+        const kind = stripBoundary(d, k)
+        const u = stripEdge(d, k)
+        const tone = rand()
+        if (kind === 2 || kind === 3) {
+          // a hedge is a continuous mass: wide shrubs close together, their crowns merging
+          for (let v = -reach; v <= reach; v += kind === 2 ? 2.2 + rand() * 1.6 : 7 + rand() * 6) {
+            if (noise(k * 0.9 + i * 3.1, v / 80 + j * 5.3) < (kind === 2 ? 0.42 : 0.36)) continue // runs and gaps
+            const at = ground(u + (rand() - 0.5) * 1.2, v)
+            if (!at) continue
+            const tall = kind === 3 ? rand() < 0.7 : rand() < 0.1
+            if (tall) add(at[0], at[1], rand() < 0.3 ? 'conifer' : 'broadleaf', 9 + rand() * 8, tone)
+            else add(at[0], at[1], 'shrub', 2.8 + rand() * 1.8, tone, 1.3 + rand() * 0.6)
+            hedges++
+          }
+        }
+        // a copse in the odd field corner: a few trees of mixed size, round a bigger one
+        const L = segmentLength(d, k)
+        for (let v = -reach; v <= reach; v += L) {
+          if (fHash(i * 977 + k, j * 613 + Math.round(v / L), 40) > 0.045) continue
+          const n = 3 + Math.floor(rand() * 7)
+          const ct = rand()
+          for (let t = 0; t < n; t++) {
+            const a = rand() * Math.PI * 2
+            const rr = 14 * Math.sqrt(rand())
+            const at = ground(u + 4 + Math.abs(Math.cos(a) * rr), v + Math.sin(a) * rr)
+            if (!at) continue
+            add(at[0], at[1], rand() < 0.35 ? 'conifer' : rand() < 0.25 ? 'shrub' : 'broadleaf', (t === 0 ? 15 : 8) + rand() * 6, ct)
+            hedges++
+          }
+        }
+      }
+      // the district's edges: ditches carry a belt of trees and scrub; farm roads the odd tree
+      for (let a = -1; a <= 1; a++) {
+        for (let b = -1; b <= 1; b++) {
+          if (a < 0 || (a === 0 && b <= 0)) continue // each edge once
+          const o = district(i + a, j + b)
+          const ditch = districtBoundary(d, o) === 1
+          const mx = (d.sx + o.sx) / 2
+          const mz = (d.sz + o.sz) / 2
+          const len = Math.hypot(o.sx - d.sx, o.sz - d.sz)
+          const px = -(o.sz - d.sz) / len
+          const pz = (o.sx - d.sx) / len
+          const tone = rand()
+          for (let t = -DISTRICT; t <= DISTRICT; t += ditch ? 4 + rand() * 4 : 30 + rand() * 40) {
+            if (ditch && noise(i * 7.1 + a * 3.3 + b, t / 70 + j * 1.7) < 0.3) continue
+            const side = (rand() - 0.5) * (ditch ? 8 : 12)
+            const [x, z] = unwarp(mx + px * t + (o.sx - d.sx) / len * side, mz + pz * t + (o.sz - d.sz) / len * side)
+            const hit = fieldAt(x, z)
+            if (hit.edgeDistrict > 7 || !(same(hit.district, d) || same(hit.district, o)) || !farmed(x, z)) continue
+            const tall = ditch ? rand() < 0.75 : true
+            add(x, z, tall ? (rand() < 0.2 ? 'conifer' : 'broadleaf') : 'shrub', tall ? 10 + rand() * 9 : 3 + rand() * 2, tone)
+            hedges++
+          }
+        }
+      }
     }
   }
 
@@ -97,6 +160,6 @@ export function createGreenery(houses: House[], impostors: ImpostorSet): THREE.G
     return m.compose(new THREE.Vector3(p.x, heightAt(p.x, p.z) - 0.3, p.z), q, new THREE.Vector3(w, h, w))
   }
   plantImpostors(impostors, plants, heightAt, place, group)
-  console.info(`[garage] greenery: ${plants.length} garden trees, shrubs and hedgerow plants`)
+  console.info(`[garage] greenery: ${plants.length} plants (${hedges} on field boundaries)`)
   return group
 }
