@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { AtmosphereParams } from '../atmosphere-effect'
 import { aimFarShadow, createFarShadowLight } from './far-shadow'
 import type { Room } from './kit'
+import { WIND } from './foliage'
 import { createLandscape, type Landscape } from './landscape'
 import { SITE } from './site'
 import { sunDirection, sunLight, type SunPosition } from './sky'
@@ -151,6 +152,9 @@ export function createFujiWorld(group: THREE.Group, opts: FujiWorldOptions): Fuj
     },
     resize: (width, height, pixelRatio) => landscape.lake.resize(width, height, pixelRatio),
     setReflectionScale: (scale) => landscape.lake.setReflectionScale(scale),
-    update: (dt) => landscape.lake.update(dt),
+    update: (dt) => {
+      landscape.lake.update(dt)
+      WIND.time.value += dt // grass and trees sway (foliage.ts) — only while frames are drawn
+    },
   }
 }

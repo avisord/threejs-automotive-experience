@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { createFujiMountain } from './fuji-mountain'
 import { createCanopy } from './canopy'
 import { fbm, noRaycast, seeded, smoothstep } from './landform'
@@ -13,6 +12,8 @@ import { createTown, type House } from './town'
 import { layoutVegetation, type VegetationLayout } from './vegetation-layout'
 import { createRangeForest } from './ranges'
 import { createForest } from './trees'
+import { WIND, foliage } from './foliage'
+import { PATCH_KINDS, farPatch, grassPatch, type PatchKind, type PatchSpec } from './grass'
 import { createWater, type WaterSurface } from './water'
 
 /**
@@ -69,114 +70,148 @@ const ACCENTS: Accent[] = [
 ]
 
 /**
- * Seven curved blades from one root, of different heights and leans, their tips
- * paler and yellower than their bases — one instance of the meadow.
+ * The meadow around the building, in layers of grass patches (grass.ts), not
+ * blades: a dense short sward close in; tufts of mixed grass and low
+ * broad-leaved plants over the whole meadow; tall and seeding grass in stands.
+ * Where it grows is as before — full close in, thinning with distance and
+ * giving out over an uneven edge with stray patches beyond, kept under the
+ * view of the valley past the glass. What grows where is decided by broad,
+ * smooth noise fields, so neighbouring patches share their height, density,
+ * lean and colour and the meadow varies patch by patch, not blade by blade.
  */
-function grassClump(): THREE.BufferGeometry {
-  const blades: THREE.BufferGeometry[] = []
-  const levels = [0, 0.35, 0.7, 1]
-  const widths = [0.012, 0.01, 0.006, 0]
-  const rand = seeded(3)
-  for (let b = 0; b < 7; b++) {
-    const turn = (b / 7) * Math.PI * 2 + rand() * 0.9
-    const lean = 0.12 + rand() * 0.3
-    const tall = 0.55 + rand() * 0.45
-    // blades stand a little apart at the root
-    const ox = (rand() - 0.5) * 0.06
-    const oz = (rand() - 0.5) * 0.06
-    const positions: number[] = []
-    const colors: number[] = []
-    for (const [k, y] of levels.entries()) {
-      const bend = y * y * lean // curls over toward the tip
-      for (const side of widths[k] ? [-1, 1] : [0]) {
-        const lx = side * widths[k]
-        positions.push(ox + Math.cos(turn) * lx - Math.sin(turn) * bend, y * tall, oz + Math.sin(turn) * lx + Math.cos(turn) * bend)
-        // darker at the root, paler and yellower toward the tip
-        const shade = 0.6 + 0.6 * y
-        colors.push(shade * (1 + 0.25 * y), shade * (1 + 0.1 * y), shade * (1 - 0.25 * y))
-      }
-    }
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-    // lit like the ground it grows from, so the meadow and the terrain match
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(positions.length / 3).fill([0, 1, 0]).flat(), 3))
-    g.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4, 4, 5, 6])
-    blades.push(g)
-  }
-  const clump = mergeGeometries(blades)!
-  for (const g of blades) g.dispose()
-  return clump
-}
-
-/**
- * Grass around the pavilion: a short mown lawn behind it (tall grass there
- * would hide the valley from inside), a meadow at the sides and front with
- * patches of taller grass.
- */
-function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.InstancedMesh {
-  const COUNT = 62000
+function createMeadow(keepClear: LandscapeOptions['keepClear']): THREE.Group {
+  const COUNT = 46000
+  const BASE = 30000
+  /** patches nearer than this get the detailed geometry (LOD 0); beyond, the simplified one */
+  const NEAR = 18
   const INNER = 2
   const OUTER = 150
   /** full density out to here, then thinning */
   const FULL = 24
+  /** the short sward's reach: past it the terrain's own grass texture is the sward */
+  const SWARD = 34
   /** where the meadow gives out, by direction: uneven, 70–125 m — not a circle */
   const edge = (a: number) => 70 + 55 * fbm(Math.cos(a) * 1.6 + 7, Math.sin(a) * 1.6 - 2, 3)
-  const mesh = new THREE.InstancedMesh(
-    grassClump(),
-    outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })),
-    COUNT,
-  )
-  mesh.name = 'meadow'
+  const VARIANTS = 3
+  const kinds = Object.keys(PATCH_KINDS) as PatchKind[]
+  const material = foliage(outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })), {
+    wind: 'grass',
+    translucency: 0.3,
+  })
+  // the palette (sRGB): mixed by the fields, then jittered per patch
+  const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace)
+  const deep = srgb(0x4c6a30)
+  const medium = srgb(0x6a8c38)
+  const yellowGreen = srgb(0x8e9c40)
+  const olive = srgb(0x7c7c48)
+  const straw = srgb(0xb09c64)
   const rand = seeded(21)
-  const m = new THREE.Matrix4()
-  const q = new THREE.Quaternion()
-  const p = new THREE.Vector3()
-  const s = new THREE.Vector3()
-  const up = new THREE.Vector3(0, 1, 0)
-  const c = new THREE.Color()
+  type Spot = { x: number; z: number; y: number; yaw: number; scale: number; spread: number; color: THREE.Color }
+  const spots = new Map<string, Spot[]>()
+  const add = (kind: PatchKind, spot: Spot) => {
+    const lod = spot.x * spot.x + spot.z * spot.z < NEAR * NEAR ? 0 : 1
+    const k = `${kind}|${Math.floor(rand() * VARIANTS)}|${lod}`
+    const list = spots.get(k)
+    if (list) list.push(spot)
+    else spots.set(k, [spot])
+  }
+  /** the fields at a point: coherent over metres, different a patch or two away */
+  const field = (x: number, z: number) => ({
+    tall: smoothstep(fbm(x / 11 + 3, z / 11, 3), 0.5, 0.68),
+    dry: smoothstep(fbm(x / 20 + 9, z / 20 - 3, 2), 0.5, 0.66),
+    hue: fbm(x / 13 + 17, z / 13, 2),
+    warm: fbm(x / 27 - 5, z / 27 + 11, 2),
+    size: 0.75 + 0.5 * fbm(x / 16, z / 16, 2),
+    // patches lean together: a shared direction per few metres, near the wind's
+    yaw: Math.atan2(WIND.direction.value.y, WIND.direction.value.x) + (fbm(x / 15 - 2, z / 15 + 6, 2) - 0.5) * 2.4,
+  })
+  const colour = (f: ReturnType<typeof field>, kind: PatchKind, far: number) => {
+    const c = deep.clone().lerp(medium, smoothstep(f.hue, 0.3, 0.6))
+    c.lerp(yellowGreen, smoothstep(f.warm, 0.5, 0.7) * 0.8)
+    c.lerp(olive, smoothstep(f.hue, 0.6, 0.75) * 0.5)
+    c.lerp(straw, f.dry * (kind === 'dry' ? 0.9 : kind === 'tall' ? 0.45 : 0.2))
+    // (lighter where the meadow thins out: sparse dark tufts on the lit ground read as spots)
+    return c.multiplyScalar((0.9 + 0.2 * rand()) * (1 + 0.25 * far))
+  }
+
+  // ─── tufts, forbs and tall stands, where the meadow grows ────────────────
   let n = 0
-  for (let tries = 0; n < COUNT && tries < COUNT * 12; tries++) {
+  for (let tries = 0; n < COUNT && tries < COUNT * 16; tries++) {
     const r = Math.sqrt(rand() * (OUTER * OUTER - INNER * INNER) + INNER * INNER)
     const a = rand() * Math.PI * 2
-    p.set(Math.cos(a) * r, 0, Math.sin(a) * r)
-    if (keepClear(p.x, p.z)) continue
-    // Thinner with distance and gone past an uneven edge, with patches and stray tufts beyond it,
-    // so the meadow fades into the terrain's own grass instead of stopping on a circle. Farther
-    // clumps are wider (below): fewer of them still cover the ground at a distance.
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r
+    if (keepClear(x, z)) continue
+    // thinner with distance and gone past an uneven edge, with patches and stray tufts beyond it
     const e = edge(a)
-    const patches = smoothstep(fbm(p.x / 14 + 5, p.z / 14 - 8, 3), 0.5, 0.68)
+    const patches = smoothstep(fbm(x / 14 + 5, z / 14 - 8, 3), 0.5, 0.68)
     const thin = r < FULL ? 1 : (FULL / r) ** 1.3
     const keep = thin * Math.max(1 - smoothstep(r, e * 0.55, e), patches * (1 - smoothstep(r, e, OUTER)) * 0.8)
     if (rand() > keep) continue
-    p.y = heightAt(p.x, p.z)
-    q.setFromAxisAngle(up, rand() * Math.PI * 2)
-    // patches of taller, seeding grass
-    const tall = smoothstep(fbm(p.x / 9 + 3, p.z / 9, 2), 0.55, 0.7)
     // …kept below the view of the valley past the glass (a fringe along the sill, not a screen)
-    const room = roomBelowView(p.x, p.z)
+    const room = roomBelowView(x, z)
     if (room < 0.25) continue
+    const f = field(x, z)
+    const kind: PatchKind = rand() < f.tall * 0.85 ? (rand() < f.dry * 0.6 ? 'dry' : 'tall') : rand() < 0.13 ? 'forb' : 'tuft'
     // shorter toward the edge (grazed and trodden where it thins), wider clumps farther out
     const far = smoothstep(r, FULL, e)
-    const height = Math.min(room, (0.3 + rand() * 0.4 + tall * (0.5 + rand() * 0.4)) * (1 - 0.45 * far))
-    const spread = 1 + 1.2 * smoothstep(r, FULL, OUTER)
-    s.set((0.8 + rand() * 0.5) * spread, height, (0.8 + rand() * 0.5) * spread)
-    mesh.setMatrixAt(n, m.compose(p, q, s))
-    // green, with drifts of dry golden grass (late in the season, as in the valley's fields)
-    const dry = smoothstep(fbm(p.x / 5 + 9, p.z / 5 - 3, 2), 0.48, 0.62) * (0.6 + 0.4 * rand())
-    c.setHSL(
-      THREE.MathUtils.lerp(0.23 - tall * 0.04 + rand() * 0.04, 0.12 + rand() * 0.02, dry),
-      THREE.MathUtils.lerp(0.4 + rand() * 0.2, 0.42, dry),
-      // (lighter where the meadow thins out: sparse dark tufts on the lit ground read as spots)
-      THREE.MathUtils.lerp(0.27 + tall * 0.06 + rand() * 0.1, 0.42 + rand() * 0.08, dry) + 0.12 * far,
-      THREE.SRGBColorSpace,
-    )
-    mesh.setColorAt(n, c)
+    const tallest = PATCH_KINDS[kind].height[1]
+    const scale = Math.min(room / tallest, f.size * (0.8 + 0.4 * rand()) * (1 - 0.4 * far))
+    add(kind, {
+      x,
+      z,
+      y: heightAt(x, z),
+      yaw: f.yaw + (rand() - 0.5) * 1.1,
+      scale,
+      spread: 1 + 1.4 * smoothstep(r, FULL, OUTER),
+      color: colour(f, kind, far),
+    })
     n++
   }
-  mesh.count = n
-  mesh.computeBoundingSphere()
-  return noRaycast(mesh)
+
+  // ─── the short sward, close in ────────────────────────────────────────────
+  for (let t = 0, b = 0; b < BASE && t < BASE * 6; t++) {
+    const r = Math.sqrt(rand()) * (SWARD + 10)
+    const a = rand() * Math.PI * 2
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r
+    if (keepClear(x, z) || rand() > 1 - smoothstep(r, SWARD - 8, SWARD + 10)) continue
+    const f = field(x, z)
+    add('base', { x, z, y: heightAt(x, z), yaw: f.yaw + (rand() - 0.5) * 2, scale: f.size * (0.8 + 0.5 * rand()), spread: 1.3, color: colour(f, 'base', 0).multiplyScalar(0.92) })
+    b++
+  }
+
+  // ─── one InstancedMesh per patch variant ──────────────────────────────────
+  const group = new THREE.Group()
+  group.name = 'meadow'
+  const m = new THREE.Matrix4()
+  const q = new THREE.Quaternion()
+  const up = new THREE.Vector3(0, 1, 0)
+  let triangles = 0
+  kinds.forEach((kind, ki) => {
+    for (let v = 0; v < VARIANTS * 2; v++) {
+      const lod = v % 2
+      const list = spots.get(`${kind}|${v >> 1}|${lod}`) ?? []
+      if (list.length === 0) continue
+      const spec = { ...PATCH_KINDS[kind], seed: 100 + ki * 10 + (v >> 1) } as PatchSpec
+      const geometry = grassPatch(lod ? farPatch(spec) : spec)
+      const mesh = new THREE.InstancedMesh(geometry, material, list.length)
+      list.forEach((sp, i) => {
+        q.setFromAxisAngle(up, sp.yaw)
+        mesh.setMatrixAt(i, m.compose(new THREE.Vector3(sp.x, sp.y - 0.02, sp.z), q, new THREE.Vector3(sp.scale * sp.spread, sp.scale, sp.scale * sp.spread)))
+        mesh.setColorAt(i, sp.color)
+      })
+      // the tall stands cast onto the ground and each other; the rest is too low to matter
+      mesh.castShadow = kind === 'tall' || kind === 'dry'
+      mesh.receiveShadow = true
+      mesh.computeBoundingSphere()
+      mesh.name = `meadow-${kind}-lod${lod}`
+      triangles += (geometry.index!.count / 3) * list.length
+      group.add(noRaycast(mesh))
+    }
+  })
+  console.info(`[garage] meadow: ${n} patches + sward, ${(triangles / 1e6).toFixed(1)} M triangles`)
+  return group
 }
 
 /** the lake: open water with long, slow ripples and a real (low-resolution) reflection */

@@ -193,6 +193,19 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   gardens/hedgerows + `ranges.createRangeForest` (crest lines and slope stands on ranges
   < 14 km, mapped into the compression, not in the far shadow map). All instanced, all
   cast into the shadow maps. Layout takes ~2 s of the ~8 s garage build.
+- Vegetation assets (placement unchanged): the meadow (`landscape.createMeadow`) is built
+  from grass **patches** (`grass.ts`: 12–40 blades of mixed shapes — thin/broad/curved/bent/
+  leaf/dry — per clump, vertex-coloured root→tip), in layers (short sward close in, tufts,
+  forbs, tall and dry stands) chosen by smooth noise fields so neighbouring patches share
+  height/lean/colour; 3 variants per kind, LOD 0 < 18 m, LOD 1 = `farPatch` (fewer, wider,
+  1–2 segment blades). Trees are grown fuller (`grow(..., fullness)`: more, larger leaf cards
+  down the twigs, hiding limbs), six archetypes (pines, broad/round oaks, ash, aspen), crowns
+  scaled asymmetrically. `foliage.ts` gives all leafy materials: coherent wind (`WIND.time`,
+  advanced only in `Room.update`), sun translucency, and `lumaLeaves` — only the leaf
+  texture's brightness (normalised by `leafGain`), the hue from the instance colour
+  (`trees.foliageTint`), so near cards and impostors share one palette. Impostor atlas bakes
+  crown depth shading (inner/low leaves darker). Headless screenshots can return a stale
+  composited frame — to test animation, `readPixels` right after `post.render` in one task.
 - Trees (`garages/trees.ts`): ez-tree grows 3 near + 3 light variants (pine presets),
   instanced; Poly Haven 2k Japanese cedar bark replaces its 1k bark; its needle atlas is
   kept (straight alpha, `alphaToCoverage`, a lower alphaTest for far crowns — otherwise

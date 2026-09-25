@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { receiveFarShadow } from './far-shadow'
+import { foliage, leafGain, loaded } from './foliage'
 import { OUTDOOR_SKY_LIGHT } from './sky'
 import { grow, type PresetJson, type TreeCtor, type Variant } from './trees'
 
@@ -25,18 +26,21 @@ interface Species {
   kind: ImpostorKind
   /** light variant (fewer, bigger leaf cards): reads better small */
   light: boolean
+  /** crown fullness (trees.grow) — the same as the near trees', so a tree keeps its mass at every distance */
+  fullness: number
 }
 
 /** the atlas cells, left to right */
 const SPECIES: Species[] = [
-  { preset: 'Pine Large', seed: 1101, kind: 'conifer', light: true },
-  { preset: 'Pine Medium', seed: 1202, kind: 'conifer', light: true },
-  { preset: 'Pine Small', seed: 1303, kind: 'conifer', light: true },
-  { preset: 'Oak Medium', seed: 1404, kind: 'broadleaf', light: true },
-  { preset: 'Ash Medium', seed: 1505, kind: 'broadleaf', light: true },
-  { preset: 'Oak Large', seed: 1606, kind: 'broadleaf', light: true }, // (the aspen and Bush 2 cards are autumn yellow)
-  { preset: 'Bush 1', seed: 1707, kind: 'shrub', light: false },
-  { preset: 'Bush 3', seed: 1808, kind: 'shrub', light: false },
+  { preset: 'Pine Large', seed: 1101, kind: 'conifer', light: true, fullness: 1.6 },
+  { preset: 'Pine Medium', seed: 1202, kind: 'conifer', light: true, fullness: 1.6 },
+  { preset: 'Oak Large', seed: 1303, kind: 'broadleaf', light: true, fullness: 2.4 },
+  { preset: 'Oak Medium', seed: 1404, kind: 'broadleaf', light: true, fullness: 2.6 },
+  { preset: 'Ash Large', seed: 1505, kind: 'broadleaf', light: true, fullness: 2.4 },
+  // (the aspen's cards are autumn yellow; only their light and dark are baked — foliage.ts)
+  { preset: 'Aspen Large', seed: 1606, kind: 'broadleaf', light: true, fullness: 2.2 },
+  { preset: 'Bush 1', seed: 1707, kind: 'shrub', light: false, fullness: 1.4 },
+  { preset: 'Bush 3', seed: 1808, kind: 'shrub', light: false, fullness: 1.4 },
 ]
 const CELL = { w: 256, h: 512 }
 
@@ -48,19 +52,6 @@ export interface ImpostorSet {
   /** species indices of a kind */
   of(kind: ImpostorKind): number[]
   dispose(): void
-}
-
-/**
- * The leaf-card texture must have loaded before it's drawn into the atlas.
- * ez-tree loads it asynchronously (its `image` is only set once it arrives),
- * so wait for that — up to a few seconds — then for the decode.
- */
-async function loaded(texture: THREE.Texture | null): Promise<void> {
-  if (!texture) return
-  for (let waited = 0; !texture.image && waited < 8000; waited += 50) await new Promise((r) => setTimeout(r, 50))
-  const image = texture.image as HTMLImageElement | undefined
-  if (!image) console.warn('[garage] impostors: a leaf texture never arrived')
-  else if ('decode' in image && !image.complete) await image.decode().catch(() => {})
 }
 
 /**
@@ -77,7 +68,7 @@ async function bakeAtlas(variants: Variant[], frames: { fw: number; fh: number }
   target.texture.colorSpace = THREE.SRGBColorSpace
   const scene = new THREE.Scene()
   // albedo only — the live scene lights the billboards (baked light on top of live light washed them out)
-  const bark = new THREE.MeshBasicMaterial({ color: 0x3a3028 })
+  const bark = new THREE.MeshBasicMaterial({ color: 0x3c3a36 }) // (tinted green by the instance colour: a dark grey-brown survives it)
   const pixels = new Uint8Array(width * height * 4)
   renderer.setRenderTarget(target)
   // clear to the leaves' own dark green with alpha 0, so mip levels don't bleed a halo into the edges
@@ -85,7 +76,30 @@ async function bakeAtlas(variants: Variant[], frames: { fw: number; fh: number }
   renderer.clear()
   for (const [i, variant] of variants.entries()) {
     await loaded(variant.leafMap)
+    // the leaves' light and dark only, normalised (foliage.leafGain): the instance colour (trees.foliageTint) is the hue
+    const gain = await leafGain(variant.leafMap)
     const leaves = new THREE.MeshBasicMaterial({ map: variant.leafMap, alphaTest: 0.5, side: THREE.DoubleSide })
+    const { fw: frameW, fh: frameH } = frames[i]
+    leaves.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vCrown;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCrown = position;')
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vCrown;')
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+        // (linear luminance × gain, capped: the render target stores sRGB of this)
+        float leaf = min( 1.0, dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) * ${gain.toFixed(3)} * 0.55 );
+        // Crown depth, baked: leaves deep inside the crown and low in it sit in its own shade; the outer
+        // shell and the top catch the light. Without it a billboard is one flat cut-out colour.
+        float out_ = clamp( length( vCrown.xz ) / ${(frameW * 0.5).toFixed(4)}, 0.0, 1.0 );
+        float high = clamp( vCrown.y / ${(frameH * 0.55).toFixed(4)}, 0.0, 1.0 );
+        float front = clamp( 0.5 + vCrown.z / ${(frameW).toFixed(4)}, 0.0, 1.0 ); // facing the bake camera: the side seen
+        float lit = smoothstep( 0.25, 1.0, out_ * 0.55 + high * 0.3 + front * 0.45 );
+        diffuseColor.rgb = vec3( leaf * mix( 0.22, 1.05, lit ) );`,
+        )
+    }
     const group = new THREE.Group()
     group.add(new THREE.Mesh(variant.branches, bark), new THREE.Mesh(variant.leaves, leaves))
     scene.add(group)
@@ -105,9 +119,9 @@ async function bakeAtlas(variants: Variant[], frames: { fw: number; fh: number }
   renderer.dispose()
   renderer.forceContextLoss()
 
-  // Leaves are solid: the cards' own soft alpha came through as ~0.6 coverage and, with alpha-to-coverage,
-  // left the billboards half see-through and ghostly. Keep just a soft edge.
-  for (let i = 3; i < pixels.length; i += 4) pixels[i] = Math.min(255, pixels[i] * 3)
+  // Leaves are solid: the resolved MSAA coverage left crowns ~0.6 opaque (ghostly with alpha-to-coverage).
+  // Firm it up — only a little: more (×3) turned each leaf card's partly covered square into a solid tile.
+  for (let i = 3; i < pixels.length; i += 4) pixels[i] = Math.min(255, pixels[i] * 1.4)
   dilate(pixels, width, height, 8)
   const atlas = new THREE.DataTexture(pixels, width, height)
   atlas.colorSpace = THREE.SRGBColorSpace
@@ -197,7 +211,7 @@ function crossedQuads(cell: number, count: number, fw: number, fh: number): THRE
 }
 
 export async function createImpostors(Tree: TreeCtor, presets: Record<string, PresetJson>): Promise<ImpostorSet> {
-  const variants = SPECIES.map((s) => grow(Tree, presets[s.preset], s.seed, s.light, s.kind === 'conifer'))
+  const variants = SPECIES.map((s) => grow(Tree, presets[s.preset], s.seed, s.light, s.kind === 'conifer', s.fullness))
   // each cell's frame: wide enough for the crown, and the cell's 1:2 aspect so nothing is stretched
   const frames = variants.map((v) => {
     const box = new THREE.Box3().setFromBufferAttribute(v.leaves.attributes.position as THREE.BufferAttribute)
@@ -246,6 +260,10 @@ export async function createImpostors(Tree: TreeCtor, presets: Record<string, Pr
   }
   material.customProgramCacheKey = () => 'impostor'
   receiveFarShadow(material)
+  foliage(material, { wind: 'tree', translucency: 0.2 })
+  // the atlas holds the leaves at 0.55 of their normalised brightness (headroom): undo it here, so a far tree
+  // is the same colour as a near one of the same tint
+  material.color.setScalar(1 / 0.55)
   const geometries = frames.map((f, i) => crossedQuads(i, SPECIES.length, f.fw, f.fh))
   const kinds = SPECIES.map((s) => s.kind)
   return {
