@@ -22,6 +22,13 @@ export interface AtmosphereParams {
    */
   mist?: { density: number; falloff: number }
   /**
+   * A thin, tall layer (the clear air itself, kilometres deep): little over a
+   * few kilometres, but it keeps paling ranges 20–30 km off whose crests stand
+   * above the haze and mist — without it they held the same contrast as the
+   * ranges at 9 km, and the layers didn't recede.
+   */
+  air?: { density: number; falloff: number }
+  /**
    * Far layers drawn closer than they are (a distance-compressed backdrop):
    * past `start` metres, a drawn distance d stands for start + (d − start) × factor.
    */
@@ -51,6 +58,8 @@ uniform float uFalloff;
 uniform float uGroundY;
 uniform float uMistDensity;
 uniform float uMistFalloff;
+uniform float uAirDensity;
+uniform float uAirFalloff;
 uniform float uCompressStart;
 uniform float uCompressFactor;
 uniform float uStrength;
@@ -116,7 +125,8 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, const in float depth
   if ( !sky ) {
     float h0 = max( uCameraPosition.y - uGroundY, 0.0 );
     float opticalDepth =
-      ( fogDepth( uDensity, uFalloff, h0, rd.y, dist ) + fogDepth( uMistDensity, uMistFalloff, h0, rd.y, dist ) ) * uStrength;
+      ( fogDepth( uDensity, uFalloff, h0, rd.y, dist ) + fogDepth( uMistDensity, uMistFalloff, h0, rd.y, dist ) +
+        fogDepth( uAirDensity, uAirFalloff, h0, rd.y, dist ) ) * uStrength;
     float transmittance = exp( -opticalDepth );
     // the air's own glow, brighter toward the sun (forward scattering) — kept modest: at 0.7+ and full
     // strength a sunward view washes out to white within a hundred metres
@@ -176,6 +186,8 @@ export class AtmosphereEffect extends Effect {
         ['uGroundY', new THREE.Uniform(0)],
         ['uMistDensity', new THREE.Uniform(0)],
         ['uMistFalloff', new THREE.Uniform(0.01)],
+        ['uAirDensity', new THREE.Uniform(0)],
+        ['uAirFalloff', new THREE.Uniform(0.001)],
         ['uCompressStart', new THREE.Uniform(1e9)],
         ['uCompressFactor', new THREE.Uniform(1)],
         ['uStrength', new THREE.Uniform(1)],
@@ -225,6 +237,7 @@ export class AtmosphereEffect extends Effect {
     if (!p) {
       u.get('uDensity')!.value = 0
       u.get('uMistDensity')!.value = 0
+      u.get('uAirDensity')!.value = 0
       u.get('uShafts')!.value = 0
       return
     }
@@ -236,6 +249,8 @@ export class AtmosphereEffect extends Effect {
     u.get('uGroundY')!.value = p.groundY
     u.get('uMistDensity')!.value = p.mist?.density ?? 0
     u.get('uMistFalloff')!.value = p.mist?.falloff ?? 0.01
+    u.get('uAirDensity')!.value = p.air?.density ?? 0
+    u.get('uAirFalloff')!.value = p.air?.falloff ?? 0.001
     u.get('uCompressStart')!.value = p.compress?.start ?? 1e9
     u.get('uCompressFactor')!.value = p.compress?.factor ?? 1
     u.get('uShaftDensity')!.value = p.shaftDensity

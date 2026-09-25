@@ -86,6 +86,8 @@ export function createFujiWorld(group: THREE.Group, opts: FujiWorldOptions): Fuj
     density: 7e-5,
     falloff: 1 / 1200,
     mist: { density: 5e-5, falloff: 1 / 220 },
+    // and the clear air, kilometres deep: the ranges 20–30 km off pale into it, their crests included
+    air: { density: 1.5e-5, falloff: 1 / 8000 },
     groundY: SITE.lakeLevel + lift,
     compress: SITE.compress, // far layers are drawn closer than they are (site.ts): haze them for their real distance
     shaftLight: sun,

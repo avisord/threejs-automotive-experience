@@ -142,8 +142,10 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   and mapped vertex by vertex (`site.mapFar`, normals from the real shape first) so each
   point keeps its exact direction from the eye and its depth order; the atmosphere
   effect's `compress` undoes the mapping to haze them for their real distance. Haze is
-  two exponential height layers (1.2 km scale + a ~220 m valley `mist`), so each range's
-  foot is paler than its crest; ranges run out to 27 km (`ranges.ts`). The haze colour is
+  three exponential height layers (1.2 km scale + a ~220 m valley `mist` + a thin 8 km
+  `air` layer — without it the 20–30 km ranges, whose crests rise out of the haze, kept the
+  contrast of the 9 km ones and the layers didn't recede), so each range's foot is paler
+  than its crest; the far terrain runs out to 34 km (`ranges.ts`). The haze colour is
   set a little darker/bluer than the horizon sky, or far ridges wash out. Two shader bugs
   fixed there: the fog integral must not switch formulas at a fixed |falloff·rd.y| (it
   drew a hard line across Fuji at ~7° elevation), and "sky" is depth ≥ 0.9999999 — at
@@ -199,8 +201,9 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   (`impostors.ts`: 8 species baked into an albedo atlas with a throwaway WebGL context,
   two crossed quads, view-facing crown normals, mip-scaled alpha so far crowns don't
   vanish, dilated colours so mips don't fringe). ~0.5 M impostors + `greenery.ts` village
-  gardens/hedgerows + `ranges.createRangeForest` (crest lines and slope stands on ranges
-  < 14 km, mapped into the compression, not in the far shadow map). All instanced, all
+  gardens/hedgerows + `ranges.createRangeForest` (skyline trees and the forest stands on
+  the far terrain < 14 km, mapped into the compression, not in the far shadow map; they take
+  the terrain's horizon-map shadow per instance). All instanced, all
   cast into the shadow maps. Layout takes ~2 s of the ~8 s garage build.
 - Vegetation assets (placement unchanged): the meadow (`landscape.createMeadow`) is built
   from grass **patches** (`grass.ts`: 12–40 blades of mixed shapes — thin/broad/curved/bent/
@@ -262,6 +265,23 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 - Landscape materials (`receiveFarShadow`) compile three's point/spot/area light loops out:
   every RectAreaLight otherwise cost ~1.6 ms on every landscape pixel. N8AO runs `halfRes`.
   Fuji front view at 1080p ≈ 17 ms GPU.
+- Far terrain (`ranges.ts`): one polar mesh from 3.24 to 34 km (1440 × 170, geometric
+  rings), continuing `heightAt` out of the valley. Built from forms, not one noise:
+  `MASSIFS` (foothills ~5 km, middle ranges 8–12 km, high ranges 21–26 km) each make a
+  meandering main ridge + spurs (asymmetric widths, sharp/round/plateau profiles), merged
+  with a smooth max over broad roots and rolling ground; `VALLEYS` cut corridors back into
+  them; erosion is a warped periodic spur-and-gully pattern down each ridge's flanks. Erosion
+  must be applied once per ridge in a frame blended from its pieces: per piece then maxed, the
+  max chose whichever overlapping piece had no gully (erosion vanished); averaged, it
+  cancelled; a width or spacing that differs per piece, or a steep-side flag that flips
+  behind a ridge's end, left steps. Colour/cover from elevation, slope, aspect and moisture
+  (gullies, valley floors); per-pixel crown/clearing detail from a real-metre `realXZ`
+  attribute. Cast shadows: an 8-direction horizon map per vertex (from a 180 m height raster
+  of the whole land incl. `fujiSurface`), compared with the sun in the shader (`horizonShadow`,
+  applied before `aomap_fragment`, after translucency). Land under Fuji's skirts is pushed
+  well below them (depth precision). ~0.95 s to build; GPU cost no higher than the old bands.
+  Keep the skyline in front of Fuji at ~4.6–5.2° (`silhouette` of the front ridge) or its
+  skirts show and it reads wider.
 - Fuji's shape (`fuji-mountain.ts` `profile()`): a steep curve plus a nearly straight one over
   a 15 km radius, fitted to the real north-side elevations — a single-exponent cone read as
   a triangle. The front ranges (`ranges.ts`) hide its lower skirts so the visible mountain

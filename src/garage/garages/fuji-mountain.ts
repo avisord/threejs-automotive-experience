@@ -35,6 +35,19 @@ function profile(u: number): number {
   return 0.45 * (1 - u) ** 6 + 0.55 * (1 - u) ** 1.4
 }
 
+/**
+ * The mountain's broad surface above the lake at a real-scale point (x, z around the
+ * pavilion), without its erosion — for the ranges around it: they keep clear of its
+ * skirts and take its shadow. −∞ off the mountain.
+ */
+export function fujiSurface(x: number, z: number): number {
+  const d = Math.hypot(x, z + FUJI.distance)
+  if (d >= FUJI.radius) return -Infinity
+  const u = Math.max(0, (d - FUJI.crater) / (FUJI.radius - FUJI.crater))
+  const sink = smoothstep(Math.hypot(x, z), 5000, 9000)
+  return FUJI.height * profile(u) * sink - 80 * (1 - sink)
+}
+
 export function createFujiMountain(): THREE.Mesh {
   const { height: H, radius: R } = FUJI
   const snow = new THREE.Color().setHex(0xf2f4f8, THREE.SRGBColorSpace)

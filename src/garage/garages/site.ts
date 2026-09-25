@@ -12,7 +12,8 @@ import { fbm, lerp, noise, ridged, smoothstep } from './landform'
  *   → a winding rural road across the valley (~480 m)
  *   → rolling ground, farms and a village, down to
  *   → the lake (~1–2.9 km), then its wooded far shore rising gently to 3.3 km
- *   → foothill ranges (5–12 km) → Mount Fuji (~17 km)
+ *   → foothills (~5 km) and mountain ranges (8–12 km) → Mount Fuji (~17 km),
+ *     high ranges off to its sides (21–26 km)
  *
  * The pavilion stands ~50 m above the lake, a few metres from the edge of
  * its terrace, the land below falling away steeply and then gently across the
