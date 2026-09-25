@@ -43,10 +43,17 @@ export const VEGETATION = {
   lean: 3.5,
   /** fraction of the land left open by clearings */
   clearings: 0.3,
-  /** distance bands from the pavilion, metres: full trees → light trees → billboards */
-  bands: { near: 220, mid: 450 },
-  /** hard caps per band (full trees are ~18k triangles, light ~8k) */
-  caps: { near: 70, mid: 520 },
+  /**
+   * Level-of-detail bands, metres from the pavilion (the orbit camera stays within ~15 m of it):
+   * LOD 0 hero trees → LOD 1 skeleton + foliage masses → LOD 2 three crossed cards → LOD 3 two.
+   * Chosen by screen size, not a driving game's metres: through the 36° lens a tree looks ~1.3×
+   * bigger than through a ~60° game camera, so each band reaches that much farther.
+   */
+  lod: { hero: 30, masses: 70, cards: 160 },
+  /** hard caps per band (a hero tree is ~27k triangles, LOD 1 ~1k, a card 6) — a full band passes on its farthest */
+  caps: { hero: 60, masses: 400, cards: 4000 },
+  /** beyond this, trees cast no shadow of their own: the canopy shell carries the woods' shadow */
+  shadowless: 1500,
   /** heights, metres */
   height: { conifer: 19, broadleaf: 13, shrub: 2.2 },
 }

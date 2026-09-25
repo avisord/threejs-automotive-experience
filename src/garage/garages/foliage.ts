@@ -38,6 +38,21 @@ export interface FoliageOptions {
   translucency?: number
   /** take only the leaf texture's brightness (× gain, normalising its mean to ~1); the instance colour gives the hue */
   lumaLeaves?: number
+  /**
+   * Coverage-preserving alpha test for cards: each mip level averages leaves
+   * with the gaps between them, so a card's alpha sinks under the threshold
+   * with distance and far foliage thins to nothing. Scale alpha back up by the
+   * mip level sampled (Golus's alpha-to-coverage mip scaling).
+   */
+  coverage?: boolean
+  /** leaves aren't glossy: cut the sky's specular sheen, which turned dark, shaded clumps blue */
+  matte?: boolean
+  /**
+   * The normal is the crown's, not the card's: don't flip it for back faces. (three flips a
+   * double-sided surface's normal when its back is seen — a crossed card showing its back then
+   * faced away from the light and went dark: half of every billboard tree.)
+   */
+  crownNormals?: boolean
 }
 
 export function foliage<M extends THREE.MeshStandardMaterial>(material: M, opts: FoliageOptions): M {
@@ -95,6 +110,34 @@ export function foliage<M extends THREE.MeshStandardMaterial>(material: M, opts:
         diffuseColor.rgb = vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * ${opts.lumaLeaves.toFixed(3)};`,
       )
     }
+    if (opts.coverage) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        {
+          vec2 texel = vMapUv * vec2( textureSize( map, 0 ) );
+          float lod = max( 0.0, 0.5 * log2( max( dot( dFdx( texel ), dFdx( texel ) ), dot( dFdy( texel ), dFdy( texel ) ) ) ) );
+          diffuseColor.a *= 1.0 + lod * 0.35;
+        }`,
+      )
+    }
+    if (opts.crownNormals) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+        #ifdef DOUBLE_SIDED
+          normal *= faceDirection;
+        #endif`,
+      )
+    }
+    if (opts.matte) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        reflectedLight.indirectSpecular *= 0.2;
+        reflectedLight.directSpecular *= 0.4;`,
+      )
+    }
     if (opts.translucency) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <lights_fragment_end>',
@@ -110,7 +153,7 @@ export function foliage<M extends THREE.MeshStandardMaterial>(material: M, opts:
       )
     }
   }
-  const key = `foliage|${opts.wind ?? ''}|${opts.translucency ?? 0}|${opts.lumaLeaves ?? 0}`
+  const key = `foliage|${opts.wind ?? ''}|${opts.translucency ?? 0}|${opts.lumaLeaves ?? 0}|${opts.coverage ?? false}|${opts.matte ?? false}|${opts.crownNormals ?? false}`
   material.customProgramCacheKey = () => `${key}|${previousKey()}`
   material.needsUpdate = true
   return material

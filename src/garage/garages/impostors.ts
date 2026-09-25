@@ -5,9 +5,10 @@ import { OUTDOOR_SKY_LIGHT } from './sky'
 import { grow, type PresetJson, type TreeCtor, type Variant } from './trees'
 
 /**
- * Cheap trees for the distance (LOD 2): the real ez-tree trees, rendered once
- * into a texture atlas and drawn as two crossed quads — 4 triangles a tree
- * instead of thousands, with the real silhouette (not a cone or a ball).
+ * Cheap trees for the distance: the real ez-tree trees, rendered once into a
+ * texture atlas and drawn as crossed cards — LOD 2 three of them (6 triangles,
+ * a fuller silhouette from any side), LOD 3 two (4 triangles). Thousands of
+ * leaves in a texture, not in geometry; the real silhouette, not a cone or a ball.
  *
  * The atlas holds albedo only; the scene lights the billboards live through
  * "crown" normals (mostly up, leaning out from the trunk), so they sit in the
@@ -42,11 +43,13 @@ const SPECIES: Species[] = [
   { preset: 'Bush 1', seed: 1707, kind: 'shrub', light: false, fullness: 1.4 },
   { preset: 'Bush 3', seed: 1808, kind: 'shrub', light: false, fullness: 1.4 },
 ]
-const CELL = { w: 256, h: 512 }
+const CELL = { w: 384, h: 768 } // LOD 2 cards stand ~300 px tall at 80 m through the 36° lens
 
 export interface ImpostorSet {
-  /** one geometry per species (2 crossed quads, 1 unit = the tree's height) */
+  /** LOD 3: one geometry per species (2 crossed quads, 1 unit = the tree's height) */
   geometries: THREE.BufferGeometry[]
+  /** LOD 2: the same, three crossed quads */
+  cards: THREE.BufferGeometry[]
   kinds: ImpostorKind[]
   material: THREE.MeshStandardMaterial
   /** species indices of a kind */
@@ -122,7 +125,7 @@ async function bakeAtlas(variants: Variant[], frames: { fw: number; fh: number }
   // Leaves are solid: the resolved MSAA coverage left crowns ~0.6 opaque (ghostly with alpha-to-coverage).
   // Firm it up — only a little: more (×3) turned each leaf card's partly covered square into a solid tile.
   for (let i = 3; i < pixels.length; i += 4) pixels[i] = Math.min(255, pixels[i] * 1.4)
-  dilate(pixels, width, height, 8)
+  dilate(pixels, width, height, 6)
   const atlas = new THREE.DataTexture(pixels, width, height)
   atlas.colorSpace = THREE.SRGBColorSpace
   atlas.generateMipmaps = true
@@ -138,7 +141,7 @@ async function bakeAtlas(variants: Variant[], frames: { fw: number; fh: number }
  * stays 0) — without it, mip levels and linear filtering blend leaf colour
  * with the clear colour, and distant billboards wear a pale grey fringe.
  */
-function dilate(px: Uint8Array, w: number, h: number, passes: number): void {
+export function dilate(px: Uint8Array, w: number, h: number, passes: number): void {
   const filled = new Uint8Array(w * h)
   for (let i = 0; i < w * h; i++) filled[i] = px[i * 4 + 3] > 0 ? 1 : 0
   for (let pass = 0; pass < passes; pass++) {
@@ -172,15 +175,15 @@ function dilate(px: Uint8Array, w: number, h: number, passes: number): void {
   }
 }
 
-/** two crossed quads for atlas cell `cell`, `fw` wide × `fh` tall, standing on the origin */
-function crossedQuads(cell: number, count: number, fw: number, fh: number): THREE.BufferGeometry {
+/** `planes` crossed quads for atlas cell `cell`, `fw` wide × `fh` tall, standing on the origin */
+function crossedQuads(cell: number, count: number, fw: number, fh: number, planes = 2): THREE.BufferGeometry {
   const u0 = cell / count
   const u1 = (cell + 1) / count
   const position: number[] = []
   const normal: number[] = []
   const uv: number[] = []
   const index: number[] = []
-  for (const [k, turn] of [0, Math.PI / 2].entries()) {
+  for (const [k, turn] of Array.from({ length: planes }, (_, i) => (i * Math.PI) / planes).entries()) {
     const ax = Math.cos(turn)
     const az = -Math.sin(turn)
     for (const [cx, cy, u, v] of [
@@ -260,19 +263,21 @@ export async function createImpostors(Tree: TreeCtor, presets: Record<string, Pr
   }
   material.customProgramCacheKey = () => 'impostor'
   receiveFarShadow(material)
-  foliage(material, { wind: 'tree', translucency: 0.2 })
+  foliage(material, { wind: 'tree', translucency: 0.2, matte: true, crownNormals: true })
   // the atlas holds the leaves at 0.55 of their normalised brightness (headroom): undo it here, so a far tree
   // is the same colour as a near one of the same tint
   material.color.setScalar(1 / 0.55)
   const geometries = frames.map((f, i) => crossedQuads(i, SPECIES.length, f.fw, f.fh))
+  const cards = frames.map((f, i) => crossedQuads(i, SPECIES.length, f.fw, f.fh, 3))
   const kinds = SPECIES.map((s) => s.kind)
   return {
     geometries,
+    cards,
     kinds,
     material,
     of: (kind) => kinds.flatMap((k, i) => (k === kind ? [i] : [])),
     dispose() {
-      for (const g of geometries) g.dispose()
+      for (const g of [...geometries, ...cards]) g.dispose()
       atlas.dispose()
       material.dispose()
     },

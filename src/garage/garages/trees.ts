@@ -4,6 +4,7 @@ import { SURFACES, pbrMaps } from './kit'
 import { seeded } from './landform'
 import { foliage, leafGain } from './foliage'
 import { createImpostors, type ImpostorSet } from './impostors'
+import { createMasses } from './masses'
 import { OUTDOOR_SKY_LIGHT } from './sky'
 import { VEGETATION, type Plant, type VegetationLayout } from './vegetation-layout'
 
@@ -262,31 +263,69 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
   const treeHeight = (v: Variant): [number, number] => (v.conifer ? [15, 27] : [10, 17])
 
   // ─── the planned vegetation, by level of detail ───────────────────────────
-  const { bands, caps } = VEGETATION
-  const lod0: { conifer: Spot[]; broadleaf: Spot[] } = { conifer: [], broadleaf: [] }
-  const lod1: { conifer: Spot[]; broadleaf: Spot[] } = { conifer: [], broadleaf: [] }
+  const { lod, caps, shadowless } = VEGETATION
+  const hero: { conifer: Spot[]; broadleaf: Spot[] } = { conifer: [], broadleaf: [] }
+  const massed: { conifer: Spot[]; broadleaf: Spot[] } = { conifer: [], broadleaf: [] }
   const shrubs0: Spot[] = []
-  const lod2: Plant[] = []
-  let n0 = 0
-  let n1 = 0
+  const cards: Plant[] = []
+  const far: Plant[] = []
+  const counts = [0, 0, 0, 0]
   // nearest first, so a full band passes on its farthest trees
   const byDistance = [...opts.layout.plants].sort((a, b) => a.x * a.x + a.z * a.z - (b.x * b.x + b.z * b.z))
   for (const p of byDistance) {
     const d = Math.hypot(p.x, p.z)
     if (p.kind === 'shrub') {
       if (d < 150 && shrubs0.length < 140) shrubs0.push({ x: p.x, z: p.z, plan: p })
-      else lod2.push(p)
-    } else if (d < bands.near && n0 < caps.near) {
-      lod0[p.kind].push({ x: p.x, z: p.z, plan: p })
-      n0++
-    } else if (d < bands.mid && n1 < caps.mid) {
-      lod1[p.kind].push({ x: p.x, z: p.z, plan: p })
-      n1++
-    } else lod2.push(p)
+      else if (d < lod.cards) cards.push(p)
+      else far.push(p)
+    } else if (d < lod.hero && counts[0] < caps.hero) {
+      hero[p.kind].push({ x: p.x, z: p.z, plan: p })
+      counts[0]++
+    } else if (d < lod.masses && counts[1] < caps.masses) {
+      massed[p.kind].push({ x: p.x, z: p.z, plan: p })
+      counts[1]++
+    } else if (d < lod.cards && counts[2] < caps.cards) {
+      cards.push(p)
+      counts[2]++
+    } else {
+      far.push(p)
+      counts[3]++
+    }
   }
-  const nearMeshes = [...plant(near.filter((v) => v.conifer), lod0.conifer, treeHeight, 0.35), ...plant(near.filter((v) => !v.conifer), lod0.broadleaf, treeHeight, 0.35)]
-  // mid crowns: a lower threshold keeps mipmapped (fainter) leaf alpha from thinning them out
-  const midMeshes = [...plant(mid.filter((v) => v.conifer), lod1.conifer, treeHeight, 0.18), ...plant(mid.filter((v) => !v.conifer), lod1.broadleaf, treeHeight, 0.18)]
+  // LOD 0: the full trees
+  const nearMeshes = [
+    ...plant(near.filter((v) => v.conifer), hero.conifer, treeHeight, 0.35),
+    ...plant(near.filter((v) => !v.conifer), hero.broadleaf, treeHeight, 0.35),
+  ]
+  // LOD 1: skeleton + foliage masses, grown from the light trees (masses.ts)
+  const masses = await createMasses(mid)
+  const plantMasses = (list: Spot[], conifer: boolean) => {
+    const planted: THREE.Object3D[] = []
+    const kinds = masses.trees.map((t, i) => [t, i] as const).filter(([t]) => t.conifer === conifer)
+    kinds.forEach(([tree], vi) => {
+      const mine = list.filter((spot) => Math.floor(spot.plan!.pick * kinds.length) === vi)
+      if (mine.length === 0) return
+      const trunks = new THREE.InstancedMesh(tree.skeleton, barkMaterial, mine.length)
+      const crowns = new THREE.InstancedMesh(tree.masses, masses.material, mine.length)
+      mine.forEach((spot, i) => {
+        grounded(spot, spot.plan!.height)
+        trunks.setMatrixAt(i, m)
+        crowns.setMatrixAt(i, m)
+        crowns.setColorAt(i, tint(conifer, spot.plan!.tone))
+      })
+      for (const mesh of [trunks, crowns]) {
+        mesh.castShadow = true // LOD 0–1: detailed shadows in the sun's sharp map and the far one
+        mesh.receiveShadow = true
+        mesh.computeBoundingSphere()
+        mesh.raycast = () => {}
+        mesh.name = 'lod1'
+        group.add(mesh)
+        planted.push(mesh)
+      }
+    })
+    return planted
+  }
+  const midMeshes = [...plantMasses(massed.conifer, true), ...plantMasses(massed.broadleaf, false)]
 
   // pines framing the view and a few cherries, placed by hand
   const accentPines = opts.accents.filter((a) => a.kind === 'pine')
@@ -312,22 +351,29 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
   const bushMeshes = plant(bushes, bushSpots, () => [1.2, 2.6], 0.35)
   for (const o of bushMeshes) o.name = 'bush'
 
-  // LOD 2: everything else as impostors
+  // LOD 2 (three crossed cards) and LOD 3 (two), from one atlas of the same trees (impostors.ts)
   const impostors = await createImpostors(Tree, presets)
-  // (impostors stand straight up — a tilted card shows it's a card — and sink a little deeper, as their
-  // crossed quads have no trunk flare to hide the join on a slope)
+  // (cards stand straight up — a tilted card shows it's a card — and sink a little deeper, as they have
+  // no trunk flare to hide the join on a slope)
   const upright = (spot: Spot, h: number) => {
     const { x, z, plan } = spot
     q.setFromAxisAngle(up, plan?.turn ?? 0)
     const w = h * (plan?.width ?? 1)
     return m.compose(new THREE.Vector3(x, opts.heightAt(x, z) - 0.5, z), q, new THREE.Vector3(w, h, w))
   }
-  const farMeshes = plantImpostors(impostors, lod2, opts.heightAt, upright, group)
+  const farMeshes = [
+    ...plantImpostors(impostors, cards, opts.heightAt, upright, group, impostors.cards),
+    ...plantImpostors(impostors, far.filter((p) => Math.hypot(p.x, p.z) < shadowless), opts.heightAt, upright, group),
+    // Shadows by LOD: the far map (1.7 m texels, re-rendered only when the sun moves) is the simplified
+    // shadow for LOD 2–3; past `shadowless` trees cast none of their own — the canopy shell does
+    ...plantImpostors(impostors, far.filter((p) => Math.hypot(p.x, p.z) >= shadowless), opts.heightAt, upright, group, undefined, false),
+  ]
 
   const tris = (vs: Variant[]) => Math.round(vs.reduce((s, v) => s + v.triangles, 0) / vs.length)
+  const massTris = Math.round(masses.trees.reduce((s, t) => s + t.triangles, 0) / masses.trees.length)
   console.info(
-    `[garage] forest: ${opts.layout.plants.length} planned — LOD0 ${n0} (~${tris(near)} tris each), LOD1 ${n1} (~${tris(mid)}), ` +
-      `LOD2 ${lod2.length} impostors, ${bushSpots.length} full bushes`,
+    `[garage] forest: ${opts.layout.plants.length} planned — LOD0 ${counts[0]} hero (~${tris(near)} tris), LOD1 ${counts[1]} massed ` +
+      `(~${massTris} tris), LOD2 ${counts[2]} cards (6 tris), LOD3 ${counts[3]} (4 tris), ${bushSpots.length} full bushes`,
   )
   return { group, near: nearMeshes, accents: accentMeshes, mid: midMeshes, far: farMeshes, bushes: bushMeshes, impostors, ready: bark.ready }
 }
@@ -357,8 +403,10 @@ export function plantImpostors(
   _heightAt: (x: number, z: number) => number,
   place: (spot: { x: number; z: number; plan: Plant }, h: number) => THREE.Matrix4,
   group: THREE.Object3D,
+  geometries: THREE.BufferGeometry[] = impostors.geometries,
+  castShadow = true,
 ): THREE.Object3D[] {
-  const buckets = impostors.geometries.map(() => [] as Plant[])
+  const buckets = geometries.map(() => [] as Plant[])
   for (const p of plants) {
     const options = impostors.of(p.kind)
     buckets[options[Math.min(options.length - 1, Math.floor(p.pick * options.length))]].push(p)
@@ -367,13 +415,13 @@ export function plantImpostors(
   const meshes: THREE.Object3D[] = []
   buckets.forEach((list, species) => {
     if (list.length === 0) return
-    const mesh = new THREE.InstancedMesh(impostors.geometries[species], impostors.material, list.length)
+    const mesh = new THREE.InstancedMesh(geometries[species], impostors.material, list.length)
     mesh.name = 'impostors'
     list.forEach((p, i) => {
       mesh.setMatrixAt(i, place({ x: p.x, z: p.z, plan: p }, p.height))
       mesh.setColorAt(i, impostorTint(p.kind, p.tone, c))
     })
-    mesh.castShadow = true
+    mesh.castShadow = castShadow
     mesh.receiveShadow = true
     mesh.computeBoundingSphere()
     mesh.raycast = () => {}

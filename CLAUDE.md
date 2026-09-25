@@ -186,7 +186,16 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   `site.woodedness`, lone trees, a clearing noise field; `landscape.planVegetation` supplies
   the site rules (not water/road/houses/cliffs, nothing rising into the lake view). Its
   `cover()` darkens the terrain under trees and shapes the canopy shell. `trees.ts` gives
-  each plant a LOD: ez-tree full (<220 m, cap 70) → light (<450 m, cap 520) → impostors
+  each plant one of four LODs by distance from the pavilion (`VEGETATION.lod`: 30/70/160 m —
+  a driving game's 20/50/120 scaled ~1.3× for the 36° lens): LOD 0 full ez-tree (heroes +
+  hand-placed accents); LOD 1 `masses.ts` — limb skeleton (branch triangles with a ring edge
+  < `SKELETON_EDGE` dropped) + 20–24 crossed-card foliage masses placed by k-means over the
+  full tree's leaves, each card a baked *cluster card* (a thin slab of real leaves, leafy
+  broken edge), crown-centred normals — ~1 k tris; LOD 2 three crossed impostor cards; LOD 3
+  two; past `VEGETATION.shadowless` (1.5 km) no shadow casting (the canopy shell carries it).
+  Card materials use `foliage({ crownNormals })` — three flips a DoubleSide normal on back
+  faces, which turned half of every crossed-card tree dark — and `matte` (sky specular made
+  shaded clumps blue). Impostors
   (`impostors.ts`: 8 species baked into an albedo atlas with a throwaway WebGL context,
   two crossed quads, view-facing crown normals, mip-scaled alpha so far crowns don't
   vanish, dilated colours so mips don't fringe). ~0.5 M impostors + `greenery.ts` village
