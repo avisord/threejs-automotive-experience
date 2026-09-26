@@ -70,7 +70,7 @@ controls.enablePan = false // keep the car centred
 controls.minPolarAngle = 0.02 // straight-down top view is fine
 controls.maxPolarAngle = THREE.MathUtils.degToRad(84) // …but never below the floor line
 controls.minDistance = 3.4
-controls.maxDistance = 20
+controls.maxDistance = 100
 controls.update()
 
 // ─── keyboard zoom: + / - ───────────────────────────────────────────────────
