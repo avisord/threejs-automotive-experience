@@ -74,7 +74,7 @@ export function createCarPlacement(hooks: Hooks): CarPlacement {
   let active = false
   const saved = load()
 
-  /** keep the car's footprint inside the walls, on or above the floor, under the ceiling */
+  /** keep the car's footprint inside the walls; up and down it goes wherever it's dragged (into the floor too) */
   function keepInRoom(): void {
     if (!car) return
     const { min, max } = hooks.bounds()
@@ -83,10 +83,9 @@ export function createCarPlacement(hooks: Hooks): CarPlacement {
     const clampAxis = (v: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : THREE.MathUtils.clamp(v, lo, hi))
     p.x = clampAxis(p.x, min.x + half, max.x - half)
     p.z = clampAxis(p.z, min.z + half, max.z - half)
-    p.y = clampAxis(p.y, 0, Math.max(0, max.y - car.size.y - 0.1))
   }
 
-  /** slide the contact shadow under the car; it thins out as the car leaves the floor */
+  /** slide the contact shadow under the car; it thins out as the car rises off the floor (sunk in, it stays) */
   function followShadow(): void {
     if (!car) return
     const p = car.root.position
