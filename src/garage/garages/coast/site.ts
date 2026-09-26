@@ -154,9 +154,9 @@ export const ISLANDS: { x: number; z: number; rx: number; rz: number; seed: numb
   // stacks off the cove's rocky points (surf breaks round them)
   { x: 95, z: -610, rx: 9, rz: 7, seed: 1 },
   { x: 118, z: -632, rx: 5, rz: 4, seed: 2 },
-  { x: 0, z: -298, rx: 6, rz: 5, seed: 3 },
+  { x: -235, z: -392, rx: 8, rz: 6, seed: 3 },
   { x: 290, z: -1080, rx: 14, rz: 10, seed: 4 },
-  { x: -60, z: -215, rx: 7, rz: 6, seed: 5 },
+  { x: 182, z: -478, rx: 7, rz: 6, seed: 5 },
   // islands out in the bay (left of centre, as in the reference)
   { x: -1500, z: -9200, rx: 420, rz: 260, seed: 6 },
   { x: -2300, z: -11800, rx: 900, rz: 420, seed: 7 },
@@ -184,6 +184,47 @@ function coastLimit(r: number): number {
   return lerp(table[i], table[i + 1], f - i)
 }
 
+/**
+ * The cove, straight out through the glass: a crescent of sand across the
+ * view — its shore ~430 m out in the middle, the sand ~150 m deep and nearly
+ * level behind it, so the whole beach lies in the band a camera at car height
+ * sees over the sill (4.5–7° down) and faces the garage instead of running
+ * away edge-on. Rocky points close it at both ends; past the right one the coast
+ * swings out and recedes. Shore distance by bearing (degrees → metres).
+ */
+const COVE: [bearingDeg: number, dist: number][] = [
+  [-29, 520],
+  [-24, 485],
+  [-17, 452],
+  [-8, 436],
+  [2, 432],
+  [10, 444],
+  [16, 480],
+  [21, 560],
+  [25, 720],
+  [28, 1050],
+  [31, 1600],
+]
+const COVE_SPAN = { from: COVE[0][0], to: COVE[COVE.length - 1][0] }
+
+/** the cove's shore distance at a bearing (degrees), null outside it */
+function coveShore(bDeg: number): number | null {
+  if (bDeg < COVE_SPAN.from || bDeg > COVE_SPAN.to) return null
+  for (let i = 1; i < COVE.length; i++) {
+    const [b1, r1] = COVE[i]
+    if (bDeg <= b1) {
+      const [b0, r0] = COVE[i - 1]
+      const t = (bDeg - b0) / (b1 - b0)
+      // (smooth between the points, in log distance: the far end swings out fast)
+      return Math.exp(lerp(Math.log(r0), Math.log(r1), t * t * (3 - 2 * t)))
+    }
+  }
+  return null
+}
+
+/** 0–1: how far into the cove's sandy middle a bearing is (the points at its ends are rock) */
+const coveSand = (bDeg: number) => smoothstep(bDeg, -21, -14) * (1 - smoothstep(bDeg, 17, 22))
+
 /** the mask: is (x, z) land? (raw, sampled once into the shore rasters) */
 export function isLand(x: number, z: number): boolean {
   const r = Math.hypot(x, z)
@@ -198,6 +239,12 @@ export function isLand(x: number, z: number): boolean {
     if (d2 < edge * edge) return true
   }
   const b = bearing(x, z)
+  const cove = coveShore(b / DEG)
+  if (cove !== null && r < 6000) {
+    // the rocky points are ragged; the sand between them one smooth curve
+    const ragged = (1 - coveSand(b / DEG)) * ((noise(b * 60, 3.3) - 0.5) * 40 + (noise(b * 190, 7.1) - 0.5) * 14)
+    return r < cove + ragged
+  }
   // (land behind the garage's left, round to its back: the headland it stands on)
   return b > coastLimit(r) || b < -165 * DEG
 }
@@ -324,14 +371,20 @@ export function shore(x: number, z: number): number {
 /** 0–1: sand here — the cove ahead-right, a second small beach further along, pockets of sand in coves */
 export function beachness(x: number, z: number): number {
   const r = Math.hypot(x, z)
-  // (only by the right-hand coast: at the same distance out on the water, or on the left shore, no sand)
+  const bDeg = bearing(x, z) / DEG
+  // the cove: sand from its waterline back ~110 m, out into its shallows
+  const cove = coveShore(bDeg)
+  if (cove !== null && r < 1200) {
+    const d = r - cove // + out to sea, − inland
+    return coveSand(bDeg) * smoothstep(d, -190, -150) * (1 - smoothstep(d, 250, 400))
+  }
+  // (elsewhere only by the right-hand coast: at the same distance out on the water, or on the left shore, no sand)
   const off = bearing(x, z) - coastLimit(r)
   const nearCoast = smoothstep(off, -0.35, -0.08) * (1 - smoothstep(off, 0.25, 0.5))
   if (nearCoast <= 0) return 0
-  const cove = smoothstep(r, 240, 290) * (1 - smoothstep(r, 530, 570))
   const second = smoothstep(r, 1180, 1240) * (1 - smoothstep(r, 1420, 1500))
   const pockets = smoothstep(noise(Math.log(r) * 9 + 2, 5.5), 0.62, 0.72) * smoothstep(r, 700, 900)
-  return Math.max(cove, second, pockets * 0.9) * nearCoast
+  return Math.max(second, pockets * 0.9) * nearCoast
 }
 
 /** 0–1: how cliff-like the shore is (tall rock faces on the headlands, lower rocky shore between) */
@@ -464,8 +517,11 @@ function naturalHeight(x: number, z: number, s: number): number {
   const sand = beachness(x, z)
   // the shore's rise: a sand beach barely above the water for ~40 m, then dunes and scrub; a cliff
   // rising 15–40 m within a few metres, with ledges (steps of rock strata) on the way up
-  const beachRise = 1.2 * smoothstep(s, 0, 45) + 9 * smoothstep(s, 35, 140)
-  const cliffTop = 14 + 26 * smoothstep(fbm(x / 160 + 7, z / 160, 2), 0.3, 0.7)
+  // (the cove's sand stays nearly level for 150 m: a beach rising to dunes shows only as a sliver)
+  const beachRise = 1.2 * smoothstep(s, 0, 60) + 1.5 * smoothstep(s, 60, 150) + 8 * smoothstep(s, 150, 260)
+  // (the cove's own rocky points stay low: tall ones at its ends screened the sea and the sand)
+  const inCove = coveShore(bearing(x, z) / DEG) !== null ? 1 - smoothstep(r, 800, 1100) : 0
+  const cliffTop = (14 + 26 * smoothstep(fbm(x / 160 + 7, z / 160, 2), 0.3, 0.7)) * (1 - 0.65 * inCove)
   // (a sharp edge and a steep face on the headlands: a slow ramp made every point a rounded sausage)
   const face = smoothstep(s, 0, 4 + 12 * (1 - cliff))
   // ledges: the strata step the face, each a few metres high, the steps wandering along the coast

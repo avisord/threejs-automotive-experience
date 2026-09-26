@@ -51,6 +51,9 @@ export async function loadCar(profile: CarProfile, onProgress?: (fraction: numbe
     if (!mesh.isMesh) return
     const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material
     mesh.castShadow = !material.transparent
+    // …and takes shadows: without it the sun lit the car (its highlights on the paint) straight
+    // through a garage's walls and roof
+    mesh.receiveShadow = true
   })
 
   if (profile.yaw) car.rotation.y = profile.yaw

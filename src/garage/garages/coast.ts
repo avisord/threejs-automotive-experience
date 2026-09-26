@@ -72,8 +72,10 @@ function createCoastGarage(): Room {
   }
 
   // ─── the floor: polished stone over a soft mirror ────────────────────────
-  // (the slab goes down to the terrace; its edge shows along the planter)
-  solid([w + 1.2, -GROUND + 0.02, d + 0.6], plinth, [0, GROUND / 2 - 0.01, 0])
+  // (the slab goes down to the terrace; its edge shows along the planter. Its top stays a centimetre
+  // under the floor: level with the mirror it z-fought in the reflection — fine stripes crawling over
+  // the floor as the camera moved)
+  solid([w + 1.2, -GROUND, d + 0.6], plinth, [0, GROUND / 2 - 0.01, 0])
   const deck = new THREE.PlaneGeometry(w, d)
   const deckUV = deck.attributes.uv
   for (let k = 0; k < deckUV.count; k++) deckUV.setXY(k, (deckUV.getX(k) * w) / 4.5, (deckUV.getY(k) * d) / 4.5)

@@ -87,7 +87,7 @@ export function createOcean(): Ocean {
 
   const material = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.06,
+    roughness: 0.09,
     metalness: 0,
     ior: 1.333,
     envMapIntensity: 1,
@@ -162,7 +162,7 @@ export function createOcean(): Ocean {
           float chopKeep = 1.0 - smoothstep( 0.4, 1.4, footprint );
           vec2 drift = vec2( uSurfTime * 0.35, uSurfTime * 0.6 );
           s += oNoiseSlope( p * 0.9 + drift ) * 0.05 * chopKeep;
-          s += oNoiseSlope( p * 2.6 - drift * 1.3 ) * 0.02 * ( 1.0 - smoothstep( 0.15, 0.5, footprint ) );
+          s += oNoiseSlope( p * 2.6 - drift * 1.3 ) * 0.012 * ( 1.0 - smoothstep( 0.1, 0.35, footprint ) );
           oLost += 0.002 * ( 1.0 - chopKeep );
           // near the shore the sea is choppier and the swell steepens (shoaling)
           float nearShore = 1.0 - smoothstep( 0.0, 260.0, off );
@@ -224,7 +224,10 @@ export function createOcean(): Ocean {
       .replace(
         '#include <roughnessmap_fragment>',
         `// sub-pixel waves become roughness: the far sea's sun glitter spreads into a broad path
-        float roughnessFactor = clamp( sqrt( roughness * roughness + oLost * 1.5 ), 0.0, 0.45 );
+        // (and never sharper than the pixel can resolve: a mirror-smooth facet a pixel wide caught the sun
+        // in one frame and not the next — the sea sparkled and crawled as the camera moved)
+        float footprintRough = 0.05 * clamp( length( fwidth( vReal ) ), 0.0, 6.0 );
+        float roughnessFactor = clamp( sqrt( roughness * roughness + oLost * 1.5 + footprintRough * footprintRough ), 0.0, 0.5 );
         roughnessFactor = mix( roughnessFactor, 0.85, oFoam );`,
       )
       // a ray reflected down off a wave would hit the next wave, which shows the sky too — not the

@@ -20,7 +20,7 @@ import { pbrMaps } from '../kit'
  * and beams' shadows long over the floor, and gilds the cliff faces and the
  * palms' edges while the sky keeps the shade blue.
  */
-export const COAST_SUN: SunPosition = { azimuth: -146, elevation: 6.5 }
+export const COAST_SUN: SunPosition = { azimuth: -146, elevation: 10 }
 
 export interface CoastWorldOptions {
   /** the room's own reaction to the sun (key lights, dust) */
@@ -70,8 +70,10 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   sun.shadow.mapSize.set(4096, 4096)
   Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 300 })
   sun.shadow.camera.updateProjectionMatrix()
-  sun.shadow.bias = -0.0002
-  sun.shadow.normalBias = 0.03
+  // (a low sun grazes the floor: at the valley's bias it striped the lit floor with acne that crawled as
+  // the camera moved)
+  sun.shadow.bias = -0.0005
+  sun.shadow.normalBias = 0.06
   sun.shadow.autoUpdate = false
   group.add(sun)
   const farShadow = createFarShadowLight() // must come right after the sun (far-shadow.ts)

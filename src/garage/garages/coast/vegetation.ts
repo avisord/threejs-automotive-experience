@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { fbm, noRaycast, seeded, smoothstep } from '../landform'
+import { fbm, lerp, noRaycast, seeded, smoothstep } from '../landform'
 import type { PbrMaps } from '../kit'
 import { WIND, foliage } from '../foliage'
 import { PATCH_KINDS, farPatch, grassPatch, type PatchKind, type PatchSpec } from '../grass'
@@ -33,13 +33,18 @@ const DEG = Math.PI / 180
 
 /** how tall something at (x, z) may grow before it rises into the view of the cove from inside (Infinity: no limit) */
 export function roomBelowCove(x: number, z: number): number {
-  const b = bearing(x, z)
+  const b = bearing(x, z) / DEG
   const r = Math.hypot(x, z)
-  // the cove and the sea beyond it lie between −30° and +40°, from ~5° to ~7° below the horizon
-  const across = 1 - smoothstep(b, 30 * DEG, 44 * DEG) * (b > 0 ? 1 : 0) - smoothstep(-b, 26 * DEG, 40 * DEG) * (b < 0 ? 1 : 0)
-  if (across <= 0 || r > 330) return Infinity
-  const line = VIEW_EYE.y - (r + VIEW_EYE.z) * Math.tan(6.6 * DEG)
-  return line - heightAt(x, z) + (1 - across) * 20
+  if (r > 470) return Infinity
+  // In front of the sand (−18°…+20°) nothing may rise above the sill's line (8.4° down from the
+  // design eye): the beach lies just above it. Toward the sides, up to the line under the sea's
+  // (6.6°), and past the cove's ends, anything — palms frame the view there.
+  const centre = smoothstep(b, -24, -17) * (1 - smoothstep(b, 20, 26))
+  const side = smoothstep(b, -36, -28) * (1 - smoothstep(b, 30, 38))
+  if (side <= 0) return Infinity
+  const angle = lerp(6.6, 8.4, centre) * DEG
+  const line = VIEW_EYE.y - (r + VIEW_EYE.z) * Math.tan(angle)
+  return line - heightAt(x, z) + (1 - side) * 30
 }
 
 /** the garage's footprint and terrace, where nothing grows but the lawn */
@@ -98,12 +103,13 @@ function placePalms(rand: () => number): PalmSpot[] {
   }
   // the cove's backshore: coconuts in a loose line, leaning out toward the sea
   for (let i = 0; i < 2500 && spots.length < 90; i++) {
-    const r = 240 + rand() * 360
-    const b = (-8 + rand() * 45) * DEG
+    const r = 180 + rand() * 360
+    const b = (-22 + rand() * 50) * DEG
     const x = Math.sin(b) * r
     const z = -Math.cos(b) * r
     const s = shore(x, z)
-    if (beachness(x, z) < 0.4 || s < 28 || s > 80) continue
+    // behind the sand, and only toward the cove's ends: palms in the middle would stand in front of the beach
+    if (beachness(x, z) < 0.1 || s < 150 || s > 215 || Math.abs(b) < 13 * DEG) continue
     // toward the sea: down the shore field
     const gx = shore(x + 4, z) - shore(x - 4, z)
     const gz = shore(x, z + 4) - shore(x, z - 4)
@@ -145,11 +151,12 @@ function placePlants(rand: () => number): PlantSpot[] {
   const add = (x: number, z: number, kind: PlantKind, size: number, y = heightAt(x, z)) =>
     spots.push({ x, y, z, kind, size, turn: rand() * Math.PI * 2, tone: rand() })
   // the planter along the glass: a garden bed, tall at the ends, low in the middle so the view stays open
+  // (planted at its ends only: anything in the middle stands right in front of the beach)
   for (let x = -9.2; x < 10; x += 0.45 + rand() * 0.35) {
+    if (x > -5.5 && x < 6.5) continue
     const z = -7.9 + (rand() - 0.5) * 0.7
-    const end = Math.abs(x) > 6.5
-    const kind: PlantKind = end ? (rand() < 0.5 ? 'strelitzia' : 'cycad') : (['agave', 'flax', 'bougainvillea', 'agave', 'beachgrass'] as PlantKind[])[Math.floor(rand() * 5)]
-    add(x, z, kind, kind === 'strelitzia' ? 0.8 + rand() * 0.3 : kind === 'bougainvillea' ? 0.9 + rand() * 0.4 : 0.9 + rand() * 0.4, -0.16)
+    const kind: PlantKind = Math.abs(x) > 7.5 ? (rand() < 0.5 ? 'strelitzia' : 'cycad') : (['agave', 'flax', 'bougainvillea'] as PlantKind[])[Math.floor(rand() * 3)]
+    add(x, z, kind, kind === 'strelitzia' ? 0.8 + rand() * 0.3 : 0.9 + rand() * 0.4, -0.16)
   }
   // the garden round the garage and down the first of the slope
   for (let i = 0; i < 9000 && spots.length < 2600; i++) {
@@ -192,15 +199,17 @@ function placePlants(rand: () => number): PlantSpot[] {
   }
   // the backshore: sea grape mounds and beach grass behind the sand, a little grass on the dunes
   for (let i = 0; i < 12000 && spots.length < 11500; i++) {
-    const r = 230 + rand() * 450
-    const b = (-15 + rand() * 60) * DEG
+    const r = 180 + rand() * 450
+    const b = (-25 + rand() * 60) * DEG
     const x = Math.sin(b) * r
     const z = -Math.cos(b) * r
     const s = shore(x, z)
-    if (s < 14 || s > 90 || onRoad(x, z) > 0) continue
     const sand = beachness(x, z)
-    if (rand() > 0.35 + 0.4 * smoothstep(s, 20, 60)) continue
-    const kind: PlantKind = s < 35 && sand > 0.3 ? 'beachgrass' : rand() < 0.45 ? 'seagrape' : rand() < 0.5 ? 'beachgrass' : 'agave'
+    // the open sand stays open: dune grass in its upper reaches, sea grape and agave behind it
+    const back = sand > 0.2 ? 135 : 14
+    if (s < back || s > back + 70 || onRoad(x, z) > 0) continue
+    if (rand() > 0.35 + 0.4 * smoothstep(s, back, back + 40)) continue
+    const kind: PlantKind = s < back + 25 ? 'beachgrass' : rand() < 0.5 ? 'seagrape' : rand() < 0.5 ? 'beachgrass' : 'agave'
     add(x, z, kind, kind === 'seagrape' ? 1.2 + rand() * 1.4 : 0.8 + rand() * 0.6)
   }
   // salt-tolerant scrub on the cliff tops and the rocky shore

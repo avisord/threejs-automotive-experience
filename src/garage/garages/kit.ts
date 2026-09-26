@@ -340,7 +340,9 @@ const BlurredReflectorShader = {
         float fi = float( i ) + 0.5;
         float a = fi * 2.39996323; // golden angle spreads taps evenly over the disc
         vec2 offset = vec2( cos( a ), sin( a ) ) * sqrt( fi / float( TAPS ) ) * blur;
-        sum += textureLod( tDiffuse, uv + offset, lod ).rgb;
+        // (clamped: the sun's disc in the mirror overflows half floats — an inf here, spread by the
+        // blur and by depth of field, became a blown-out blob on the floor)
+        sum += min( textureLod( tDiffuse, uv + offset, lod ).rgb, vec3( 64.0 ) );
       }
       // Schlick, from the reflectance straight down to 1 at grazing (the floor's normal is +y)
       float cosV = clamp( normalize( cameraPosition - vWorld ).y, 0.0, 1.0 );

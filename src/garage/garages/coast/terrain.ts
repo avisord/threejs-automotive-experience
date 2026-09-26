@@ -112,7 +112,7 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           gRock = clamp( max( steep, shoreRock ) + ( gDetail( p.xz, 9.0 ) - 0.5 ) * 0.5 * steep, 0.0, 1.0 );
           gRock *= 1.0 - vCoast.z; // (not on the road)
           // sand: the beach, fading into the scrub behind it
-          gSand = beach * ( 1.0 - smoothstep( 35.0, 75.0, s ) ) * ( 1.0 - gRock );
+          gSand = beach * ( 1.0 - smoothstep( 135.0, 175.0, s ) ) * ( 1.0 - gRock );
           // the water's reach: wet sand below the highest uprush, the moving film and its foam
           float reach = uprush( p.xz );
           float above = p.y - uSea;

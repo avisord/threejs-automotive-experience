@@ -318,12 +318,18 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   writes a negative texel into the lake mirror — not traced further).
 - Coast House: the land below the glass is capped **under the floor edge's sightline** (8.4° from a
   2 m eye), not along it — capping along a sightline squeezed the whole slope into one sliver and hid
-  the cove. The cove (330–600 m, 34 m below) sits at 5–7°; anything planted in front of it keeps under
-  `roomBelowCove`. Far coast: the coastline wobble is calmed past ~8 km (it folded into thin spits
+  the cove. The cove is a crescent straight ahead (`COVE`: shore ~430 m out, ~150 m of level sand, 34 m below),
+  at 4.5–7° — visible over the sill from car height; in front of the sand nothing rises above the
+  sill's line (`roomBelowCove`), and the planter is planted only at its ends. Far coast: the coastline wobble is calmed past ~8 km (it folded into thin spits
   with bright water behind that read as white plateaus), and low land keeps 0.4 % of its distance clear
   of the sea for depth precision. Textures held only in shader uniforms (terrain, rocks, clouds) are
   freed by the room's own `dispose` — `disposeTree` only frees material properties. Switching to Fuji
   or Coast and back leaves 2–3 textures behind (pre-existing, shared forest path; not traced yet).
+- Cars **receive** shadows (`car.ts`): without it an open-air room's sun lit the paint straight through
+  the garage's walls and roof. Nothing may sit level with a floor mirror (y = 0): a slab top there
+  z-fights in the reflection as fine stripes that crawl when the camera moves — keep it ≥ 1 cm under.
+  The floor mirror clamps its samples (the sun's disc overflows half floats; depth of field spread the
+  inf into a blob). Lens flare visibility samples a ~1° disc: a 7 px one flickered behind palm fronds.
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too (a shadow-casting light's map is a render target,
