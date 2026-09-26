@@ -109,6 +109,9 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
 
 - `gltf-transform optimize` runs **palette** by default: it folds untextured materials
   (body paint, glass) into one and loses their names. Always `--palette false`.
+- Ground and centre a car with `Box3.setFromObject(car, true)` (precise, from vertices). The
+  default turns each mesh's bounding box into the world, and a wheel turned on its axle gets a
+  box ~1.4× the tyre: the GT3 R (LR/RF turned 50°) floated 15 cm, the 930 10 cm.
 - GLTFLoader sanitises node names (drops `.`, spaces → `_`) and suffixes duplicates
   (`hub_lf`, `hub_lf_1`) — write regexes against loaded names, not file names.
 - Sketchfab exports mark body/interior BLEND just because textures have alpha → render
