@@ -54,12 +54,15 @@ export async function loadCar(profile: CarProfile, onProgress?: (fraction: numbe
   })
 
   if (profile.yaw) car.rotation.y = profile.yaw
+  // Measured from the vertices (precise), not each mesh's bounding box turned into the world: a
+  // wheel turned on its axle (the GT3 R's LR/RF, 50°) has a box ~1.4× the tyre, whose corner
+  // reached the floor 15 cm below the tread — the car stood on it, floating (the 930 by 10 cm).
   if (profile.length) {
-    const size = new THREE.Box3().setFromObject(car).getSize(new THREE.Vector3())
+    const size = new THREE.Box3().setFromObject(car, true).getSize(new THREE.Vector3())
     car.scale.multiplyScalar(profile.length / Math.max(size.x, size.z))
   }
   car.updateMatrixWorld(true)
-  const box = new THREE.Box3().setFromObject(car)
+  const box = new THREE.Box3().setFromObject(car, true)
   const center = box.getCenter(new THREE.Vector3())
   car.position.set(car.position.x - center.x, car.position.y - box.min.y, car.position.z - center.z)
 
