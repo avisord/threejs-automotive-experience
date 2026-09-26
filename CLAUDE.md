@@ -362,12 +362,16 @@ the real GPU and looking at screenshots:
   the GT3 RS (empty bay ~60 ms), linear in pixels; BVH is already SAH. Realtime isn't
   reachable with three-gpu-pathtracer — only lower res/bounces, or temporal reprojection.
 
-## Branch / PR state (2026-09-23)
+## Branch / PR state (2026-09-26)
 
-Merged to `main`: PR #1 (garage), #2 (graphics settings), #4 (selectable garages, the
-user's). Open stack: #3 `feat/material-groups` (parts editor) → #5
-`feat/material-library` (material library, lights, lamp shadows) → `feat/path-tracing`
-→ `feat/empty-bay` (both pushed, no PR yet) → local-only `feat/video-export`
-(camera moves + MP4 export). Path tracing stays as it is for now (user's call). Also:
-`feat/light-wall-garage` (new "Light Wall" garage, branched from `main`).
-The user's local `main` may still hold two pre-rewrite commits — `origin/main` is the truth.
+Everything is on `main`: PRs #1–#10 are merged, and the old feature branches were deleted
+(local and remote). Path tracing stays as it is for now (user's call). Start new work on a
+fresh branch from `origin/main`.
+
+Stacking lesson: a stacked PR merges into its **base branch**, not `main`. #5, #6, #7 and #9
+merged into each other and `main` got none of it until #10 (`feat/stack-to-main`) brought the
+whole stack in. After a base merges, retarget the next PR to `main` before merging it, or end
+with one PR from the top of the stack to `main`.
+
+The user's local `main` may still hold two pre-rewrite commits (`64d9f77`, `56b3b53`, both
+already in history under other hashes). `origin/main` is the truth.
