@@ -142,7 +142,7 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           c *= mix( 1.0, 0.8 + 0.4 * gDetail( p.xz + 5.0, 3.0 ), near );
           // sand: warm and pale, its photo for grain; darker where wet
           float sandDetail = dot( texture2D( uSandMap, p.xz / 3.0 ).rgb, LUMA ) / ${MEAN.sand};
-          vec3 sand = vec3( 0.62, 0.52, 0.36 ) * mix( 1.0, clamp( sandDetail, 0.4, 1.8 ), 0.5 );
+          vec3 sand = vec3( 0.8, 0.68, 0.49 ) * mix( 1.0, clamp( sandDetail, 0.4, 1.8 ), 0.5 );
           sand *= 0.92 + 0.16 * gDetail( p.xz, 11.0 );
           sand = mix( sand, sand * vec3( 0.45, 0.43, 0.42 ), gWet );
           // rock: the cliff photo from the side (strata level), from above on ledges; warm grey-beige

@@ -9,6 +9,7 @@ import { COAST, SEA, SURF } from './site'
 import { COAST_SURFACES, createCoastTerrain } from './terrain'
 import { createRocks } from './rocks'
 import { createCoastRanges } from './ranges'
+import { createCoastVegetation } from './vegetation'
 import { pbrMaps } from '../kit'
 
 /**
@@ -48,13 +49,15 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   const outdoor = new THREE.Group()
   outdoor.name = 'coast-outdoor'
   const sky = createSky()
+  // every plant, planned first: the terrain darkens the ground under the woods
+  const vegetation = createCoastVegetation({ bark: pbrMaps(COAST_SURFACES.palmBark) })
   // the cliff photo is shared by the terrain's rock faces and the rocks themselves
   const cliffMaps = pbrMaps(COAST_SURFACES.cliff)
-  const terrain = createCoastTerrain(cliffMaps)
+  const terrain = createCoastTerrain(cliffMaps, vegetation.layout.cover)
   const ocean = createOcean()
   const rocks = createRocks(cliffMaps)
   const ranges = createCoastRanges()
-  outdoor.add(terrain.mesh, ocean.mesh, rocks.group, ranges)
+  outdoor.add(terrain.mesh, ocean.mesh, rocks.group, ranges, vegetation.group)
   group.add(sky.mesh, outdoor)
 
   const sun = new THREE.DirectionalLight(0xffffff, 2.2)
@@ -87,8 +90,8 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
     shaftRange: 40,
     dust: opts.dust ? { box: opts.dust, density: 0 } : undefined,
   }
-  const noonAir = new THREE.Color(0.32, 0.42, 0.6)
-  const lowAir = new THREE.Color(0.36, 0.4, 0.52) // (the air stays blue at a low sun: the gold is in the forward scatter)
+  const noonAir = new THREE.Color(0.28, 0.4, 0.66)
+  const lowAir = new THREE.Color(0.28, 0.37, 0.6) // (the air stays blue at a low sun: the gold is in the forward scatter)
 
   let sunAt: SunPosition = { ...COAST_SUN }
   function applySun(next: SunPosition): void {
@@ -112,13 +115,14 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   }
   applySun(sunAt)
 
-  const farDetail: THREE.Object3D[] = [...rocks.far, ranges]
+  const farDetail: THREE.Object3D[] = [...rocks.far, ranges, ...vegetation.far]
   return {
     outdoor,
     sun,
     atmosphere,
     farDetail,
-    ready: Promise.all([terrain.ready, cliffMaps.ready]).then(() => {
+    ready: Promise.all([terrain.ready, cliffMaps.ready, vegetation.ready]).then(() => {
+      farDetail.push(...vegetation.far.filter((o) => !farDetail.includes(o)))
       sun.shadow.needsUpdate = true
       farShadow.shadow.needsUpdate = true
     }),

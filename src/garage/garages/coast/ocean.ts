@@ -209,9 +209,9 @@ export function createOcean(): Ocean {
           oFoam = mix( oFoam, oFoam * 0.5, smoothstep( 1.0, 8.0, footprint ) );
           // ─── the water's own colour, by depth: what light comes back up out of it ───
           vec3 deep = vec3( 0.004, 0.016, 0.042 );
-          vec3 blueGreen = vec3( 0.006, 0.042, 0.06 );
-          vec3 turquoise = vec3( 0.02, 0.14, 0.14 );
-          vec3 sandy = vec3( 0.11, 0.16, 0.12 );
+          vec3 blueGreen = vec3( 0.008, 0.07, 0.09 );
+          vec3 turquoise = vec3( 0.03, 0.26, 0.25 );
+          vec3 sandy = vec3( 0.2, 0.28, 0.2 );
           vec3 body = mix( deep, blueGreen, 1.0 - smoothstep( 25.0, 60.0, depth ) );
           body = mix( body, turquoise, ( 1.0 - smoothstep( 3.0, 16.0, depth ) ) * mix( 0.35, 1.0, sand ) );
           body = mix( body, sandy, ( 1.0 - smoothstep( 0.4, 2.6, depth ) ) * sand );
