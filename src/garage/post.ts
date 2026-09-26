@@ -168,7 +168,7 @@ export interface PostProcessing {
   /** set AA, resolution, reflections, textures and AO quality in one go */
   applyPreset(name: QualityPreset): void
   reset(): void
-  /** re-read which meshes glow (lights-only bloom), e.g. after the garage changes */
+  /** re-read which meshes glow (lights-only bloom): a part set to glow, or a new garage */
   refreshGlow(): void
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void

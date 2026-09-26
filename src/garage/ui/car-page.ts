@@ -1,32 +1,7 @@
-import type { Finish, PaintStyle } from '../paint'
 import { PART_DEFS, PRESETS, presetConfig, type CarConfigurator, type PartDef } from '../configurator'
 import type { Nav, Page } from './panel'
-import { actionButton, colorField, el, section, segmented, slider } from './widgets'
-
-const STYLE_LABEL: Record<PaintStyle, string> = {
-  factory: 'Factory',
-  solid: 'Solid',
-  stripes: 'Stripes',
-  'two-tone': 'Two-tone',
-  carbon: 'Carbon',
-  camo: 'Camo',
-}
-
-const FINISH_LABEL: Record<Finish, string> = {
-  factory: 'Factory',
-  gloss: 'Gloss',
-  metallic: 'Metallic',
-  satin: 'Satin',
-  matte: 'Matte',
-  chrome: 'Chrome',
-}
-
-/** what colour A / B mean for each style; styles missing here use one colour only */
-const COLOR_B_LABEL: Partial<Record<PaintStyle, [a: string, b: string]>> = {
-  stripes: ['Base', 'Stripes'],
-  'two-tone': ['Lower', 'Upper'],
-  camo: ['Light', 'Dark'],
-}
+import { paintControls } from './paint-controls'
+import { actionButton, el, section, slider } from './widgets'
 
 /**
  * Paint, wheels and glass. Structural changes (style, finish, presets)
@@ -52,40 +27,16 @@ export function carPage(current: () => CarConfigurator | undefined): Page {
     }
 
     const livery = configurator.profile.livery && (def.id === 'body' || def.id === 'wing')
-    const labels = { ...STYLE_LABEL, factory: livery ? 'Livery' : 'Factory' }
     s.append(
-      segmented(def.styles, labels, c.style, (style) => {
-        activePreset = null
-        configurator.set(def.id, { style })
-        nav.refresh()
-      }),
-    )
-
-    if (c.style === 'factory') {
-      // the livery / factory texture can still be hue-shifted
-      s.append(
-        slider('Hue shift', c.hue, { min: 0, max: 360, step: 1 }, (v) => `${v}°`, (v) => {
+      ...paintControls({
+        settings: c,
+        styles: def.styles,
+        factoryLabel: livery ? 'Livery' : 'Factory',
+        set(patch, structural) {
           activePreset = null
-          configurator.set(def.id, { hue: v })
-        }),
-      )
-    } else {
-      const names = COLOR_B_LABEL[c.style]
-      const pick = (key: 'colorA' | 'colorB') => (hex: string, commit: boolean) => {
-        activePreset = null
-        configurator.set(def.id, { [key]: hex })
-        if (commit) nav.refresh()
-      }
-      s.append(colorField(names?.[0] ?? 'Colour', c.colorA, pick('colorA')))
-      if (names) s.append(colorField(names[1], c.colorB, pick('colorB')))
-    }
-
-    s.append(el('div', 'cfg-label cfg-sub', 'Finish'))
-    s.append(
-      segmented(Object.keys(FINISH_LABEL) as Finish[], FINISH_LABEL, c.finish, (finish) => {
-        activePreset = null
-        configurator.set(def.id, { finish })
-        nav.refresh()
+          configurator.set(def.id, patch)
+          if (structural) nav.refresh()
+        },
       }),
     )
     return s

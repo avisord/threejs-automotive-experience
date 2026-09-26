@@ -13,6 +13,8 @@ export interface Page {
   /** one-line description shown on menu rows that link here */
   hint?: string
   render(body: HTMLElement, nav: Nav): void
+  /** called when navigation moves off this page */
+  leave?(): void
 }
 
 /** menu rows linking to other pages */
@@ -63,6 +65,7 @@ export function mountPanel(parent: HTMLElement, pages: Record<string, Page>, roo
 
   function go(next: string[]): void {
     const samePage = next.join('/') === path.join('/')
+    if (!samePage) pages[path[path.length - 1]].leave?.()
     path = next
     try {
       localStorage.setItem(PATH_KEY, JSON.stringify(path))

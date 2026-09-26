@@ -13,6 +13,8 @@ import { collectionPage } from './ui/collection-page'
 import { garagePage } from './ui/garage-page'
 import { graphicsPage } from './ui/graphics-page'
 import { displayPage } from './ui/display-page'
+import { partsPage } from './ui/parts-page'
+import { createGroupEditor, type GroupEditor } from './groups'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -142,7 +144,11 @@ function captureEnvironment(): void {
 }
 
 // ─── post: AO, bloom, grade, vignette, AA ───────────────────────────────────
-const post = createPostProcessing(renderer, scene, camera, () => collectGlowMeshes(room.group))
+// glowing meshes for lights-only bloom: the room's LEDs plus any car part set to glow
+const post = createPostProcessing(renderer, scene, camera, () => [
+  ...collectGlowMeshes(room.group),
+  ...(bay ? collectGlowMeshes(bay.root) : []),
+])
 
 /**
  * Frames still to draw. In on-demand mode (the default) nothing is drawn
@@ -253,6 +259,7 @@ interface Bay {
   root: THREE.Object3D
   shadow: THREE.Mesh
   configurator: CarConfigurator
+  groups: GroupEditor
 }
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
@@ -274,6 +281,7 @@ async function showCar(id: string): Promise<void> {
     if (bay) {
       scene.remove(bay.root, bay.shadow)
       room.floorLayers.splice(room.floorLayers.indexOf(bay.shadow), 1)
+      bay.groups.dispose() // overlays first — they share geometry with the car
       disposeCar(bay.root)
       disposeContactShadow(bay.shadow)
     }
@@ -284,7 +292,13 @@ async function showCar(id: string): Promise<void> {
     room.floorLayers.push(shadow)
     const configurator = createConfigurator(root, profile)
     applyAnisotropy(root)
-    bay = { id: profile.id, root, shadow, configurator }
+    const groups = createGroupEditor(root, profile, configurator.carSpace, () => {
+      invalidate()
+      post.refreshGlow()
+    })
+    groups.setOverlaysVisible(false) // the Parts page shows them
+    bay = { id: profile.id, root, shadow, configurator, groups }
+    post.refreshGlow()
     invalidate(4) // first frames also compile the new car's shaders
     garage.configurator = configurator
     try {
@@ -368,11 +382,13 @@ function adoptGarage(def: GarageDef): void {
 // opened by link somewhere other than last time: as if picked. A reload keeps any grade tweaks.
 if (garageDef.id !== savedGarage) adoptGarage(garageDef)
 
-// ─── side panel: Menu › Garage · Collection · Car · Settings ───────────────
+// ─── side panel: Menu › Garage · Collection · Car · Parts · Settings ───────
+/** Menu › Parts: clicks on the car select parts (declared before the panel renders) */
+let picking = false
 const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
-    render: (body, nav) => body.append(menuList(pages, ['garage', 'collection', 'car', 'settings'], nav)),
+    render: (body, nav) => body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'settings'], nav)),
   },
   garage: garagePage({
     current: () => garageDef.id,
@@ -385,6 +401,11 @@ const pages: Record<string, Page> = {
     select: (id) => void showCar(id),
   }),
   car: carPage(() => bay?.configurator),
+  parts: partsPage({
+    editor: () => bay?.groups,
+    picking: () => picking,
+    setPicking,
+  }),
   settings: {
     title: 'Settings',
     hint: 'Graphics, display',
@@ -403,6 +424,70 @@ try {
 } catch {
   // no storage — default car
 }
+// ─── picking parts in 3D (Menu › Parts) ─────────────────────────────────────
+const HINT = 'drag to orbit · scroll or +/− to zoom'
+const PICK_HINT = 'click a part to select · shift+click to add · alt+click picks behind · esc clears'
+function setPicking(on: boolean): void {
+  picking = on
+  renderer.domElement.style.cursor = on ? 'crosshair' : ''
+  hint.textContent = on ? PICK_HINT : HINT
+  if (!on) bay?.groups.highlight('hover', [])
+  invalidate()
+}
+
+const raycaster = new THREE.Raycaster()
+const ndc = new THREE.Vector2()
+/** meshes under a canvas point, nearest first, one entry per mesh */
+function meshesAt(clientX: number, clientY: number): THREE.Mesh[] {
+  if (!bay) return []
+  const rect = renderer.domElement.getBoundingClientRect()
+  ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
+  // camera.matrixWorld is still the pose last drawn (fitCameraInRoom), so rays match the picture
+  raycaster.setFromCamera(ndc, camera)
+  const seen = new Set<THREE.Object3D>()
+  const out: THREE.Mesh[] = []
+  for (const hit of raycaster.intersectObjects(bay.groups.pickable, false)) {
+    if (seen.has(hit.object)) continue
+    seen.add(hit.object)
+    out.push(hit.object as THREE.Mesh)
+  }
+  return out
+}
+
+// a click (not a drag — dragging orbits) picks; hover tints what would be picked
+let downAt: { x: number; y: number } | null = null
+renderer.domElement.addEventListener('pointerdown', (e) => (downAt = { x: e.clientX, y: e.clientY }))
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const start = downAt
+  downAt = null
+  if (!picking || !bay || !start || e.button !== 0) return
+  if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 5) return
+  const hits = meshesAt(e.clientX, e.clientY)
+  const mesh = e.altKey ? hits[1] ?? hits[0] : hits[0]
+  const additive = e.shiftKey || e.ctrlKey || e.metaKey
+  if (mesh) bay.groups.select([mesh], additive ? 'toggle' : 'replace')
+  else if (!additive) bay.groups.select([])
+  panelNav.refresh()
+})
+// hover picks only once the pointer rests — a raycast over a million-triangle
+// car takes tens of ms, too much to repeat on every pointermove
+let hoverTimer = 0
+renderer.domElement.addEventListener('pointermove', (e) => {
+  clearTimeout(hoverTimer)
+  if (!picking || downAt) return // no hover work while dragging
+  hoverTimer = window.setTimeout(() => {
+    const hits = meshesAt(e.clientX, e.clientY)
+    const mesh = e.altKey ? hits[1] ?? hits[0] : hits[0]
+    bay?.groups.highlight('hover', mesh ? [mesh] : [])
+  }, 60)
+})
+renderer.domElement.addEventListener('pointerleave', () => bay?.groups.highlight('hover', []))
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !bay || bay.groups.selection.size === 0) return
+  bay.groups.select([])
+  panelNav.refresh()
+})
+
 const known = (id: string | null) => (id && CARS.some((c) => c.id === id) ? id : null)
 void showCar(known(requested) ?? known(savedCar) ?? DEFAULT_CAR)
 

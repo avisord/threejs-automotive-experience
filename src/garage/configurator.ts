@@ -126,6 +126,8 @@ export interface CarConfigurator {
   readonly config: CarConfig
   /** parts this car actually has meshes for */
   readonly parts: PartId[]
+  /** inverse of the car root's world matrix, kept current by update() — patterns are laid out in it */
+  readonly carSpace: THREE.Matrix4
   readonly profile: CarProfile
   /** change one part and re-apply it */
   set(id: PartId, patch: Partial<PartConfig>): void
@@ -193,6 +195,7 @@ export function createConfigurator(car: THREE.Object3D, profile: CarProfile): Ca
   return {
     config,
     parts: PART_DEFS.map((d) => d.id).filter((id) => paints.has(id)),
+    carSpace,
     profile,
     set(id, patch) {
       Object.assign(config[id], patch)
