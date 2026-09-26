@@ -333,6 +333,15 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   z-fights in the reflection as fine stripes that crawl when the camera moves — keep it ≥ 1 cm under.
   The floor mirror clamps its samples (the sun's disc overflows half floats; depth of field spread the
   inf into a blob). Lens flare visibility samples a ~1° disc: a 7 px one flickered behind palm fronds.
+- Coast realism (grounding without geometry): `coast/contact.ts` bakes a soft occlusion raster (±320 m,
+  0.4 m texels) under every plant, palm, rock and the room's `footprints`; the coast terrain dims its sky
+  light and colour by it. The terrain's grass area carries macro/meso/micro variation in the shader (drifts,
+  dry patches, bare soil, lodged grass, tussocks, pebbles) — it must look like ground with the grass patches
+  hidden; patches stop at 90 m. Dome shrubs (`plants.ts`) are ~26 cards over an opaque lumpy **core**
+  (drawn first): 44 cards alone stacked ~10 alpha-tested layers and cost ~3 ms. Blossom is a mask in atlas
+  cell 4 (blue > green) coloured by the `bloom` vertex attribute, so flowers stay small among leaves. The
+  Coast Overlook's stone is `terraceStone()` (slab joints box-filtered by pixel footprint — thinner than a
+  pixel they broke into dashes). Contact shadows add a tight 7 cm bake for the tyres' crease.
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too (a shadow-casting light's map is a render target,

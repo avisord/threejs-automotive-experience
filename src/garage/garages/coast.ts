@@ -32,6 +32,8 @@ function createCoastGarage(): Room {
 
   let interior: ReturnType<typeof createInteriorLights> | null = null
   const world = createCoastWorld(group, {
+    // the showroom's plinth on the land: the ground darkens along its foot
+    footprints: [[-w / 2 - 0.6, -d / 2 - 0.3, w / 2 + 0.6, d / 2 + 0.3]],
     dust: new THREE.Box3(new THREE.Vector3(-w / 2, 0, front), new THREE.Vector3(w / 2, h, d / 2)),
     onSun({ elevation, atmosphere }) {
       interior?.refresh()

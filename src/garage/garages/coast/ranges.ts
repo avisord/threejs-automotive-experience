@@ -220,6 +220,29 @@ export function createCoastRanges(): THREE.Mesh {
     c.fromArray(color, k * 3).lerp(rock, steep * 0.55)
     c.toArray(color, k * 3)
   }
+  // cavity: each point's height against its neighbourhood's (~±500 m at the big mountain) — gullies and
+  // valleys below it, crests and spurs above. Seen against a low sun the faces toward us are all in
+  // shade, lit by the sky alone, and a flat sky light shows no relief: the ridge network reads through
+  // how much sky each point sees (a gully sees less) — so the shader scales the sky light by it
+  const cavity = new Float32Array(count)
+  for (let i = 0; i < RINGS; i++) {
+    for (let j = 0; j < SEGMENTS; j++) {
+      let sum = 0
+      let n = 0
+      for (let di = -2; di <= 2; di++) {
+        const ii = i + di
+        if (ii < 0 || ii >= RINGS) continue
+        for (let dj = -4; dj <= 4; dj += 2) {
+          sum += position[(ii * SEGMENTS + ((j + dj + SEGMENTS) % SEGMENTS)) * 3 + 1]
+          n++
+        }
+      }
+      const k = i * SEGMENTS + j
+      const h = position[k * 3 + 1]
+      cavity[k] = h <= 0 ? 0 : Math.max(-1, Math.min(1, (h - sum / n) / (30 + 0.12 * Math.max(0, h))))
+    }
+  }
+  g.setAttribute('cavity', new THREE.BufferAttribute(cavity, 1))
   // y above the sea for the mapping
   for (let k = 0; k < count; k++) position[k * 3 + 1] = Math.max(position[k * 3 + 1], -200)
   mapFar(g)
@@ -230,13 +253,14 @@ export function createCoastRanges(): THREE.Mesh {
   material.onBeforeCompile = (shader, renderer) => {
     base.call(material, shader, renderer)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 realXZ;\nvarying vec2 vRealXZ;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRealXZ = realXZ;')
+      .replace('#include <common>', '#include <common>\nattribute vec2 realXZ;\nvarying vec2 vRealXZ;\nattribute float cavity;\nvarying float vCavity;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRealXZ = realXZ;\nvCavity = cavity;')
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
         varying vec2 vRealXZ;
+        varying float vCavity;
         float fHash( vec2 p ) { p = fract( p * vec2( 123.34, 456.21 ) ); p += dot( p, p + 45.32 ); return fract( p.x * p.y ); }
         float fNoise( vec2 p ) {
           vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f * f * ( 3.0 - 2.0 * f );
@@ -256,7 +280,14 @@ export function createCoastRanges(): THREE.Mesh {
           float crowns = fDetail( p, 14.0 ) * 0.5 + fDetail( p + 31.0, 45.0 ) * 0.3 + fDetail( p - 7.0, 160.0 ) * 0.2;
           float green = smoothstep( 0.02, 0.06, diffuseColor.g - diffuseColor.b ); // (forest and scrub, not rock)
           diffuseColor.rgb *= mix( 1.0, 0.7 + 0.6 * crowns, green );
+          // (a little in the colour too: gullies hold darker, denser growth; crests are thinner and drier)
+          diffuseColor.rgb *= 1.0 + 0.1 * vCavity;
         }`,
+      )
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        reflectedLight.indirectDiffuse *= 0.72 + 0.4 * smoothstep( -1.0, 1.0, vCavity );`,
       )
   }
   const key = material.customProgramCacheKey.bind(material)

@@ -152,7 +152,7 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           float d1 = gDetail( p.xz + 5.0, 7.0 );
           float d2 = gDetail( p.xz * 1.7 - 13.0, 3.1 );
           float dryPatch = smoothstep( 0.6, 0.78, d1 * 0.65 + d2 * 0.35 );
-          c = mix( c, lum * vec3( 1.9, 1.62, 1.02 ), dryPatch * 0.5 * open * near );
+          c = mix( c, lum * vec3( 1.9, 1.62, 1.02 ), dryPatch * 0.6 * open * near );
           float bare = smoothstep( 0.7, 0.84, gDetail( p.xz - 41.0, 4.3 ) * 0.7 + d2 * 0.3 ) * ( 1.0 - smoothstep( 0.93, 0.99, n.y ) * 0.6 );
           c = mix( c, vec3( 0.2, 0.15, 0.1 ) * ( 0.75 + 0.5 * d2 ), bare * 0.7 * open * near );
           // lodged grass: long streaks laid over along the sea wind, paler (their blades catch the sky)
@@ -164,7 +164,9 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           vec3 gTex2 = texture2D( uGrassMap, p.xz / 8.6 + 0.37 ).rgb;
           float detail = mix( dot( gTex, LUMA ), dot( gTex2, LUMA ), 0.35 ) / ${MEAN.grass};
           c *= mix( 1.0, clamp( detail, 0.0, 2.5 ), 1.0 - smoothstep( 60.0, 400.0, dist ) );
-          c *= mix( 1.0, 0.86 + 0.28 * gDetail( p.xz * 1.3 + 5.0, 0.9 ), near );
+          // tussocks and thinner turf between them: light and dark at a pace and a stride
+          float tussock = gDetail( p.xz * 1.3 + 5.0, 0.9 ) * 0.45 + gDetail( p.xz + 3.0, 1.4 ) * 0.3 + gDetail( p.xz - 9.0, 3.4 ) * 0.25;
+          c *= mix( 1.0, 0.76 + 0.48 * tussock, near );
           c.rg *= 1.0 + ( gDetail( p.xz + 17.0, 1.6 ) - 0.5 ) * vec2( 0.1, 0.05 );
           // pebbles in the turf: a stone in the odd 0.7 m cell, pale grey, gone where it would be under a pixel
           {

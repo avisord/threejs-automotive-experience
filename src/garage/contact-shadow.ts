@@ -16,10 +16,14 @@ export interface ContactShadowOptions {
   opacity?: number
 }
 
+/** metres above the floor that count as touching it, for the tight contact layer */
+const TYRE_CONTACT = 0.07
+
 /**
  * Bake a soft ground shadow for a static object: render its depth from below
- * with an ortho camera, blur it, and lay the result on a floor plane. Runs
- * once — re-bake if the object moves.
+ * with an ortho camera, blur it, and lay the result on a floor plane — with
+ * a sharp contact layer for whatever touches the floor on top. Runs once —
+ * re-bake if the object moves.
  */
 export function bakeContactShadow(
   renderer: THREE.WebGLRenderer,
@@ -77,9 +81,9 @@ export function bakeContactShadow(
     depthTest: false,
   })
   const quad = new FullScreenQuad()
-  const blurPass = (amount: number) => {
+  const blurPass = (amount: number, into = target) => {
     quad.material = hBlur
-    hBlur.uniforms.tDiffuse.value = target.texture
+    hBlur.uniforms.tDiffuse.value = into.texture
     hBlur.uniforms.h.value = amount / 256
     renderer.setRenderTarget(scratch)
     quad.render(renderer)
@@ -87,7 +91,7 @@ export function bakeContactShadow(
     quad.material = vBlur
     vBlur.uniforms.tDiffuse.value = scratch.texture
     vBlur.uniforms.v.value = amount / 256
-    renderer.setRenderTarget(target)
+    renderer.setRenderTarget(into)
     quad.render(renderer)
   }
   // three passes, wide to narrow: a broad soft falloff (~0.5 m) round the car, the tighter passes
@@ -95,6 +99,26 @@ export function bakeContactShadow(
   blurPass(blur)
   blurPass(blur * 0.6)
   blurPass(blur * 0.3)
+
+  // the tyres' contact: a second, tight bake of only what's within a few centimetres of the floor
+  // (tread patches, a low splitter), barely blurred, laid over the soft one — the dark crease where
+  // rubber meets ground that the broad blur washes out, and what stops a car looking parked on air
+  const tight = new THREE.WebGLRenderTarget(resolution, resolution)
+  cam.far = Math.min(height, TYRE_CONTACT)
+  cam.updateProjectionMatrix()
+  bakeScene.add(object)
+  renderer.setClearColor(0x000000, 0)
+  renderer.setRenderTarget(tight)
+  renderer.clear()
+  renderer.render(bakeScene, cam)
+  parent?.add(object)
+  blurPass(0.8, tight)
+  const overlay = new THREE.MeshBasicMaterial({ map: tight.texture, transparent: true, depthTest: false, depthWrite: false })
+  quad.material = overlay
+  renderer.setRenderTarget(target)
+  quad.render(renderer)
+  overlay.dispose()
+  tight.dispose()
 
   renderer.setRenderTarget(prevTarget)
   renderer.setClearColor(prevClear, prevAlpha)
