@@ -147,17 +147,30 @@ const fragmentShader = /* glsl */ `
     vec3 n = vec3( t.rg * 2.0 - 1.0, t.b );
     // the sun in the card's own frame (x right, y up, z toward the garage)
     vec3 s = normalize( vec3( dot( uSunDir, vRight ), dot( uSunDir, vUp ), dot( uSunDir, vFacing ) ) );
-    float density = t.a;
+    // thickness at the scale of the puffs, not of the billows: a blurred mip of the density. Light
+    // passing through the cloud toward us goes by this (a noisy per-pixel density made a backlit
+    // cloud flicker between glowing and black — pink blotches)
+    float thick = textureLod( uAtlas, vUv, 3.5 ).a;
+    // with the sun behind, the cores are opaque: its disc is thousands of times the sky, and a few
+    // per cent of it through a gap in the billows shone through as a bright disc
+    float behind = max( -s.z, 0.0 );
+    float density = mix( t.a, max( t.a, smoothstep( 0.3, 0.7, thick ) * step( 0.2, t.a ) ), smoothstep( 0.0, 0.5, behind ) );
     // wrapped diffuse: the sunlit side, the shade side still lit a little through the cloud
     float lit = clamp( dot( n, s ) * 0.55 + 0.45, 0.0, 1.0 );
     // thick cores sit in their own shadow; the base is darker still
-    float self = mix( 1.0, 0.55, smoothstep( 0.5, 1.0, density ) ) * mix( 0.7, 1.0, clamp( n.y * 0.5 + 0.6, 0.0, 1.0 ) );
-    // against the sun: the thin edges glow (forward scattering)
-    float rim = pow( max( -s.z, 0.0 ), 3.0 ) * ( 1.0 - density ) * 2.5;
+    float self = mix( 1.0, 0.55, smoothstep( 0.5, 1.0, t.a ) ) * mix( 0.7, 1.0, clamp( n.y * 0.5 + 0.6, 0.0, 1.0 ) );
+    // the sun behind the cloud: forward scattering. What reaches us falls off with the thickness
+    // crossed — the thin edges blaze (the silver lining), the body is a dark silhouette lit by the sky
+    float forward = pow( behind, 4.0 );
+    float through = exp( -9.0 * thick );
     vec3 ambient = mix( uSkyLow, uSkyTop, clamp( n.y * 0.5 + 0.5, 0.0, 1.0 ) );
-    vec3 col = ambient * ( 0.6 + 0.4 * lit ) + uSunColor * ( lit * self + rim );
-    // seen through tens of kilometres of air: the low ones fade into the horizon's haze
-    col = mix( col, uHaze, uHazeAmount );
+    // (seen from the shaded side, the sunlit-face term fades out: we're looking at its back, lit by
+    // the sky and by the little sunlight that diffuses all the way through)
+    vec3 col = ambient * ( 0.6 + 0.4 * lit ) * mix( 1.0, 0.55, forward )
+      + uSunColor * ( lit * self * ( 1.0 - 0.9 * forward ) + forward * ( 0.04 + 5.0 * through ) );
+    // seen through tens of kilometres of air: the low ones fade into the horizon's haze (less where
+    // the cloud stands against the sun: its silhouette is what reads there)
+    col = mix( col, uHaze, uHazeAmount * ( 1.0 - 0.5 * forward ) );
     gl_FragColor = vec4( col * density, density );
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
