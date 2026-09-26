@@ -4,6 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { SURFACES, box, boxUV, disposeTree, pbrMaps, type GarageDef, type Room } from './kit'
 import { createGlassMaterial, glassPane } from './glass'
 import { GROUND } from './coast/site'
+import { OUTDOOR_SKY_LIGHT } from './sky'
 import { createCoastWorld } from './coast/world'
 
 /** the terrace the car stands on (x × z), its front edge toward the cove (−z) */
@@ -139,7 +140,9 @@ function createCoastOverlook(): Room {
   // (the photographed concrete is dark, ~0.085: lifted to a pale sun-bleached stone — a touch less than
   // white, so the sun on it rolls off instead of clipping)
   const stone = terraceStone(
-    new THREE.MeshStandardMaterial({ ...stoneMaps.maps, color: new THREE.Color().setRGB(2.45, 2.3, 2.08), roughness: 0.62 }),
+    // (out in the open it takes the sky at the landscape's strength: at full strength its blue light
+    // drowned the sun — the terrace lit almost as bright with the sun off, flat and cold)
+    new THREE.MeshStandardMaterial({ ...stoneMaps.maps, color: new THREE.Color().setRGB(2.3, 2.2, 2.02), roughness: 0.72, envMapIntensity: OUTDOOR_SKY_LIGHT }),
     { x0: -DECK.w / 2, x1: DECK.w / 2, z0: DECK.front, z1: DECK.back },
   )
   const steel = new THREE.MeshStandardMaterial({ color: 0x1a1b1d, roughness: 0.4, metalness: 0.8 })
@@ -219,8 +222,8 @@ function createCoastOverlook(): Room {
 export const coastOverlook: GarageDef = {
   id: 'coast-overlook',
   name: 'Coast Overlook',
-  tag: 'Out in the open on a clifftop terrace above the tropical cove, no walls between the car and the sunset',
+  tag: 'Out in the open on a clifftop terrace above the tropical cove, no walls between the car and the sky',
   palette: ['#1d4f7a', '#3fb2b0', '#f2c38b', '#e8dcc8'],
-  look: 'golden',
+  look: 'daylight',
   create: createCoastOverlook,
 }

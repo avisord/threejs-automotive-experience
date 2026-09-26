@@ -31,6 +31,7 @@ const TONE_MAPPER: Record<ToneMapper, string> = { agx: 'AgX', aces: 'ACES', neut
 
 const LOOK_LABEL: Record<GradeLook, string> = {
   natural: 'Natural',
+  daylight: 'Daylight',
   golden: 'Golden hour',
   cyber: 'Cyber',
   warm: 'Warm',

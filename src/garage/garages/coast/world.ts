@@ -15,13 +15,14 @@ import { pbrMaps } from '../kit'
 import { ContactMap } from './contact'
 
 /**
- * Golden hour over the sea: the sun low out past the left of the view, a
- * little ahead — it lies on the water as a glitter path, comes in through
- * the glass from the sea side, rakes across the car and throws the mullions'
- * and beams' shadows long over the floor, and gilds the cliff faces and the
- * palms' edges while the sky keeps the shade blue.
+ * A clear tropical midday, as an open-world racing game shows it: the sun
+ * high behind the camera's right shoulder, so everything the view faces is
+ * sunlit, the car throws a short crisp shadow forward and to the left, and
+ * the sea shows its turquoise shallows instead of a glitter path. (Golden
+ * hour — the sun low out over the sea, `{ azimuth: -146, elevation: 10 }` —
+ * is a sun preset away.)
  */
-export const COAST_SUN: SunPosition = { azimuth: -146, elevation: 10 }
+export const COAST_SUN: SunPosition = { azimuth: 55, elevation: 52 }
 
 export interface CoastWorldOptions {
   /** the room's own reaction to the sun (key lights, dust) */

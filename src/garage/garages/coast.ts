@@ -263,9 +263,9 @@ function mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
 export const coastGarage: GarageDef = {
   id: 'coast',
   name: 'Coast House',
-  tag: 'A glass-fronted showroom above a tropical cove at golden hour',
+  tag: 'A glass-fronted showroom above a tropical cove on a clear day',
   palette: ['#1d4f7a', '#3fb2b0', '#f2c38b', '#4e6a2a'],
-  look: 'golden',
+  look: 'daylight',
   create: createCoastGarage,
 }
 
