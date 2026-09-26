@@ -1,14 +1,19 @@
 import { PART_DEFS, PRESETS, presetConfig, type CarConfigurator, type PartDef } from '../configurator'
 import type { Nav, Page } from './panel'
 import { materialControls } from './material-controls'
-import { actionButton, el, section, slider } from './widgets'
+import type { CarPlacement } from '../placement'
+import { actionButton, el, section, slider, toggle } from './widgets'
 
 /**
  * Paint, wheels and glass. Structural changes (style, finish, presets)
  * re-render the page; pickers and sliders only update the car so the control
  * under the pointer keeps its drag.
  */
-export function carPage(current: () => CarConfigurator | undefined, placeholder: () => string = () => 'Loading car…'): Page {
+export function carPage(
+  current: () => CarConfigurator | undefined,
+  placeholder: () => string = () => 'Loading car…',
+  placement?: CarPlacement,
+): Page {
   let activePreset: string | null = null
   let lastCar: string | null = null
 
@@ -41,8 +46,33 @@ export function carPage(current: () => CarConfigurator | undefined, placeholder:
     return s
   }
 
+  /** where the car stands: a gizmo on the car to drag it along x / y / z, and a way back */
+  function positionSection(placement: CarPlacement, nav: Nav): HTMLElement {
+    const s = section(
+      'Position',
+      toggle(placement.active, 'Move the car', (on) => {
+        placement.setActive(on)
+        nav.refresh()
+      }),
+    )
+    const p = placement.position!
+    const at = `x ${p.x.toFixed(2)} · y ${p.y.toFixed(2)} · z ${p.z.toFixed(2)} m`
+    s.append(el('p', 'cfg-note', placement.active ? `Drag the arrows on the car. ${at}` : at))
+    if (p.lengthSq() > 1e-6)
+      s.append(
+        actionButton('Reset position', () => {
+          placement.reset()
+          nav.refresh()
+        }),
+      )
+    return s
+  }
+
   return {
     title: 'Car',
+    leave() {
+      placement?.setActive(false) // the gizmo belongs to this page
+    },
     hint: 'Paint, livery, wheels, glass',
     render(body, nav) {
       const configurator = current()
@@ -54,6 +84,8 @@ export function carPage(current: () => CarConfigurator | undefined, placeholder:
         lastCar = configurator.profile.id
         activePreset = null
       }
+
+      if (placement?.position) body.append(positionSection(placement, nav))
 
       const presets = section('Presets')
       const chips = el('div', 'cfg-chips')
