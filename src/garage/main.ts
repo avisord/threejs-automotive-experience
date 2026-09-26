@@ -517,7 +517,7 @@ async function showCar(id: string): Promise<void> {
     clearBay()
     scene.add(root)
     const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3())
-    const shadow = bakeContactShadow(renderer, root, { width: size.x + 1.4, depth: size.z + 1.4, height: 0.9 })
+    const shadow = bakeContactShadow(renderer, root, { width: size.x + 2.4, depth: size.z + 2.4, height: 0.9 }) // room for the blur
     scene.add(shadow)
     room.floorLayers.push(shadow)
     const configurator = createConfigurator(root, profile, traceSceneChanged)
