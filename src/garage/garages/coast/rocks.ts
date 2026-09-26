@@ -313,7 +313,7 @@ export function createRocks(cliff: PbrMaps): Rocks {
   const t0 = performance.now()
   const placed = placeRocks()
   const material = rockMaterial(cliff)
-  const near = SHAPES.map((s) => rockGeometry(s, 9))
+  const near = SHAPES.map((s) => rockGeometry(s, 7))
   const coarse = SHAPES.map((s) => rockGeometry(s, 3))
   const group = new THREE.Group()
   group.name = 'rocks'

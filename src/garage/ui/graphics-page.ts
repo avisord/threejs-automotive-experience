@@ -4,6 +4,7 @@ import {
   matchingPreset,
   type AoQuality,
   type AoView,
+  type DofMode,
   type GradeLook,
   type Msaa,
   type PostProcessing,
@@ -327,6 +328,23 @@ export function graphicsPage(post: PostProcessing): Page {
       }
       flare.append(el('p', 'cfg-note', 'Glare, starburst and ghosts when the sun is in view; anything in front of it puts them out.'))
       body.append(flare)
+
+      // ─── depth of field ─────────────────────────────────────────────────
+      const lens = section('Depth of field')
+      lens.append(
+        segmented(['auto', 'on', 'off'] as DofMode[], { auto: 'Auto', on: 'On', off: 'Off' }, s.dof.mode, (mode) => {
+          post.set('dof', { mode })
+          structural()
+        }),
+      )
+      if (post.dofActive) {
+        lens.append(
+          slider('Blur', s.dof.strength, { min: 0, max: 3, step: 0.05 }, fixed(2), (v) => post.set('dof', { strength: v })),
+          slider('Sharp zone', s.dof.range, { min: 1, max: 20, step: 0.5 }, (v) => `${v.toFixed(1)} m`, (v) => post.set('dof', { range: v })),
+        )
+      }
+      lens.append(el('p', 'cfg-note', 'Focus on the car, the view behind it a little soft, as a photographer would shoot it. Auto: on in garages shot that way (Coast House).'))
+      body.append(lens)
 
       body.append(
         actionButton('Reset graphics', () => {

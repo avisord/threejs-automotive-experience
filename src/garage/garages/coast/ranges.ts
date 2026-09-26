@@ -108,7 +108,9 @@ function massifHeight(m: Massif, x: number, z: number): number {
   // spurs down the flanks, gullies between them — running across the ridge, bending with it
   const spur = ridged(along * 7 + m.seed * 5 + v * 0.8, v * 1.3 + m.seed, 3)
   const flank = smoothstep(Math.abs(vs), 0.15, 0.6) * (1 - smoothstep(Math.abs(vs), 1.3, 2))
-  h *= 1 + flank * (0.22 * (spur - 0.55))
+  h *= 1 + flank * (0.5 * (spur - 0.55))
+  // secondary ridges and ravines, smaller than the spurs, all over the flanks
+  h += crest * 0.14 * (ridged(x / 1300 + m.seed, z / 1300, 4) - 0.55) * smoothstep(Math.abs(vs), 0.1, 0.5)
   // notches along the crest
   h *= 1 - 0.06 * smoothstep(0.7, 0.95, ridged(along * 12 + m.seed, 3.1, 2)) * (1 - smoothstep(Math.abs(vs), 0, 0.3))
   return Math.max(0, h)
@@ -139,7 +141,7 @@ export function farHeight(x: number, z: number): number {
   top *= smoothstep(r, COAST.realRadius, COAST.realRadius + 2500) * smoothstep(s, 60, 900)
   h = Math.max(h, h * 0.4 + top)
   // erosion over everything: fine gullies on the steeper ground
-  h -= 25 * smoothstep(0.75, 0.97, ridged(x / 700, z / 700, 3)) * smoothstep(h, 150, 600) * smoothstep(r, COAST.realRadius, COAST.realRadius + 1500)
+  h -= (25 * smoothstep(0.75, 0.97, ridged(x / 700, z / 700, 3)) + 70 * smoothstep(0.72, 0.95, ridged(x / 1900 + 5, z / 1900, 3))) * smoothstep(h, 150, 800) * smoothstep(r, COAST.realRadius, COAST.realRadius + 1500)
   return Math.max(h, clearance * smoothstep(s, 0, 40))
 }
 

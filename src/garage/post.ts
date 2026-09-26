@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import {
   BlendFunction,
   BloomEffect,
+  DepthOfFieldEffect,
   EffectComposer,
   EffectPass,
   Pass,
@@ -28,6 +29,8 @@ export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
 export type Reflections = 'off' | 'low' | 'medium' | 'high'
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra'
 export type VolumetricQuality = 'low' | 'medium' | 'high'
+/** depth of field: on where the garage asks for it (a photographic location), always, or never */
+export type DofMode = 'auto' | 'on' | 'off'
 /** ray-march steps per pixel for each volumetric quality */
 const VOLUMETRIC_STEPS: Record<VolumetricQuality, number> = { low: 14, medium: 28, high: 48 }
 
@@ -65,6 +68,12 @@ export interface GraphicsSettings {
   volumetric: { enabled: boolean; strength: number; quality: VolumetricQuality }
   /** glare, starburst and ghosts when the sun is in view — see lens-flare-effect.ts */
   lensFlare: { enabled: boolean; intensity: number }
+  /**
+   * A photographer's depth of field, focused on the car (the orbit target): the car sharp, the
+   * coast behind it a little soft. `strength` scales the blur (aperture), `range` is how deep the
+   * sharp zone is, metres.
+   */
+  dof: { mode: DofMode; strength: number; range: number }
   /** progressive path tracing once the camera rests — see pathtrace.ts */
   pathTracing: {
     enabled: boolean
@@ -211,6 +220,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   atmosphere: { enabled: true, strength: 1 },
   volumetric: { enabled: true, strength: 1, quality: 'medium' },
   lensFlare: { enabled: true, intensity: 1 },
+  dof: { mode: 'auto', strength: 1, range: 6 },
   pathTracing: { enabled: false, bounces: 4, samples: 256, resolution: 0.75, denoise: true },
 }
 
@@ -250,6 +260,13 @@ export interface PostProcessing {
   showPathTraced(texture: THREE.Texture | null, weight: number): void
   /** the current garage's air (open-air garages), or null for none */
   setAtmosphere(params: AtmosphereParams | null): void
+  /**
+   * What the lens focuses on (kept live: the orbit target), and whether the garage asks for depth
+   * of field — with its own aperture (the blur's scale) — or not (null). See `dof.mode`.
+   */
+  setFocus(target: THREE.Vector3, garage: { bokehScale: number } | null): void
+  /** depth of field is currently in the picture */
+  readonly dofActive: boolean
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
@@ -298,19 +315,33 @@ export function createPostProcessing(
   let vignette: VignetteEffect | null = null
   let atmosphere: AtmosphereEffect | null = null
   let lensFlare: LensFlareEffect | null = null
+  let dof: DepthOfFieldEffect | null = null
+  let dofPass: EffectPass | null = null
+  let focusTarget = new THREE.Vector3()
+  let garageDof: { bokehScale: number } | null = null
+  const dofWanted = () => settings.dof.mode === 'on' || (settings.dof.mode === 'auto' && garageDof !== null)
   let atmosphereParams: AtmosphereParams | null = null
   let structureKey = ''
 
   function rebuildEffects(): void {
-    for (const pass of [effectPass, smaaPass]) {
+    for (const pass of [dofPass, effectPass, smaaPass]) {
       if (!pass) continue
       composer.removePass(pass)
       pass.dispose() // also disposes the effects it holds
     }
-    smaaPass = null
+    smaaPass = dofPass = null
     const s = settings
     const effects: Effect[] = []
-    bloom = grade = vignette = atmosphere = lensFlare = null
+    bloom = grade = vignette = atmosphere = lensFlare = dof = null
+    // Depth of field in its own pass, first: it blurs the scene's light as the lens would, and the
+    // air, bloom and grade then work on the blurred image (merged into the effect pass, its blur read
+    // the frame before the haze — far land lost its haze where it went soft)
+    if (dofWanted()) {
+      dof = new DepthOfFieldEffect(camera, { focusDistance: 8, focusRange: s.dof.range, bokehScale: 2, resolutionScale: 0.5 })
+      dof.target = focusTarget
+      dofPass = new EffectPass(camera, dof)
+      composer.addPass(dofPass)
+    }
     // the air goes first: haze and shafts are part of the scene's light, graded and tone mapped with it
     if ((s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams) {
       atmosphere = new AtmosphereEffect(camera)
@@ -361,6 +392,7 @@ export function createPostProcessing(
       s.aa.smaa,
       (s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams !== null,
       s.lensFlare.enabled && atmosphereParams !== null,
+      dofWanted(),
     ].join()
     if (key !== structureKey) {
       structureKey = key
@@ -401,6 +433,12 @@ export function createPostProcessing(
       lensFlare.setSun(atmosphereParams?.sunDirection ?? null, atmosphereParams?.sunColor ?? null)
       lensFlare.intensity = s.lensFlare.intensity
     }
+    if (dof) {
+      // (bokeh scale is in pixels at the effect's resolution: a garage's aperture × the user's strength)
+      dof.bokehScale = (garageDof?.bokehScale ?? 2) * s.dof.strength
+      dof.cocMaterial.focusRange = s.dof.range
+      dof.target = focusTarget
+    }
   }
 
   function save(): void {
@@ -436,6 +474,14 @@ export function createPostProcessing(
     setAtmosphere(params) {
       atmosphereParams = params
       apply()
+    },
+    setFocus(target, garage) {
+      focusTarget = target
+      garageDof = garage
+      apply()
+    },
+    get dofActive() {
+      return dof !== null
     },
     showPathTraced(texture, weight) {
       blend.show(texture, weight)

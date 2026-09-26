@@ -138,7 +138,9 @@ function wobble(r: number): number {
   const small = (noise(l * 11 + 1.3, 4.2) - 0.5) * 0.12 + (noise(l * 27 - 5, 1.9) - 0.5) * 0.05
   // sharper points: the noise rectified, so headlands jut out and bays are broad
   const points = Math.max(0, noise(l * 7.3 + 9, 2.2) - 0.55) * 0.9
-  return (big + small + points) * coveCalm(r) * smoothstep(r, 180, 320)
+  // (calmer far out, where the coast runs across the view: there an angular wobble of a few degrees is
+  // kilometres of shore, and it folded the far coast into thin spits with bright water behind them)
+  return (big + small + points) * coveCalm(r) * smoothstep(r, 180, 320) * (1 - 0.85 * smoothstep(r, 6000, 14000))
 }
 
 /** the rocky point that closes the cove on its far side, and the one under the garage at its near end */

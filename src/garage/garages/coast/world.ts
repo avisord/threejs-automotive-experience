@@ -4,6 +4,7 @@ import { aimFarShadow, createFarShadowLight } from '../far-shadow'
 import type { Room } from '../kit'
 import { WIND } from '../foliage'
 import { createSky, sunDirection, sunLight, type SunPosition } from '../sky'
+import { createCumulus } from './clouds'
 import { createOcean } from './ocean'
 import { COAST, SEA, SURF } from './site'
 import { COAST_SURFACES, createCoastTerrain } from './terrain'
@@ -19,7 +20,7 @@ import { pbrMaps } from '../kit'
  * and beams' shadows long over the floor, and gilds the cliff faces and the
  * palms' edges while the sky keeps the shade blue.
  */
-export const COAST_SUN: SunPosition = { azimuth: -132, elevation: 8 }
+export const COAST_SUN: SunPosition = { azimuth: -146, elevation: 6.5 }
 
 export interface CoastWorldOptions {
   /** the room's own reaction to the sun (key lights, dust) */
@@ -38,6 +39,8 @@ export interface CoastWorld {
   ready: Promise<void>
   hooks: Pick<Room, 'outdoor' | 'sun' | 'atmosphere' | 'shadowsChanged'>
   update(dt: number): void
+  /** textures only shader uniforms hold (disposeTree frees material properties, not uniforms) */
+  textures: THREE.Texture[]
 }
 
 /**
@@ -48,7 +51,9 @@ export interface CoastWorld {
 export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {}): CoastWorld {
   const outdoor = new THREE.Group()
   outdoor.name = 'coast-outdoor'
-  const sky = createSky()
+  // a clean upper sky, thin cloud banked low; the heaped cumulus are impostors (clouds.ts)
+  const sky = createSky({ coverage: 0.38, scale: 0.42, density: 0.8 })
+  const cumulus = createCumulus()
   // every plant, planned first: the terrain darkens the ground under the woods
   const vegetation = createCoastVegetation({ bark: pbrMaps(COAST_SURFACES.palmBark) })
   // the cliff photo is shared by the terrain's rock faces and the rocks themselves
@@ -58,7 +63,7 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   const rocks = createRocks(cliffMaps)
   const ranges = createCoastRanges()
   outdoor.add(terrain.mesh, ocean.mesh, rocks.group, ranges, vegetation.group)
-  group.add(sky.mesh, outdoor)
+  group.add(sky.mesh, cumulus.group, outdoor)
 
   const sun = new THREE.DirectionalLight(0xffffff, 2.2)
   sun.castShadow = true
@@ -100,6 +105,7 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
     const light = sunLight(sunAt.elevation)
     const day = THREE.MathUtils.smoothstep(sunAt.elevation, 0, 25)
     sky.setSun(dir)
+    cumulus.setSun(dir, light.color, day)
     sun.position.copy(dir).multiplyScalar(150)
     sun.color.copy(light.color)
     sun.intensity = light.intensity * 1.7
@@ -143,5 +149,6 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
       SURF.time.value += dt
       WIND.time.value += dt
     },
+    textures: [...terrain.textures, cliffMaps.maps.map, cliffMaps.maps.normalMap, cliffMaps.maps.roughnessMap, cumulus.atlas],
   }
 }

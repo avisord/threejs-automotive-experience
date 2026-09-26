@@ -218,7 +218,7 @@ function placePlants(rand: () => number): PlantSpot[] {
 }
 
 /** the lawn and coastal grass round the garage (grass.ts patches), thinning out down the slope */
-function createCoastGrass(rand: () => number): THREE.Group {
+function createCoastGrass(rand: () => number): { group: THREE.Group; far: THREE.Object3D[] } {
   const COUNT = 22000
   const NEAR = 18
   const material = foliage(outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })), {
@@ -258,6 +258,7 @@ function createCoastGrass(rand: () => number): THREE.Group {
   }
   const group = new THREE.Group()
   group.name = 'coast-grass'
+  const far: THREE.Object3D[] = []
   const m = new THREE.Matrix4()
   const q = new THREE.Quaternion()
   const up = new THREE.Vector3(0, 1, 0)
@@ -279,9 +280,10 @@ function createCoastGrass(rand: () => number): THREE.Group {
         mesh.receiveShadow = true
         mesh.computeBoundingSphere()
         group.add(noRaycast(mesh))
+        if (lod === 1) far.push(mesh) // (the floor mirror sees only the grass by the glass)
       }
   })
-  return group
+  return { group, far }
 }
 
 // ─── the woods on the hills ─────────────────────────────────────────────────
@@ -322,8 +324,8 @@ export function createCoastVegetation(opts: { bark: PbrMaps }): CoastVegetation 
   const plants = createPlants(placePlants(rand))
   const grass = createCoastGrass(rand)
   const layout = planWoods()
-  group.add(palms.group, plants.group, grass)
-  const far: THREE.Object3D[] = [...palms.far, ...plants.far]
+  group.add(palms.group, plants.group, grass.group)
+  const far: THREE.Object3D[] = [...palms.far, ...plants.far, ...grass.far]
   console.info(`[garage] coast vegetation planned in ${Math.round(performance.now() - t0)} ms (${layout.plants.length} woodland plants)`)
   const forestReady = createForest({
     seed: 9,

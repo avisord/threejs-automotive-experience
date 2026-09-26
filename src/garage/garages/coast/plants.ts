@@ -269,7 +269,7 @@ function plantGeometry(kind: PlantKind, seed: number, far: boolean): THREE.Buffe
       // a dome of leafy sprays; blossom sprays mixed in on the flowering ones
       const bloom = kind === 'bougainvillea' ? srgb(0xc2186e) : kind === 'hibiscus' ? srgb(0xe0502a) : null
       const green = kind === 'seagrape' ? GREENS.seagrape : GREENS.shrub
-      const n = far ? 26 : 70
+      const n = far ? 22 : 48
       const flat = kind === 'seagrape' ? 0.55 : 0.85
       for (let i = 0; i < n; i++) {
         // points over an irregular dome
@@ -280,7 +280,7 @@ function plantGeometry(kind: PlantKind, seed: number, far: boolean): THREE.Buffe
         const nrm = new THREE.Vector3(Math.cos(a) * Math.cos(el), Math.sin(el) * flat, Math.sin(a) * Math.cos(el)).normalize()
         const c = new THREE.Vector3(Math.cos(a) * Math.cos(el) * 0.5 * bump, 0.05 + Math.sin(el) * flat * bump, Math.sin(a) * Math.cos(el) * 0.5 * bump)
         const blossom = bloom && rand() < (nrm.y > 0.3 ? 0.4 : 0.2)
-        b.card(c, nrm, (far ? 0.55 : 0.4) * (0.8 + rand() * 0.4), 3, blossom ? jitter(bloom!, 0.25) : jitter(green, 0.3), rand() * Math.PI)
+        b.card(c, nrm, (far ? 0.6 : 0.46) * (0.8 + rand() * 0.4), 3, blossom ? jitter(bloom!, 0.25) : jitter(green, 0.3), rand() * Math.PI)
       }
       break
     }
@@ -309,12 +309,14 @@ export interface PlantSpot {
 
 export interface Plants {
   group: THREE.Group
-  /** the far versions (the floor mirror skips them) */
+  /** all but the garden bed by the glass (the floor mirror skips them) */
   far: THREE.Object3D[]
 }
 
 /** metres from the garage where a plant drops to its far version */
 const NEAR = 45
+/** within this, plants show in the garage's floor mirror (the garden bed by the glass); beyond, the mirror skips them */
+const MIRRORED = 16
 const VARIANTS = 3
 
 export function createPlants(spots: PlantSpot[]): Plants {
@@ -336,8 +338,10 @@ export function createPlants(spots: PlantSpot[]): Plants {
   const buckets = new Map<string, PlantSpot[]>()
   const rand = seeded(3)
   for (const p of spots) {
-    const lod = Math.hypot(p.x, p.z) < NEAR ? 0 : 1
-    const key = `${p.kind}|${Math.floor(rand() * VARIANTS)}|${lod}`
+    const d = Math.hypot(p.x, p.z)
+    // band 0: by the glass, mirrored; 1: near, full detail; 2: the far version
+    const band = d < MIRRORED ? 0 : d < NEAR ? 1 : 2
+    const key = `${p.kind}|${Math.floor(rand() * VARIANTS)}|${band}`
     buckets.set(key, [...(buckets.get(key) ?? []), p])
   }
   const m = new THREE.Matrix4()
@@ -348,9 +352,10 @@ export function createPlants(spots: PlantSpot[]): Plants {
   const kinds: PlantKind[] = ['agave', 'strelitzia', 'cycad', 'flax', 'bougainvillea', 'hibiscus', 'seagrape', 'beachgrass']
   kinds.forEach((kind, ki) => {
     for (let v = 0; v < VARIANTS; v++)
-      for (const lod of [0, 1]) {
-        const list = buckets.get(`${kind}|${v}|${lod}`)
+      for (const band of [0, 1, 2]) {
+        const list = buckets.get(`${kind}|${v}|${band}`)
         if (!list) continue
+        const lod = band === 2 ? 1 : 0
         const geometry = plantGeometry(kind, 100 + ki * 10 + v, lod === 1)
         const mesh = new THREE.InstancedMesh(geometry, material, list.length)
         list.forEach((p, i) => {
@@ -361,9 +366,9 @@ export function createPlants(spots: PlantSpot[]): Plants {
         mesh.castShadow = lod === 0 && kind !== 'beachgrass'
         mesh.receiveShadow = true
         mesh.computeBoundingSphere()
-        mesh.name = `plants-${kind}-lod${lod}`
+        mesh.name = `plants-${kind}-band${band}`
         group.add(noRaycast(mesh))
-        if (lod === 1) far.push(mesh)
+        if (band > 0) far.push(mesh)
         tris += (geometry.index!.count / 3) * list.length
       }
   })

@@ -285,6 +285,7 @@ const post = createPostProcessing(renderer, scene, camera, () => [
   ...(bay ? collectGlowMeshes(bay.root) : []),
 ])
 post.setAtmosphere(room.atmosphere ?? null) // later rooms: swapRoom
+post.setFocus(controls.target, room.depthOfField ?? null) // the lens focuses on the orbit target: the car
 
 /**
  * Frames still to draw. In on-demand mode (the default) nothing is drawn
@@ -607,6 +608,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   installRoom()
   placement.refit() // a smaller room may not fit where the car stood
   post.setAtmosphere(room.atmosphere ?? null)
+  post.setFocus(controls.target, room.depthOfField ?? null)
   applyQuality() // floor mirror size and texture filtering for the new room
   post.refreshGlow()
   traceSceneChanged()

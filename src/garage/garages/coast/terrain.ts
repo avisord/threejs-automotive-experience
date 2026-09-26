@@ -217,7 +217,10 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
  * out to 4 km — and the seabed close in, under the sea (the waterline is
  * where the two meet).
  */
-export function createCoastTerrain(cliff: PbrMaps, cover: (x: number, z: number) => number = () => 0): { mesh: THREE.Mesh; ready: Promise<void> } {
+export function createCoastTerrain(
+  cliff: PbrMaps,
+  cover: (x: number, z: number) => number = () => 0,
+): { mesh: THREE.Mesh; ready: Promise<void>; textures: THREE.Texture[] } {
   const grassC = srgb(0x5d7c32)
   const lush = srgb(0x44692a)
   const dry = srgb(0x8e8c50)
@@ -285,7 +288,9 @@ export function createCoastTerrain(cliff: PbrMaps, cover: (x: number, z: number)
   mesh.castShadow = true
   mesh.receiveShadow = true
   console.info(`[garage] coast terrain: ${normal.count} vertices in ${Math.round(performance.now() - t0)} ms`)
-  return { mesh: noRaycast(mesh), ready: Promise.all([maps.grass.ready, maps.sand.ready]).then(() => {}) }
+  // (its maps live in shader uniforms, where disposeTree doesn't look: the room frees them)
+  const textures = [maps.grass.maps.map, maps.grass.maps.normalMap, maps.sand.maps.map, maps.sand.maps.normalMap]
+  return { mesh: noRaycast(mesh), ready: Promise.all([maps.grass.ready, maps.sand.ready]).then(() => {}), textures }
 }
 
 export { beachness }

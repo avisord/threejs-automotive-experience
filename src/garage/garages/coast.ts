@@ -82,13 +82,33 @@ function createCoastGarage(): Room {
   const floorSurface = new THREE.MeshStandardMaterial({
     ...floorMaps.maps,
     // (the photographed concrete is dark, ~0.085: lifted to a pale honed limestone)
-    color: new THREE.Color().setRGB(2.3, 2.3, 2.3),
+    color: new THREE.Color().setRGB(2.45, 2.25, 2.35), // (a touch toward rose: the photo is faintly green, and the garden and the gold light pushed it olive)
     roughness: 0.5, // × the map: polished, dull patches where it's worn
     normalScale: new THREE.Vector2(0.35, 0.35),
     opacity: 0.5, // the mirror below shows through: the car, the bright glass, the view
     envMapIntensity: 0.06,
   })
   floorSurface.name = 'coast-floor'
+  // Imperfect polish: where the stone is worn (the roughness map's rough patches) the surface is
+  // more opaque over the mirror — the reflection breaks up into broad soft patches instead of lying
+  // evenly over the floor — and a slow mottle at the scale of the slabs, so it reads as stone.
+  floorSurface.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        #ifdef USE_MAP
+          float mottle = dot( texture2D( map, vMapUv * 0.17 + 0.31 ).rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+          diffuseColor.rgb *= 0.8 + 3.2 * mottle;
+        #endif`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        diffuseColor.a = mix( diffuseColor.a * 0.8, min( 1.0, diffuseColor.a * 1.6 ), smoothstep( 0.35, 0.75, roughnessFactor ) );`,
+      )
+  }
+  floorSurface.customProgramCacheKey = () => 'coast-floor'
   const floor = createFloor(group, { geometry: deck, tint: 0xbdbdbd, fresnel: 0.05, blur: 0.011, lod: 1.6, surface: floorSurface })
   group.traverse((o) => {
     if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === floorSurface) o.receiveShadow = true
@@ -206,8 +226,14 @@ function createCoastGarage(): Room {
     ...room,
     ...world.hooks,
     interior,
+    // shot like an automotive photograph: the car sharp, the coast behind it a touch soft
+    depthOfField: { bokehScale: 0.7 },
     update(dt) {
       world.update(dt)
+    },
+    dispose() {
+      room.dispose()
+      for (const t of world.textures) t.dispose()
     },
   }
 }

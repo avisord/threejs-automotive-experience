@@ -69,7 +69,8 @@ export interface Ocean {
 export function createOcean(): Ocean {
   const shoreField = shoreTexture()
   // real metres out to the far layers' edge; fine where the surf is, coarse past the horizon
-  const geometry = polarGrid(COAST.farRadius, 320, 900, (t) => t ** 3.2, () => 0)
+  // (the waves and colours are per pixel: the mesh only has to follow the Earth's curve and the far mapping)
+  const geometry = polarGrid(COAST.farRadius, 200, 640, (t) => t ** 3.2, () => 0)
   geometry.deleteAttribute('color')
   const pos = geometry.attributes.position
   const real = new Float32Array(pos.count * 2)

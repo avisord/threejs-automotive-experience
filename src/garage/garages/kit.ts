@@ -74,6 +74,11 @@ export interface Room {
   shadowsChanged?(): void
   /** the room's own light fittings, in groups the user can switch, dim and warm (Menu › Garage) */
   interior?: InteriorLights
+  /**
+   * A photographic location: depth of field on by default here (Settings › Graphics › Depth of
+   * field, "Auto"), with this aperture — the blur's scale, in pixels at half resolution.
+   */
+  depthOfField?: { bokehScale: number }
 }
 
 /**
