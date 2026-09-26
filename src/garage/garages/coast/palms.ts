@@ -8,7 +8,12 @@ import { OUTDOOR_SKY_LIGHT } from '../sky'
 /**
  * Palms, the coast's signature. Five archetypes, each generated (no assets):
  *
- *   tall slender · broad coconut · leaning coconut · young · dense mature
+ *   tall straight (slender) · medium broad (coconut) · tall curved (leaning)
+ *   · small young · asymmetric mature
+ *
+ * and three seeded variants of each (trunk bow and lean, frond count,
+ * length and droop, crown lopsidedness), so a row of palms isn't one palm
+ * repeated; instances add their own height, turn, a slight squash and tint.
  *
  * A palm is a trunk (a tapered tube along a curve: straight, gently bowed or
  * leaning out toward the light, flared at its foot, photographed palm bark)
@@ -41,6 +46,8 @@ export interface PalmSpec {
   skirt: number
   /** coconuts under the crown */
   nuts: number
+  /** how lopsided the crown is: fronds longer and thicker on one side, gaps on the other (0 even) */
+  asym?: number
   seed: number
 }
 
@@ -49,9 +56,29 @@ export const PALMS: Record<'slender' | 'coconut' | 'leaning' | 'young' | 'mature
   coconut: { radius: [0.028, 0.016], bow: 0.08, lean: 0.06, fronds: 24, frond: 0.33, droop: 0.75, skirt: 0, nuts: 7, seed: 2 },
   leaning: { radius: [0.03, 0.017], bow: 0.22, lean: 0.3, fronds: 22, frond: 0.32, droop: 0.8, skirt: 0, nuts: 5, seed: 3 },
   young: { radius: [0.07, 0.05], bow: 0.02, lean: 0.03, fronds: 16, frond: 0.62, droop: 0.45, skirt: 0, nuts: 0, seed: 4 },
-  mature: { radius: [0.06, 0.05], bow: 0, lean: 0, fronds: 38, frond: 0.36, droop: 0.6, skirt: 12, nuts: 0, seed: 5 },
+  mature: { radius: [0.06, 0.05], bow: 0.04, lean: 0.03, fronds: 38, frond: 0.36, droop: 0.6, skirt: 12, nuts: 0, asym: 0.35, seed: 5 },
 }
 export type PalmKind = keyof typeof PALMS
+
+/** variants of an archetype: the same kind of palm, grown a little differently */
+const VARIANTS = 3
+function variantSpec(kind: PalmKind, v: number): PalmSpec {
+  const base = PALMS[kind]
+  if (v === 0) return base
+  const rand = seeded(base.seed * 101 + v * 17)
+  const vary = (x: number, k: number) => x * (1 - k + 2 * k * rand())
+  return {
+    ...base,
+    bow: vary(base.bow, 0.5) + 0.02 * rand(),
+    lean: vary(base.lean, 0.4),
+    fronds: Math.round(vary(base.fronds, 0.2)),
+    frond: vary(base.frond, 0.12),
+    droop: Math.min(1, vary(base.droop, 0.2)),
+    skirt: Math.round(vary(base.skirt, 0.5)),
+    asym: (base.asym ?? 0.1) * (0.5 + rand()),
+    seed: base.seed * 13 + v,
+  }
+}
 
 /** the frond texture: pinnate leaflets along a midrib (alpha), greyscale green — the instance colour tints it */
 function frondTexture(): THREE.CanvasTexture {
@@ -222,6 +249,8 @@ function buildPalm(spec: PalmSpec, lod: 0 | 1 | 2): Parts {
     }
   }
   const golden = Math.PI * (3 - Math.sqrt(5))
+  const asym = spec.asym ?? 0
+  const heavy = rand() * Math.PI * 2 // the side the crown favours
   for (let f = 0; f < fronds; f++) {
     // spiralled round the crown; young fronds (the last) upright in the centre, old ones spread and hanging
     const age = 1 - f / fronds
@@ -229,10 +258,14 @@ function buildPalm(spec: PalmSpec, lod: 0 | 1 | 2): Parts {
     const rise = THREE.MathUtils.lerp(1.25, -0.2, age ** 0.8) + (rand() - 0.5) * 0.2
     const length = spec.frond * (0.75 + 0.35 * Math.sin(Math.PI * (0.3 + age * 0.6))) * (0.9 + rand() * 0.2)
     const droop = spec.droop * (0.4 + age * 0.9)
+    // a lopsided crown: fronds on the favoured side longer, a broken one missing on the other now and then
+    const favour = Math.cos(azimuth - heavy)
+    if (lod === 0 && favour < -0.3 && rand() < asym * 0.8) continue
     const tint = green.clone().multiplyScalar(0.85 + rand() * 0.3)
     // an old frond turning yellow here and there
     if (age > 0.85 && rand() < 0.25) tint.lerp(new THREE.Color(1.1, 0.95, 0.55), 0.6)
-    addFrond(azimuth, rise, length, droop, length * 0.2 * widthScale, tint)
+    const reach = length * (1 + asym * 0.35 * favour)
+    addFrond(azimuth, rise, reach, droop, reach * 0.2 * widthScale, tint)
   }
   // dead fronds hanging against the trunk (LOD 0–1)
   if (lod < 2)
@@ -301,9 +334,9 @@ export interface Palms {
 /** metres from the garage where a palm drops to the next level of detail */
 const LOD = { near: 70, mid: 320 }
 
-/** the palms' crown colour: fresh to olive greens (sRGB) */
+/** the palms' crown colour: olive to muted fresh greens (sRGB) — saturated greens read as plastic in the low sun */
 function palmTint(tone: number, out: THREE.Color): THREE.Color {
-  return out.setHSL(0.2 + tone * 0.07, 0.32 + tone * 0.18, 0.3 + tone * 0.08, THREE.SRGBColorSpace)
+  return out.setHSL(0.19 + tone * 0.07, 0.24 + tone * 0.12, 0.28 + tone * 0.08, THREE.SRGBColorSpace)
 }
 
 export function createPalms(spots: PalmSpot[], bark: PbrMaps): Palms {
@@ -319,7 +352,7 @@ export function createPalms(spots: PalmSpot[], bark: PbrMaps): Palms {
     envMapIntensity: OUTDOOR_SKY_LIGHT,
   })
   receiveFarShadow(frondMaterial)
-  foliage(frondMaterial, { wind: 'tree', translucency: 0.55, coverage: true, crownNormals: true, matte: true })
+  foliage(frondMaterial, { wind: 'tree', translucency: 0.35, coverage: true, crownNormals: true, matte: true })
   const trunkMaterial = new THREE.MeshStandardMaterial({ ...bark.maps, color: 0xb8ab98, roughness: 1, envMapIntensity: OUTDOOR_SKY_LIGHT })
   receiveFarShadow(trunkMaterial)
   foliage(trunkMaterial, { wind: 'tree' })
@@ -333,33 +366,39 @@ export function createPalms(spots: PalmSpot[], bark: PbrMaps): Palms {
   const up = new THREE.Vector3(0, 1, 0)
   const col = new THREE.Color()
   let tris = 0
+  // (a palm's variant from its position: stable however the list is ordered)
+  const variantOf = (p: PalmSpot) => Math.floor((((Math.sin(p.x * 12.9898 + p.z * 78.233) * 43758.5453) % 1) + 1) % 1 * VARIANTS)
   for (const kind of kinds) {
-    for (const lod of [0, 1, 2] as const) {
-      const list = spots.filter((p) => {
-        if (p.kind !== kind) return false
-        const d = Math.hypot(p.x, p.z)
-        return lod === 0 ? d < LOD.near : lod === 1 ? d >= LOD.near && d < LOD.mid : d >= LOD.mid
-      })
-      if (list.length === 0) continue
-      const parts = buildPalm(PALMS[kind], lod)
-      const trunks = new THREE.InstancedMesh(parts.trunk, trunkMaterial, list.length)
-      const crowns = new THREE.InstancedMesh(parts.crown, frondMaterial, list.length)
-      list.forEach((p, i) => {
-        q.setFromAxisAngle(up, p.turn)
-        m.compose(new THREE.Vector3(p.x, p.y - 0.1, p.z), q, new THREE.Vector3(p.height, p.height, p.height))
-        trunks.setMatrixAt(i, m)
-        crowns.setMatrixAt(i, m)
-        crowns.setColorAt(i, palmTint(p.tone, col))
-      })
-      for (const mesh of [trunks, crowns]) {
-        mesh.castShadow = true
-        mesh.receiveShadow = true
-        mesh.computeBoundingSphere()
-        mesh.name = `palms-${kind}-lod${lod}`
-        group.add(noRaycast(mesh))
-        if (lod > 0) far.push(mesh)
+    for (let v = 0; v < VARIANTS; v++) {
+      for (const lod of [0, 1, 2] as const) {
+        const list = spots.filter((p) => {
+          if (p.kind !== kind || variantOf(p) !== v) return false
+          const d = Math.hypot(p.x, p.z)
+          return lod === 0 ? d < LOD.near : lod === 1 ? d >= LOD.near && d < LOD.mid : d >= LOD.mid
+        })
+        if (list.length === 0) continue
+        const parts = buildPalm(variantSpec(kind, v), lod)
+        const trunks = new THREE.InstancedMesh(parts.trunk, trunkMaterial, list.length)
+        const crowns = new THREE.InstancedMesh(parts.crown, frondMaterial, list.length)
+        list.forEach((p, i) => {
+          q.setFromAxisAngle(up, p.turn)
+          // (a slight squash per palm: crowns a little wider or narrower)
+          const w = p.height * (0.92 + 0.16 * ((p.tone * 5.77) % 1))
+          m.compose(new THREE.Vector3(p.x, p.y - 0.1, p.z), q, new THREE.Vector3(w, p.height, w))
+          trunks.setMatrixAt(i, m)
+          crowns.setMatrixAt(i, m)
+          crowns.setColorAt(i, palmTint(p.tone, col))
+        })
+        for (const mesh of [trunks, crowns]) {
+          mesh.castShadow = true
+          mesh.receiveShadow = true
+          mesh.computeBoundingSphere()
+          mesh.name = `palms-${kind}-${v}-lod${lod}`
+          group.add(noRaycast(mesh))
+          if (lod > 0) far.push(mesh)
+        }
+        tris += ((parts.trunk.index ? parts.trunk.index.count : parts.trunk.attributes.position.count) / 3 + parts.crown.index!.count / 3) * list.length
       }
-      tris += ((parts.trunk.index ? parts.trunk.index.count : parts.trunk.attributes.position.count) / 3 + parts.crown.index!.count / 3) * list.length
     }
   }
   console.info(`[garage] palms: ${spots.length}, ${(tris / 1e6).toFixed(2)} M triangles, ${Math.round(performance.now() - t0)} ms`)

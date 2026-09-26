@@ -8,6 +8,7 @@ import { createForest } from '../trees'
 import { layoutVegetation, type VegetationLayout } from '../vegetation-layout'
 import { createPalms, type PalmKind, type PalmSpot } from './palms'
 import { createPlants, type PlantKind, type PlantSpot } from './plants'
+import type { ContactMap } from './contact'
 import { SEA, VIEW_EYE, beachness, bearing, heightAt, inView, onRoad, nearestRoad, shore, woodedness } from './site'
 
 /**
@@ -56,6 +57,8 @@ export interface CoastVegetation {
   far: THREE.Object3D[]
   /** the coast's grass meadow near the garage, and its layout's cover (the terrain darkens the ground under trees) */
   layout: VegetationLayout
+  /** press every plant's foot into the ground's contact map */
+  stamp(contact: ContactMap): void
   ready: Promise<void>
 }
 
@@ -172,7 +175,8 @@ function placePlants(rand: () => number, planter: boolean): PlantSpot[] {
     if (rand() > bed * (1 - 0.6 * smoothstep(r, 30, 110))) continue
     const pick = rand()
     const kind: PlantKind =
-      pick < 0.22 ? 'bougainvillea' : pick < 0.36 ? 'hibiscus' : pick < 0.5 ? 'strelitzia' : pick < 0.62 ? 'agave' : pick < 0.74 ? 'cycad' : pick < 0.86 ? 'flax' : 'seagrape'
+      // (flowering shrubs an accent, not the garden's mass: most of it is foliage)
+      pick < 0.12 ? 'bougainvillea' : pick < 0.2 ? 'hibiscus' : pick < 0.36 ? 'strelitzia' : pick < 0.5 ? 'agave' : pick < 0.64 ? 'cycad' : pick < 0.78 ? 'flax' : 'seagrape'
     const natural = kind === 'strelitzia' ? 1.4 : kind === 'bougainvillea' || kind === 'hibiscus' ? 1.5 + rand() : 1
     const size = Math.min(natural * (0.7 + rand() * 0.6), room / (kind === 'strelitzia' ? 1.9 : 1.2))
     if (size < 0.35) continue
@@ -192,7 +196,7 @@ function placePlants(rand: () => number, planter: boolean): PlantSpot[] {
     const room = roomBelowCove(x, z)
     const flowering = smoothstep(fbm(x / 40 - 3, z / 40 + 8, 2), 0.55, 0.7)
     const pick = rand()
-    const kind: PlantKind = pick < flowering * 0.6 ? (rand() < 0.6 ? 'bougainvillea' : 'hibiscus') : pick < 0.7 ? 'seagrape' : pick < 0.85 ? 'cycad' : 'strelitzia'
+    const kind: PlantKind = pick < flowering * 0.3 ? (rand() < 0.6 ? 'bougainvillea' : 'hibiscus') : pick < 0.7 ? 'seagrape' : pick < 0.85 ? 'cycad' : 'strelitzia'
     const size = Math.min((1.4 + rand() * 1.6) * (kind === 'seagrape' ? 1.3 : 1), room / 1.3)
     if (size < 0.5) continue
     add(x, z, kind, size)
@@ -226,6 +230,9 @@ function placePlants(rand: () => number, planter: boolean): PlantSpot[] {
   return spots
 }
 
+/** where grass patches stop: beyond, the ground is the terrain shader alone */
+const FAR_GRASS = 90
+
 /** the lawn and coastal grass round the garage (grass.ts patches), thinning out down the slope */
 function createCoastGrass(rand: () => number): { group: THREE.Group; far: THREE.Object3D[] } {
   const COUNT = 22000
@@ -251,6 +258,12 @@ function createCoastGrass(rand: () => number): { group: THREE.Group; far: THREE.
     if (s < 12 || onRoad(x, z) > 0.2) continue
     const keep = r < 30 ? 1 : (30 / r) ** 1.2
     if (rand() > keep) continue
+    // past ~90 m a patch is a few pixels: the terrain's own shading carries the grass there (counted, so the
+    // density closer in stays as it was)
+    if (r > FAR_GRASS) {
+      n++
+      continue
+    }
     const room = roomBelowCove(x, z)
     if (room < 0.3) continue
     // mown lawn on the terrace, longer coastal grass beyond, tufts and tall stands in patches
@@ -330,8 +343,10 @@ export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean })
   const rand = seeded(2024)
   const group = new THREE.Group()
   group.name = 'coast-vegetation'
-  const palms = createPalms(placePalms(rand), opts.bark)
-  const plants = createPlants(placePlants(rand, opts.planter))
+  const palmSpots = placePalms(rand)
+  const plantSpots = placePlants(rand, opts.planter)
+  const palms = createPalms(palmSpots, opts.bark)
+  const plants = createPlants(plantSpots)
   const grass = createCoastGrass(rand)
   const layout = planWoods()
   group.add(palms.group, plants.group, grass.group)
@@ -351,5 +366,15 @@ export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean })
       await forest.ready
     })
     .catch((err: unknown) => console.error('[garage] coast woods failed', err))
-  return { group, far, layout, ready: Promise.all([palms.ready, forestReady]).then(() => {}) }
+  const stamp = (contact: ContactMap) => {
+    // a shrub's dome shades the ground right under it (dense, leaf litter); spiky rosettes much less
+    const DENSITY: Record<PlantKind, number> = { agave: 0.3, strelitzia: 0.35, cycad: 0.35, flax: 0.3, bougainvillea: 0.6, hibiscus: 0.6, seagrape: 0.6, beachgrass: 0.2 }
+    for (const p of plantSpots) contact.blob(p.x, p.z, p.size * 0.75, DENSITY[p.kind])
+    for (const p of palmSpots) {
+      contact.blob(p.x, p.z, 0.5 + p.height * 0.05, 0.55) // the trunk's foot, its root flare and the litter round it
+      contact.blob(p.x, p.z, p.height * 0.35, 0.12, 0) // the crown's shade, faint
+    }
+    for (const p of layout.plants) contact.blob(p.x, p.z, p.width * 0.6, p.kind === 'shrub' ? 0.5 : 0.4, p.width * 0.15)
+  }
+  return { group, far, layout, stamp, ready: Promise.all([palms.ready, forestReady]).then(() => {}) }
 }

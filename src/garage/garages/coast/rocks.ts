@@ -304,6 +304,8 @@ export interface Rocks {
   group: THREE.Group
   /** the far rocks (the garage's floor mirror can skip them) */
   far: THREE.Object3D[]
+  /** each rock's foot: where it sits and its footprint (x × z, metres) — the ground darkens round them */
+  feet: { x: number; z: number; w: number; d: number }[]
 }
 
 /** beyond this, rocks are drawn from their coarse geometry */
@@ -345,5 +347,5 @@ export function createRocks(cliff: PbrMaps): Rocks {
   })
   for (const g of [...near, ...coarse]) if (!group.children.some((c) => (c as THREE.Mesh).geometry === g)) g.dispose()
   console.info(`[garage] coast rocks: ${placed.length} placed, ${(tris / 1e6).toFixed(2)} M triangles, ${Math.round(performance.now() - t0)} ms`)
-  return { group, far }
+  return { group, far, feet: placed.map((p) => ({ x: p.x, z: p.z, w: p.size[0], d: p.size[2] })) }
 }

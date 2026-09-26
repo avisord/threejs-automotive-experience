@@ -12,6 +12,7 @@ import { createRocks } from './rocks'
 import { createCoastRanges } from './ranges'
 import { createCoastVegetation } from './vegetation'
 import { pbrMaps } from '../kit'
+import { ContactMap } from './contact'
 
 /**
  * Golden hour over the sea: the sun low out past the left of the view, a
@@ -29,6 +30,8 @@ export interface CoastWorldOptions {
   dust?: THREE.Box3
   /** plant the bed along the garage's glass (default true; the open-air overlook has no garage) */
   planter?: boolean
+  /** what the room builds on the land (x0, z0, x1, z1): the ground darkens along their feet */
+  footprints?: [number, number, number, number][]
 }
 
 export interface CoastWorld {
@@ -60,9 +63,15 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   const vegetation = createCoastVegetation({ bark: pbrMaps(COAST_SURFACES.palmBark), planter: opts.planter ?? true })
   // the cliff photo is shared by the terrain's rock faces and the rocks themselves
   const cliffMaps = pbrMaps(COAST_SURFACES.cliff)
-  const terrain = createCoastTerrain(cliffMaps, vegetation.layout.cover)
-  const ocean = createOcean()
   const rocks = createRocks(cliffMaps)
+  // where everything meets the ground: plants, rocks and the room's own footings
+  const contact = new ContactMap()
+  vegetation.stamp(contact)
+  for (const f of rocks.feet) contact.blob(f.x, f.z, Math.max(f.w, f.d) * 0.62, 0.65, Math.min(f.w, f.d) * 0.3)
+  for (const [x0, z0, x1, z1] of opts.footprints ?? []) contact.box(x0, z0, x1, z1, 0.9, 0.7)
+  const contactMap = contact.texture()
+  const terrain = createCoastTerrain(cliffMaps, vegetation.layout.cover, contactMap)
+  const ocean = createOcean()
   const ranges = createCoastRanges()
   outdoor.add(terrain.mesh, ocean.mesh, rocks.group, ranges, vegetation.group)
   group.add(sky.mesh, cumulus.group, outdoor)
@@ -153,6 +162,6 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
       SURF.time.value += dt
       WIND.time.value += dt
     },
-    textures: [...terrain.textures, cliffMaps.maps.map, cliffMaps.maps.normalMap, cliffMaps.maps.roughnessMap, cumulus.atlas],
+    textures: [...terrain.textures, contactMap.texture, cliffMaps.maps.map, cliffMaps.maps.normalMap, cliffMaps.maps.roughnessMap, cumulus.atlas],
   }
 }

@@ -41,6 +41,7 @@ export const COAST_GRID = { rings: 380, segments: 1024, spacing: (t: number) => 
 function coastGround<M extends THREE.MeshStandardMaterial>(
   material: M,
   maps: { grass: PbrMaps; sand: PbrMaps; cliff: PbrMaps },
+  contact: { texture: THREE.Texture; rect: THREE.Vector4 },
 ): M {
   const shoreField = shoreTexture()
   const uniforms = {
@@ -55,6 +56,8 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
     uCliffMap: { value: maps.cliff.maps.map },
     uCliffNormal: { value: maps.cliff.maps.normalMap },
     uCliffRough: { value: maps.cliff.maps.roughnessMap },
+    uContact: { value: contact.texture },
+    uContactRect: { value: contact.rect },
   }
   const base = material.onBeforeCompile
   material.onBeforeCompile = (shader, renderer) => {
@@ -92,6 +95,9 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
         }
         // how much of each surface, and the wet film of the uprush — shared by colour, normal and roughness
         float gRock; float gSand; float gWet; float gFilm; float gFoam;
+        float gLodge = 0.0; float gSpeck = 0.0; float gAO = 0.0; // lodged grass, pebbles, contact occlusion
+        uniform sampler2D uContact;
+        uniform vec4 uContactRect;
         vec3 gTri; // triplanar weights for the rock (x-facing, z-facing, up)
         `,
       )
@@ -128,18 +134,54 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           #if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
             c *= vColor.rgb;
           #endif
-          // the grass photo's light and dark (two scales, so its 2 m tile doesn't show)
+          // ─── the vegetated ground, at three scales (shader detail, not grass instances: the ground
+          // has to read as a living surface on its own; the grass patches only add to it close in) ───
+          float near = 1.0 - smoothstep( 600.0, 1500.0, dist );
+          float lum = dot( c, LUMA );
+          float open = 1.0 - vCoast.y; // (the woods' floor keeps its own dark colour)
+          // macro, tens of metres: muted drifts — olive, sun-dried yellow-green, deep green in the hollows
+          float m1 = gDetail( p.xz - 71.0, 60.0 );
+          float m2 = gDetail( p.xz + 31.0, 23.0 );
+          float m3 = gDetail( p.xz * mat2( 0.8, -0.6, 0.6, 0.8 ) + 9.0, 38.0 );
+          vec3 tint = vec3( 1.0 );
+          tint = mix( tint, vec3( 1.1, 1.02, 0.72 ), smoothstep( 0.4, 0.68, m1 ) * 0.7 ); // olive
+          tint = mix( tint, vec3( 1.28, 1.14, 0.66 ), smoothstep( 0.55, 0.78, m1 * 0.55 + m2 * 0.45 ) * 0.75 ); // dry, yellow-green
+          tint = mix( tint, vec3( 0.7, 0.82, 0.72 ), smoothstep( 0.56, 0.78, m3 ) * 0.6 ); // deep green
+          c = mix( c, c * tint, open * near );
+          // meso, a few metres: dry straw patches, bare soil, grass flattened by the wind
+          float d1 = gDetail( p.xz + 5.0, 7.0 );
+          float d2 = gDetail( p.xz * 1.7 - 13.0, 3.1 );
+          float dryPatch = smoothstep( 0.6, 0.78, d1 * 0.65 + d2 * 0.35 );
+          c = mix( c, lum * vec3( 1.9, 1.62, 1.02 ), dryPatch * 0.5 * open * near );
+          float bare = smoothstep( 0.7, 0.84, gDetail( p.xz - 41.0, 4.3 ) * 0.7 + d2 * 0.3 ) * ( 1.0 - smoothstep( 0.93, 0.99, n.y ) * 0.6 );
+          c = mix( c, vec3( 0.2, 0.15, 0.1 ) * ( 0.75 + 0.5 * d2 ), bare * 0.7 * open * near );
+          // lodged grass: long streaks laid over along the sea wind, paler (their blades catch the sky)
+          vec2 wq = vec2( dot( p.xz, vec2( 0.82, 0.57 ) ), dot( p.xz, vec2( -0.57, 0.82 ) ) );
+          gLodge = smoothstep( 0.62, 0.8, gDetail( wq * vec2( 0.25, 1.0 ), 2.2 ) ) * smoothstep( 0.45, 0.6, d1 ) * open * ( 1.0 - bare );
+          c *= 1.0 + 0.18 * gLodge * near;
+          // micro: the grass photo's light and dark (two scales, so its 2 m tile doesn't show), and fine colour noise
           vec3 gTex = texture2D( uGrassMap, p.xz / 2.0 ).rgb;
           vec3 gTex2 = texture2D( uGrassMap, p.xz / 8.6 + 0.37 ).rgb;
           float detail = mix( dot( gTex, LUMA ), dot( gTex2, LUMA ), 0.35 ) / ${MEAN.grass};
           c *= mix( 1.0, clamp( detail, 0.0, 2.5 ), 1.0 - smoothstep( 60.0, 400.0, dist ) );
-          // broad patches: sun-dried grass on the open ground, deeper green in the hollows
-          float near = 1.0 - smoothstep( 600.0, 1500.0, dist );
-          float broad = gDetail( p.xz - 71.0, 60.0 );
-          float big = gDetail( p.xz + 31.0, 17.0 );
-          float lum = dot( c, LUMA );
-          c = mix( c, lum * vec3( 1.7, 1.45, 0.8 ), smoothstep( 0.5, 0.7, broad * 0.5 + big * 0.5 ) * 0.45 * near * ( 1.0 - vCoast.y ) );
-          c *= mix( 1.0, 0.8 + 0.4 * gDetail( p.xz + 5.0, 3.0 ), near );
+          c *= mix( 1.0, 0.86 + 0.28 * gDetail( p.xz * 1.3 + 5.0, 0.9 ), near );
+          c.rg *= 1.0 + ( gDetail( p.xz + 17.0, 1.6 ) - 0.5 ) * vec2( 0.1, 0.05 );
+          // pebbles in the turf: a stone in the odd 0.7 m cell, pale grey, gone where it would be under a pixel
+          {
+            vec2 q = p.xz / 0.7;
+            vec2 cell = floor( q );
+            float h = surfHash( cell );
+            vec2 o = vec2( surfHash( cell + 7.1 ), surfHash( cell + 3.3 ) ) - 0.5;
+            float r = 0.09 + 0.14 * surfHash( cell + 1.7 );
+            float px = length( fwidth( q ) );
+            float stone = step( 0.9, h ) * ( 1.0 - smoothstep( r - px - 0.02, r + px, length( fract( q ) - 0.5 - o * 0.5 ) ) );
+            gSpeck = stone * ( 1.0 - smoothstep( 0.15, 0.5, px ) ) * open * ( 0.5 + bare );
+            c = mix( c, vec3( 0.34, 0.32, 0.29 ) * ( 0.7 + 0.6 * h ), gSpeck * 0.85 );
+          }
+          // contact: dark, damp, leaf-littered ground round everything standing on the land
+          gAO = texture2D( uContact, ( p.xz - uContactRect.xy ) * uContactRect.zw ).r;
+          c *= 1.0 - 0.45 * gAO;
+          c = mix( c, c * vec3( 0.85, 0.9, 0.78 ), gAO * open ); // (leaf litter: browner)
           // sand: warm and pale, its photo for grain; darker where wet
           float sandDetail = dot( texture2D( uSandMap, p.xz / 3.0 ).rgb, LUMA ) / ${MEAN.sand};
           vec3 sand = vec3( 0.8, 0.68, 0.49 ) * mix( 1.0, clamp( sandDetail, 0.4, 1.8 ), 0.5 );
@@ -165,6 +207,13 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
         }`,
       )
       .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        // (the contact map occludes the sky's light, not the sun's: the sun has its shadow maps)
+        reflectedLight.indirectDiffuse *= 1.0 - 0.7 * gAO * ( 1.0 - gSand * 0.5 );
+        reflectedLight.indirectSpecular *= 1.0 - 0.7 * gAO;`,
+      )
+      .replace(
         '#include <color_fragment>',
         '// (vertex colours applied with the rest of the ground, map_fragment)',
       )
@@ -174,6 +223,9 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
         {
           vec3 p = vGround;
           float rr = texture2D( uCliffRough, p.zy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).g * gTri.x + texture2D( uCliffRough, p.xy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).g * gTri.z + texture2D( uCliffRough, p.xz / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).g * gTri.y;
+          // the turf: laid-over blades have a faint sheen, pebbles are smoother than grass
+          roughnessFactor = mix( roughnessFactor, 0.78, gLodge );
+          roughnessFactor = mix( roughnessFactor, 0.6, gSpeck );
           roughnessFactor = mix( roughnessFactor, rr, gRock );
           roughnessFactor = mix( roughnessFactor, mix( 0.95, 0.4, gWet ), gSand );
           roughnessFactor = mix( roughnessFactor, 0.08, gFilm * ( 1.0 - gFoam ) );
@@ -219,7 +271,8 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
  */
 export function createCoastTerrain(
   cliff: PbrMaps,
-  cover: (x: number, z: number) => number = () => 0,
+  cover: (x: number, z: number) => number,
+  contact: { texture: THREE.Texture; rect: THREE.Vector4 },
 ): { mesh: THREE.Mesh; ready: Promise<void>; textures: THREE.Texture[] } {
   const grassC = srgb(0x5d7c32)
   const lush = srgb(0x44692a)
@@ -282,7 +335,7 @@ export function createCoastTerrain(
   const maps = { grass: pbrMaps(COAST_SURFACES.grass), sand: pbrMaps(COAST_SURFACES.sand), cliff }
   maps.grass.maps.roughnessMap.dispose()
   maps.sand.maps.roughnessMap.dispose()
-  const material = coastGround(outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })), maps)
+  const material = coastGround(outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })), maps, contact)
   const mesh = new THREE.Mesh(geometry, material)
   mesh.name = 'coast-terrain'
   mesh.castShadow = true
