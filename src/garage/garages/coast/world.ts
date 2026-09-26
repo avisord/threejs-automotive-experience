@@ -27,6 +27,8 @@ export interface CoastWorldOptions {
   onSun?(sun: { direction: THREE.Vector3; elevation: number; day: number; atmosphere: AtmosphereParams }): void
   /** dustier air in this box (under the roof) */
   dust?: THREE.Box3
+  /** plant the bed along the garage's glass (default true; the open-air overlook has no garage) */
+  planter?: boolean
 }
 
 export interface CoastWorld {
@@ -55,7 +57,7 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   const sky = createSky({ coverage: 0.38, scale: 0.42, density: 0.8 })
   const cumulus = createCumulus()
   // every plant, planned first: the terrain darkens the ground under the woods
-  const vegetation = createCoastVegetation({ bark: pbrMaps(COAST_SURFACES.palmBark) })
+  const vegetation = createCoastVegetation({ bark: pbrMaps(COAST_SURFACES.palmBark), planter: opts.planter ?? true })
   // the cliff photo is shared by the terrain's rock faces and the rocks themselves
   const cliffMaps = pbrMaps(COAST_SURFACES.cliff)
   const terrain = createCoastTerrain(cliffMaps, vegetation.layout.cover)

@@ -146,13 +146,13 @@ function placePalms(rand: () => number): PalmSpot[] {
 
 // ─── garden plants, shrubs and beach grass ─────────────────────────────────
 
-function placePlants(rand: () => number): PlantSpot[] {
+function placePlants(rand: () => number, planter: boolean): PlantSpot[] {
   const spots: PlantSpot[] = []
   const add = (x: number, z: number, kind: PlantKind, size: number, y = heightAt(x, z)) =>
     spots.push({ x, y, z, kind, size, turn: rand() * Math.PI * 2, tone: rand() })
   // the planter along the glass: a garden bed, tall at the ends, low in the middle so the view stays open
   // (planted at its ends only: anything in the middle stands right in front of the beach)
-  for (let x = -9.2; x < 10; x += 0.45 + rand() * 0.35) {
+  for (let x = -9.2; planter && x < 10; x += 0.45 + rand() * 0.35) {
     if (x > -5.5 && x < 6.5) continue
     const z = -7.9 + (rand() - 0.5) * 0.7
     const kind: PlantKind = Math.abs(x) > 7.5 ? (rand() < 0.5 ? 'strelitzia' : 'cycad') : (['agave', 'flax', 'bougainvillea'] as PlantKind[])[Math.floor(rand() * 3)]
@@ -324,13 +324,14 @@ function planWoods(): VegetationLayout {
   )
 }
 
-export function createCoastVegetation(opts: { bark: PbrMaps }): CoastVegetation {
+/** `planter`: plant the garage's bed along its glass (a room without the garage has none) */
+export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean }): CoastVegetation {
   const t0 = performance.now()
   const rand = seeded(2024)
   const group = new THREE.Group()
   group.name = 'coast-vegetation'
   const palms = createPalms(placePalms(rand), opts.bark)
-  const plants = createPlants(placePlants(rand))
+  const plants = createPlants(placePlants(rand, opts.planter))
   const grass = createCoastGrass(rand)
   const layout = planWoods()
   group.add(palms.group, plants.group, grass.group)

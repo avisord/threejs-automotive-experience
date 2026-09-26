@@ -201,8 +201,9 @@ export function createCoastRanges(): THREE.Mesh {
       const b = i * SEGMENTS + ((j + 1) % SEGMENTS)
       const c2 = a + SEGMENTS
       const d = b + SEGMENTS
-      if (!(under(a) && under(b) && under(c2))) index.push(a, c2, b)
-      if (!(under(b) && under(c2) && under(d))) index.push(b, c2, d)
+      // (wound so the faces point up: the rings run clockwise seen from above)
+      if (!(under(a) && under(b) && under(c2))) index.push(a, b, c2)
+      if (!(under(b) && under(c2) && under(d))) index.push(b, d, c2)
     }
   }
   const g = new THREE.BufferGeometry()
