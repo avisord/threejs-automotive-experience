@@ -66,9 +66,7 @@ const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, 0.6, 0)
 controls.enableDamping = true
 controls.dampingFactor = 0.06
-// right-drag (or ctrl/shift + drag) moves the orbit centre in the view plane; keys move it along x / y / z (below)
-controls.enablePan = true
-controls.screenSpacePanning = true
+controls.enablePan = false // keep the car centred
 controls.minPolarAngle = 0.02 // straight-down top view is fine
 controls.maxPolarAngle = THREE.MathUtils.degToRad(84) // …but never below the floor line
 controls.minDistance = 3.4
@@ -85,116 +83,14 @@ window.addEventListener('keydown', (e) => {
   else return
   e.preventDefault()
 })
-// ─── keyboard translate: move the orbit centre along x / y / z ─────────────
-// A/D or ←/→: x (the camera's right, level with the ground); W/S or ↑/↓: z (the camera's
-// forward, level); E/Q or PageUp/PageDown: y (up/down). Shift is faster; R or Home recentres
-// on the car. The camera moves with the centre, so the view translates without turning.
-/** where the orbit centre starts, and returns to — the car */
-const HOME_TARGET = new THREE.Vector3(0, 0.6, 0)
-const MOVE_KEYS: Record<string, [number, number, number]> = {
-  KeyA: [-1, 0, 0],
-  ArrowLeft: [-1, 0, 0],
-  KeyD: [1, 0, 0],
-  ArrowRight: [1, 0, 0],
-  KeyW: [0, 0, 1],
-  ArrowUp: [0, 0, 1],
-  KeyS: [0, 0, -1],
-  ArrowDown: [0, 0, -1],
-  KeyE: [0, 1, 0],
-  PageUp: [0, 1, 0],
-  KeyQ: [0, -1, 0],
-  PageDown: [0, -1, 0],
-}
-/** metres a second per metre of orbit distance — about a car length a second at the default view */
-const MOVE_SPEED = 0.5
-const movesHeld = new Set<string>()
-let moveFast = false
-/** true while typing in the panel (a number field, a colour hex) — keys belong to it then */
-const typing = (e: KeyboardEvent) => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement
-window.addEventListener('keydown', (e) => {
-  if (e.ctrlKey || e.metaKey || e.altKey || typing(e)) return
-  moveFast = e.shiftKey
-  if (e.code in MOVE_KEYS) movesHeld.add(e.code)
-  else if (e.code === 'KeyR' || e.code === 'Home') recentre()
-  else return
-  e.preventDefault()
-})
-window.addEventListener('keyup', (e) => {
-  movesHeld.delete(e.code)
-  moveFast = e.shiftKey
-})
-window.addEventListener('blur', () => movesHeld.clear()) // a key released in another window never comes up here
-
-/** move the orbit centre (and the camera with it) back to the car */
-function recentre(): void {
-  camera.position.add(offset.subVectors(HOME_TARGET, controls.target))
-  controls.target.copy(HOME_TARGET)
-  controls.update()
-  invalidate()
-}
-
-const moveRight = new THREE.Vector3()
-const moveForward = new THREE.Vector3()
-const move = new THREE.Vector3()
-/** step the held translate keys; true if the centre moved */
-function translateHeld(dt: number): boolean {
-  if (movesHeld.size === 0) return false
-  // the camera's right and forward, level with the ground, so W/S never dives into the floor
-  moveForward.subVectors(controls.target, camera.position).setY(0)
-  if (moveForward.lengthSq() < 1e-8) camera.getWorldDirection(moveForward).setY(0) // straight down: use the view's up
-  moveForward.normalize()
-  moveRight.set(-moveForward.z, 0, moveForward.x)
-  let x = 0
-  let y = 0
-  let z = 0
-  for (const code of movesHeld) {
-    const [dx, dy, dz] = MOVE_KEYS[code]
-    x += dx
-    y += dy
-    z += dz
-  }
-  const speed = MOVE_SPEED * camera.position.distanceTo(controls.target) * (moveFast ? 3 : 1) * dt
-  move.copy(moveRight).multiplyScalar(x).addScaledVector(moveForward, z)
-  move.y = y
-  if (move.lengthSq() === 0) return false
-  move.normalize().multiplyScalar(speed)
-  controls.target.add(move)
-  camera.position.add(move)
-  return true
-}
-
-/**
- * Keep the orbit centre inside the room (a little in from its walls, never under the floor):
- * the dolly-zoom in fitCameraInRoom() measures from it, and a centre outside the room turns
- * that inside out. The camera follows whatever it's pushed back by.
- */
-const clampedTarget = new THREE.Vector3()
-function keepTargetInRoom(): void {
-  const { min, max } = room.bounds
-  clampedTarget.set(
-    THREE.MathUtils.clamp(controls.target.x, min.x + 0.2, max.x - 0.2),
-    THREE.MathUtils.clamp(controls.target.y, Math.max(min.y, 0.1), max.y - 0.2),
-    THREE.MathUtils.clamp(controls.target.z, min.z + 0.2, max.z - 0.2),
-  )
-  if (clampedTarget.equals(controls.target)) return
-  camera.position.add(offset.subVectors(clampedTarget, controls.target))
-  controls.target.copy(clampedTarget)
-}
-
-/** advance OrbitControls, easing in any pending keyboard zoom and held translate keys; true if the camera moved */
+/** advance OrbitControls, easing in any pending keyboard zoom; true if the camera moved */
 function updateControls(dt: number): boolean {
-  const moved = translateHeld(dt)
-  let changed: boolean
-  if (Math.abs(zoomPending) < 1e-4) changed = controls.update()
-  else {
-    const step = zoomPending * Math.min(1, dt * 12)
-    zoomPending -= step
-    // radius *= e^step (clamped to min/max distance); dollyIn() runs update() itself
-    controls.dollyIn(Math.exp(step))
-    changed = true
-  }
-  keepTargetInRoom()
-  return moved || changed
+  if (Math.abs(zoomPending) < 1e-4) return controls.update()
+  const step = zoomPending * Math.min(1, dt * 12)
+  zoomPending -= step
+  // radius *= e^step (clamped to min/max distance); dollyIn() runs update() itself
+  controls.dollyIn(Math.exp(step))
+  return true
 }
 
 /** framing fov for the current viewport — set in resize(), widened by fitCameraInRoom() */
@@ -482,10 +378,9 @@ function applyQuality(): void {
 }
 
 // ─── hud ────────────────────────────────────────────────────────────────────
-const HINT = 'drag: orbit · right-drag, WASD/QE: move · scroll: zoom · R: reset'
 const hint = document.createElement('div')
 hint.className = 'hint'
-hint.textContent = HINT
+hint.textContent = 'drag to orbit · scroll or +/− to zoom'
 app.appendChild(hint)
 
 const fpsEl = document.createElement('div')
@@ -654,7 +549,6 @@ async function showGarage(id: string): Promise<void> {
   fade.classList.add('is-on')
   await new Promise((resolve) => setTimeout(resolve, FADE_MS))
   await swapRoom(def)
-  recentre() // a new room: start at its car again, not wherever the last one was left
   switchingTo = null
   panelNav.refresh()
   // uncover once the new room has been drawn
@@ -845,6 +739,7 @@ try {
   // no storage — default car
 }
 // ─── picking parts in 3D (Menu › Parts) ─────────────────────────────────────
+const HINT = 'drag to orbit · scroll or +/− to zoom'
 const PICK_HINT = 'click a part to select · shift+click to add · alt+click picks behind · esc clears'
 function setPicking(on: boolean): void {
   picking = on
