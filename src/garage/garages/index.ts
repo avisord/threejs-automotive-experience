@@ -1,3 +1,5 @@
+import { fujiPavilion } from './fuji'
+import { fujiMeadow } from './fuji-meadow'
 import { hangar } from './hangar'
 import { hexBay } from './hex-bay'
 import { lightWall } from './light-wall'
@@ -12,6 +14,6 @@ export { collectGlowMeshes, type GarageDef, type Room } from './kit'
  * file (see hex-bay.ts for the full contract, kit.ts for the shared parts)
  * and list it here.
  */
-export const GARAGES: GarageDef[] = [hexBay, studio, lightWall, underground, hangar]
+export const GARAGES: GarageDef[] = [hexBay, studio, lightWall, underground, hangar, fujiPavilion, fujiMeadow]
 
 export const DEFAULT_GARAGE = hexBay.id

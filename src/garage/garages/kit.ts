@@ -1,6 +1,9 @@
 import * as THREE from 'three'
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
+import type { AtmosphereParams } from '../atmosphere-effect'
 import type { GradeLook } from '../post'
+import type { SunPosition } from './sky'
+import type { InteriorLights } from './interior'
 
 /**
  * A garage: the room around the car and everything that lights it. Swapping
@@ -41,6 +44,36 @@ export interface Room {
   setReflectionScale(scale: number): void
   /** free every geometry, material, texture and render target the room made */
   dispose(): void
+  /**
+   * Resolves once assets the room loads in the background (a sky HDR) are in.
+   * The room is usable before; the app re-captures its environment map then.
+   */
+  ready?: Promise<void>
+  /** advance anything that moves on its own (water ripples); called for every frame drawn */
+  update?(dt: number): void
+  /**
+   * Open-air rooms: meshes lit by the open sky. The room's own environment
+   * map is captured from inside (under a roof, for a pavilion) — the land
+   * outside gets a second one, captured from `probe` out in the open.
+   */
+  outdoor?: {
+    root: THREE.Object3D
+    probe: THREE.Vector3
+    /** around environment captures: hide what mustn't be in them (a sun disc's spike smears in the prefilter) */
+    beforeCapture?(): void
+    afterCapture?(): void
+  }
+  /** a sun the user can move (Menu › Garage); the app re-captures the environment after a move */
+  sun?: {
+    get(): SunPosition
+    set(sun: SunPosition): void
+  }
+  /** the room's air, for the atmosphere effect (haze, light shafts) */
+  atmosphere?: AtmosphereParams
+  /** something that casts the sun's shadow changed (a car arrived or left): re-render its shadow map */
+  shadowsChanged?(): void
+  /** the room's own light fittings, in groups the user can switch, dim and warm (Menu › Garage) */
+  interior?: InteriorLights
 }
 
 /**
@@ -139,6 +172,78 @@ export function floorTileTexture(repeat: [number, number], seam = '#3a3a3a'): TH
   return texture
 }
 
+/**
+ * Photographed PBR surfaces in `public/textures/<name>/`: 2k colour (ambient
+ * occlusion baked in), OpenGL normal and roughness maps, from Poly Haven (CC0).
+ * `tile` is how many metres one copy of the texture covers.
+ */
+export const SURFACES = {
+  /** polished grey concrete floor — Poly Haven "Concrete Floor Worn 001" */
+  concreteFloor: { dir: 'concrete-floor', tile: 3 },
+  /** cast concrete panels with seams and pores — Poly Haven "Concrete" */
+  concretePanels: { dir: 'concrete-panels', tile: 4 },
+  /** fibrous Japanese cedar (sugi) bark, 1 × 2 m — Poly Haven "Japanese Cedar Bark" */
+  cedarBark: { dir: 'japanese-cedar-bark', tile: 1 },
+  /** short grass over soil, 2 × 2 m — Poly Haven "Sparse Grass" (the terrain uses it for detail, not colour) */
+  sparseGrass: { dir: 'sparse-grass', tile: 2 },
+  /** dry river pebbles, 2 × 2 m — Poly Haven "Dry River Pebbles" */
+  riverPebbles: { dir: 'river-pebbles', tile: 2 },
+} as const
+
+export interface PbrMaps {
+  /** spread into a MeshStandardMaterial */
+  maps: { map: THREE.Texture; normalMap: THREE.Texture; roughnessMap: THREE.Texture }
+  /** resolves when all three are in (never rejects — a failed map just stays blank) */
+  ready: Promise<void>
+}
+
+/**
+ * Load a surface's maps, repeated `repeat` times across the geometry's uv 0–1
+ * (pass [1, 1] for geometry whose uvs are already in tiles, see boxUV). Each
+ * call loads its own textures — a room disposes everything it made.
+ */
+export function pbrMaps(surface: { dir: string }, repeat: [number, number] = [1, 1]): PbrMaps {
+  const loader = new THREE.TextureLoader()
+  const pending: Promise<unknown>[] = []
+  const load = (file: string, color: boolean) => {
+    const url = `/textures/${surface.dir}/${file}.webp`
+    let done!: () => void
+    pending.push(new Promise<void>((resolve) => (done = resolve)))
+    const texture = loader.load(url, () => done(), undefined, (err) => {
+      console.error(`[garage] texture failed: ${url}`, err)
+      done()
+    })
+    texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping
+    texture.repeat.set(...repeat)
+    texture.anisotropy = 8
+    return texture
+  }
+  const maps = { map: load('color', true), normalMap: load('normal', false), roughnessMap: load('rough', false) }
+  return { maps, ready: Promise.all(pending).then(() => {}) }
+}
+
+/**
+ * Give a box geometry uvs in world units (one unit = `tile` metres) instead of
+ * 0–1 per face, so boxes of any size share one texture scale — a long roof
+ * slab and a short rim look like the same concrete.
+ */
+export function boxUV(geometry: THREE.BufferGeometry, tile: number): THREE.BufferGeometry {
+  const pos = geometry.attributes.position
+  const nrm = geometry.attributes.normal
+  const uv = geometry.attributes.uv
+  for (let i = 0; i < pos.count; i++) {
+    const ax = Math.abs(nrm.getX(i))
+    const ay = Math.abs(nrm.getY(i))
+    const az = Math.abs(nrm.getZ(i))
+    const [u, v] =
+      ax >= ay && ax >= az ? [pos.getZ(i), pos.getY(i)] : ay >= az ? [pos.getX(i), pos.getZ(i)] : [pos.getX(i), pos.getY(i)]
+    uv.setXY(i, u / tile, v / tile)
+  }
+  uv.needsUpdate = true
+  return geometry
+}
+
 /** Tileable blotchy noise for concrete and plaster: white-ish, tint it with the material colour. */
 export function concreteTexture(repeat: [number, number], contrast = 1): THREE.CanvasTexture {
   const size = 512
@@ -193,14 +298,22 @@ const BlurredReflectorShader = {
     blur: { value: 0.012 },
     /** mip level sampled — each step halves the resolution */
     lod: { value: 1.5 },
+    /**
+     * Reflectance looking straight down, as a fraction of `color` (1 = no Fresnel). A polished
+     * floor reflects a few percent seen from above and most of the light at a grazing angle —
+     * without it, a floor seen from a standing height mirrored the whole bright sky past the roof.
+     */
+    fresnel: { value: 1 },
   },
   vertexShader: /* glsl */ `
     uniform mat4 textureMatrix;
     varying vec4 vUv;
+    varying vec3 vWorld;
     #include <common>
     #include <logdepthbuf_pars_vertex>
     void main() {
       vUv = textureMatrix * vec4( position, 1.0 );
+      vWorld = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
       #include <logdepthbuf_vertex>
     }`,
@@ -209,7 +322,9 @@ const BlurredReflectorShader = {
     uniform sampler2D tDiffuse;
     uniform float blur;
     uniform float lod;
+    uniform float fresnel;
     varying vec4 vUv;
+    varying vec3 vWorld;
     #include <logdepthbuf_pars_fragment>
     void main() {
       #include <logdepthbuf_fragment>
@@ -222,7 +337,10 @@ const BlurredReflectorShader = {
         vec2 offset = vec2( cos( a ), sin( a ) ) * sqrt( fi / float( TAPS ) ) * blur;
         sum += textureLod( tDiffuse, uv + offset, lod ).rgb;
       }
-      gl_FragColor = vec4( color * sum / float( TAPS ), 1.0 );
+      // Schlick, from the reflectance straight down to 1 at grazing (the floor's normal is +y)
+      float cosV = clamp( normalize( cameraPosition - vWorld ).y, 0.0, 1.0 );
+      float f = fresnel + ( 1.0 - fresnel ) * pow( 1.0 - cosV, 5.0 );
+      gl_FragColor = vec4( color * f * sum / float( TAPS ), 1.0 );
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`,
@@ -236,6 +354,8 @@ export interface FloorOptions {
   /** how soft the reflection is, in screen uv (0.012 = polished epoxy, lower = wet) */
   blur?: number
   lod?: number
+  /** reflectance seen straight down, relative to `tint` (default 1: no Fresnel falloff) */
+  fresnel?: number
   /** the surface laid over the mirror; its opacity sets how much reflection shows through */
   surface: THREE.MeshStandardMaterial
 }
@@ -259,6 +379,7 @@ export function createFloor(parent: THREE.Object3D, opts: FloorOptions): Floor {
   const uniforms = (reflector.material as THREE.ShaderMaterial).uniforms
   uniforms.blur.value = opts.blur ?? 0.012
   uniforms.lod.value = opts.lod ?? 1.5
+  uniforms.fresnel.value = opts.fresnel ?? 1
   reflector.rotation.x = -Math.PI / 2
   // the blur samples a mip level, so the mirror target needs a mip chain
   const mirrorTexture = reflector.getRenderTarget().texture
@@ -311,6 +432,7 @@ export interface RoomOptions {
   bounds: [min: [number, number, number], max: [number, number, number]]
   background: THREE.ColorRepresentation
   environmentIntensity: number
+  ready?: Promise<void>
 }
 
 export function assembleRoom(group: THREE.Group, floor: Floor, opts: RoomOptions): Room {
@@ -324,18 +446,27 @@ export function assembleRoom(group: THREE.Group, floor: Floor, opts: RoomOptions
     resize: floor.resize,
     setReflectionScale: floor.setReflectionScale,
     dispose: () => disposeTree(group),
+    ready: opts.ready,
   }
 }
 
-function disposeTree(root: THREE.Object3D): void {
+/** free every geometry, material, texture, light and mirror under `root` */
+export function disposeTree(root: THREE.Object3D): void {
   root.traverse((obj) => {
     if (obj instanceof Reflector) {
       obj.dispose() // render target and material, not the geometry
       obj.geometry.dispose()
       return
     }
+    // a shadow-casting light owns its shadow map's render target (colour + depth textures)
+    const light = obj as THREE.Light
+    if (light.isLight) {
+      light.dispose()
+      return
+    }
+    // meshes, and lines and points too (a landscape's power lines)
     const mesh = obj as THREE.Mesh
-    if (!mesh.isMesh) return
+    if (!mesh.isMesh && !(obj as THREE.Line).isLine && !(obj as THREE.Points).isPoints) return
     mesh.geometry.dispose()
     for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       for (const value of Object.values(material)) if ((value as THREE.Texture | null)?.isTexture) (value as THREE.Texture).dispose()

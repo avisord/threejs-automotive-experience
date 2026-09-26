@@ -1,16 +1,15 @@
 import type * as THREE from 'three'
-import type { PaintStyle } from '../paint'
 import { meshLabel, type GroupEditor, type MaterialGroup } from '../groups'
 import type { Nav, Page } from './panel'
-import { paintControls } from './paint-controls'
+import { materialControls } from './material-controls'
 import { actionButton, el, section, toggle } from './widgets'
-
-const GROUP_STYLES: PaintStyle[] = ['factory', 'solid', 'stripes', 'two-tone', 'carbon', 'camo', 'glow']
 
 export interface PartsState {
   editor(): GroupEditor | undefined
   picking(): boolean
   setPicking(on: boolean): void
+  /** shown while there's no car to edit: loading, or an empty bay */
+  placeholder(): string
 }
 
 function button(text: string, onClick: () => void, className = 'cfg-mini'): HTMLButtonElement {
@@ -96,10 +95,8 @@ export function partsPage(state: PartsState): Page {
 
     s.append(
       el('div', 'cfg-label cfg-sub', 'Material'),
-      ...paintControls({
+      ...materialControls({
         settings: group.material,
-        styles: GROUP_STYLES,
-        factoryLabel: 'Original',
         set(patch, structural) {
           editor.setMaterial(group.id, patch)
           if (structural) nav.refresh()
@@ -115,7 +112,7 @@ export function partsPage(state: PartsState): Page {
     render(body, nav) {
       const editor = state.editor()
       if (!editor) {
-        body.append(el('p', 'cfg-empty', 'Loading car…'))
+        body.append(el('p', 'cfg-empty', state.placeholder()))
         return
       }
       editor.setOverlaysVisible(true)

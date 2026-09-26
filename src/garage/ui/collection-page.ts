@@ -1,4 +1,4 @@
-import { CARS } from '../cars'
+import { CARS, NO_CAR } from '../cars'
 import type { Page } from './panel'
 import { el } from './widgets'
 
@@ -17,6 +17,24 @@ export function collectionPage(state: CollectionState): Page {
     hint: `Choose a car · ${CARS.length} in the collection`,
     render(body, nav) {
       const grid = el('div', 'cfg-cars')
+
+      // an empty bay: the garage on its own, for its lighting and scenery
+      const empty = state.current() === NO_CAR
+      const none = el('button', `cfg-car cfg-car-none${empty ? ' is-active' : ''}`)
+      none.type = 'button'
+      none.append(
+        el('span', 'cfg-car-make', 'No car'),
+        el('span', 'cfg-car-model', 'Empty bay'),
+        el('span', 'cfg-car-tag', 'Just the garage — its light, floor and walls'),
+      )
+      if (empty) none.append(el('span', 'cfg-car-badge', 'In the bay'))
+      none.addEventListener('click', () => {
+        if (empty) return
+        state.select(NO_CAR)
+        nav.refresh()
+      })
+      grid.append(none)
+
       for (const car of CARS) {
         const active = state.current() === car.id
         const loading = state.loading() === car.id

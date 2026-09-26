@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { MATERIALS, type MaterialId, type SurfaceParams } from './materials'
 
 /**
  * How a part's albedo is produced. `factory` keeps the model's own texture
@@ -6,18 +7,17 @@ import * as THREE from 'three'
  * car-space position, so it needs no UVs and wraps the atlas-mapped body cleanly.
  */
 export type PaintStyle = 'factory' | 'solid' | 'stripes' | 'two-tone' | 'carbon' | 'camo' | 'glow'
-export type Finish = 'factory' | 'gloss' | 'metallic' | 'satin' | 'matte' | 'chrome'
 
 export interface PaintSettings {
-  style: PaintStyle
+  /** entry from the material library (see materials.ts) */
+  material: MaterialId
   /** main colour (css hex) */
   colorA: string
   /** secondary colour — stripes, upper tone, dark camo */
   colorB: string
   /** hue rotation for the factory texture, degrees */
   hue: number
-  finish: Finish
-  /** override the surface alpha (glass tint); null keeps the texture's */
+  /** override the surface alpha (window tint); null keeps the material's own */
   opacity: number | null
 }
 
@@ -29,24 +29,6 @@ const STYLE_ID: Record<PaintStyle, number> = {
   carbon: 4,
   camo: 5,
   glow: 1, // solid albedo; the light comes from the emissive set in apply()
-}
-
-/** HDR strength of the glow style — enough to clear the lights-only bloom threshold */
-const GLOW_INTENSITY = 1.5
-
-interface FinishParams {
-  roughness: number
-  metalness: number
-  clearcoat: number
-  clearcoatRoughness: number
-}
-
-const FINISHES: Record<Exclude<Finish, 'factory'>, FinishParams> = {
-  gloss: { roughness: 0.3, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03 },
-  metallic: { roughness: 0.32, metalness: 0.8, clearcoat: 1, clearcoatRoughness: 0.05 },
-  satin: { roughness: 0.5, metalness: 0.15, clearcoat: 0.35, clearcoatRoughness: 0.4 },
-  matte: { roughness: 0.88, metalness: 0, clearcoat: 0, clearcoatRoughness: 0 },
-  chrome: { roughness: 0.06, metalness: 1, clearcoat: 0, clearcoatRoughness: 0 },
 }
 
 const PAINT_PARS = /* glsl */ `
@@ -169,6 +151,7 @@ export function createPaintMaterial(
     material.clearcoatRoughness = 0.03
   }
 
+  // everything the library may overwrite, so "Original" can put it all back
   const factory = {
     roughness: material.roughness,
     metalness: material.metalness,
@@ -176,9 +159,18 @@ export function createPaintMaterial(
     metalnessMap: material.metalnessMap,
     clearcoat: material.clearcoat,
     clearcoatRoughness: material.clearcoatRoughness,
+    iridescence: material.iridescence,
+    iridescenceIOR: material.iridescenceIOR,
+    iridescenceThicknessRange: material.iridescenceThicknessRange,
+    sheen: material.sheen,
+    sheenRoughness: material.sheenRoughness,
+    sheenColor: material.sheenColor.clone(),
     emissive: material.emissive.clone(),
     emissiveIntensity: material.emissiveIntensity,
     emissiveMap: material.emissiveMap,
+    transparent: material.transparent,
+    opacity: material.opacity,
+    depthWrite: material.depthWrite,
   }
 
   const uniforms = {
@@ -212,32 +204,53 @@ export function createPaintMaterial(
   return {
     material,
     apply(s) {
-      uniforms.uStyle.value = STYLE_ID[s.style]
+      const def = MATERIALS[s.material] ?? MATERIALS.original
+      const surface: SurfaceParams = def.surface
+      uniforms.uStyle.value = STYLE_ID[def.style]
       uniforms.uColorA.value.set(s.colorA)
       uniforms.uColorB.value.set(s.colorB)
       uniforms.uHue.value = THREE.MathUtils.degToRad(s.hue)
       uniforms.uOpacity.value = s.opacity ?? -1
 
-      const params = s.finish === 'factory' ? factory : FINISHES[s.finish]
-      // custom finishes drop the factory roughness/metal maps so the numbers mean what they say
-      const maps = s.finish === 'factory' ? factory : { roughnessMap: null, metalnessMap: null }
-      const glow = s.style === 'glow'
-      const emissiveMap = glow ? null : factory.emissiveMap
-      const needsRecompile = material.roughnessMap !== maps.roughnessMap || material.emissiveMap !== emissiveMap
-      if (glow) material.emissive.set(s.colorA)
-      else material.emissive.copy(factory.emissive)
-      material.emissiveIntensity = glow ? GLOW_INTENSITY : factory.emissiveIntensity
+      const original = def.style === 'factory'
+      const glow = def.style === 'glow'
+      const emissiveMap = original ? factory.emissiveMap : null
+      // dropping the factory roughness/metal maps is what lets the library's
+      // numbers mean what they say; changing map presence needs a recompile
+      const roughnessMap = original ? factory.roughnessMap : null
+      const needsRecompile = material.roughnessMap !== roughnessMap || material.emissiveMap !== emissiveMap
+
+      material.roughness = original ? factory.roughness : surface.roughness
+      material.metalness = original ? factory.metalness : surface.metalness
+      material.roughnessMap = roughnessMap
+      material.metalnessMap = original ? factory.metalnessMap : null
+      material.clearcoat = original ? factory.clearcoat : (surface.clearcoat ?? 0)
+      material.clearcoatRoughness = original ? factory.clearcoatRoughness : (surface.clearcoatRoughness ?? 0)
+      material.iridescence = original ? factory.iridescence : (surface.iridescence ?? 0)
+      material.iridescenceIOR = original ? factory.iridescenceIOR : (surface.iridescenceIOR ?? 1.3)
+      material.iridescenceThicknessRange = original
+        ? factory.iridescenceThicknessRange
+        : [...(surface.iridescenceThicknessRange ?? [100, 400])]
+      material.sheen = original ? factory.sheen : (surface.sheen ?? 0)
+      material.sheenRoughness = original ? factory.sheenRoughness : (surface.sheenRoughness ?? 1)
+      if (original) material.sheenColor.copy(factory.sheenColor)
+      else material.sheenColor.set(surface.sheenColor ?? 0xffffff)
+
+      material.emissive.copy(glow ? material.emissive.set(s.colorA) : factory.emissive)
+      material.emissiveIntensity = glow ? (surface.emissive ?? 1.5) : factory.emissiveIntensity
       material.emissiveMap = emissiveMap
       // picked up by the lights-only bloom (see collectGlowMeshes)
       material.userData.glow = glow
-      Object.assign(material, {
-        roughness: params.roughness,
-        metalness: params.metalness,
-        clearcoat: params.clearcoat,
-        clearcoatRoughness: params.clearcoatRoughness,
-        roughnessMap: maps.roughnessMap,
-        metalnessMap: maps.metalnessMap,
-      })
+      // the path tracer can't run the pattern shader: it gets the main colour
+      // instead (null = the material's own colour and texture already are it)
+      material.userData.albedo = original ? null : new THREE.Color(s.colorA)
+
+      // see-through materials (glass) blend; everything else draws solid
+      const alpha = s.opacity ?? (original ? null : (surface.opacity ?? null))
+      material.transparent = original ? factory.transparent : alpha !== null
+      material.opacity = alpha ?? (original ? factory.opacity : 1)
+      material.depthWrite = original ? factory.depthWrite : alpha === null
+
       if (needsRecompile) material.needsUpdate = true
     },
   }

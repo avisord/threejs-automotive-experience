@@ -1,6 +1,6 @@
 import { PART_DEFS, PRESETS, presetConfig, type CarConfigurator, type PartDef } from '../configurator'
 import type { Nav, Page } from './panel'
-import { paintControls } from './paint-controls'
+import { materialControls } from './material-controls'
 import { actionButton, el, section, slider } from './widgets'
 
 /**
@@ -8,7 +8,7 @@ import { actionButton, el, section, slider } from './widgets'
  * re-render the page; pickers and sliders only update the car so the control
  * under the pointer keeps its drag.
  */
-export function carPage(current: () => CarConfigurator | undefined): Page {
+export function carPage(current: () => CarConfigurator | undefined, placeholder: () => string = () => 'Loading car…'): Page {
   let activePreset: string | null = null
   let lastCar: string | null = null
 
@@ -28,10 +28,9 @@ export function carPage(current: () => CarConfigurator | undefined): Page {
 
     const livery = configurator.profile.livery && (def.id === 'body' || def.id === 'wing')
     s.append(
-      ...paintControls({
+      ...materialControls({
         settings: c,
-        styles: def.styles,
-        factoryLabel: livery ? 'Livery' : 'Factory',
+        originalLabel: livery ? 'Livery' : 'Original',
         set(patch, structural) {
           activePreset = null
           configurator.set(def.id, patch)
@@ -48,7 +47,7 @@ export function carPage(current: () => CarConfigurator | undefined): Page {
     render(body, nav) {
       const configurator = current()
       if (!configurator) {
-        body.append(el('p', 'cfg-empty', 'Loading car…'))
+        body.append(el('p', 'cfg-empty', placeholder()))
         return
       }
       if (configurator.profile.id !== lastCar) {

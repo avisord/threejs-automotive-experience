@@ -657,3 +657,167 @@ body,
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
 }
+
+.cfg-subsection {
+  padding: 10px 0 0;
+  border: 0;
+  gap: 6px;
+}
+
+/* ─── collection: the empty-bay card ─── */
+.cfg-car-none {
+  border-style: dashed;
+  background: transparent;
+}
+
+/* ─── video: shot list ─── */
+.cfg-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+}
+
+.cfg-select:hover,
+.cfg-select:focus {
+  border-color: var(--cfg-accent);
+  outline: none;
+}
+
+.cfg-select option {
+  background: #0d1015;
+}
+
+.cfg-shot {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cfg-shot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cfg-shot-no {
+  font: 11px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.1em;
+  color: var(--cfg-accent);
+}
+
+.cfg-shot-tools {
+  display: flex;
+  gap: 4px;
+}
+
+.cfg-shot-tools .cfg-mini {
+  padding: 5px 7px;
+}
+
+.cfg-mini:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.cfg-error {
+  color: #ff7a7a;
+}
+
+/* ─── video: the director has the view ─── */
+.is-directing .cfg,
+.is-directing .hint,
+.is-directing .fps,
+.is-directing .venue {
+  display: none;
+}
+
+.rec {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px 10px 16px;
+  font: 11px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(8, 10, 14, 0.72);
+  border: 1px solid rgba(53, 224, 255, 0.18);
+  border-radius: 10px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 10;
+}
+
+/* exporting renders at the video size, not the window's — cover the stretched canvas */
+.rec.is-export {
+  inset: 0;
+  transform: none;
+  flex-direction: column;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+  background: #07080b;
+}
+
+.rec-label {
+  min-width: 190px;
+}
+
+.rec-track {
+  width: 220px;
+  height: 2px;
+  background: rgba(53, 224, 255, 0.15);
+  overflow: hidden;
+}
+
+.rec-track i {
+  display: block;
+  height: 100%;
+  background: #35e0ff;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.rec-stop {
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.rec-stop:hover {
+  border-color: #35e0ff;
+}
+
+/* Menu › Garage › Interior lights: a dot of the light's colour by its warmth, dimmed groups that are off */
+.cfg-kelvin {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: 0 0 6px var(--swatch);
+  vertical-align: -1px;
+}
+
+.cfg-part.is-off .cfg-slider,
+.cfg-part.is-off .cfg-note {
+  opacity: 0.4;
+}

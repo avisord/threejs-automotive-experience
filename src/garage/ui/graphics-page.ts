@@ -11,6 +11,7 @@ import {
   type Reflections,
   type Smaa,
   type ToneMapper,
+  type VolumetricQuality,
 } from '../post'
 import type { Page } from './panel'
 import { actionButton, el, section, segmented, slider, toggle } from './widgets'
@@ -29,11 +30,14 @@ const TONE_MAPPER: Record<ToneMapper, string> = { agx: 'AgX', aces: 'ACES', neut
 
 const LOOK_LABEL: Record<GradeLook, string> = {
   natural: 'Natural',
+  golden: 'Golden hour',
   cyber: 'Cyber',
   warm: 'Warm',
   cold: 'Cold',
   noir: 'Noir',
 }
+
+const VOLUMETRIC_LABEL: Record<VolumetricQuality, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 const PRESET_LABEL: Record<QualityPreset, string> = { low: 'Low', medium: 'Medium', high: 'High', ultra: 'Ultra' }
 
@@ -50,6 +54,13 @@ const REFLECTION_LABEL: Record<Reflections, string> = { off: 'Off', low: 'Low', 
 
 const ANISO_OPTIONS = ['1', '2', '4', '8', '16'] as const
 const ANISO_LABEL = Object.fromEntries(ANISO_OPTIONS.map((v) => [v, `${v}×`])) as Record<(typeof ANISO_OPTIONS)[number], string>
+
+const PT_SAMPLES = ['64', '256', '1024', '4096'] as const
+const PT_SAMPLES_LABEL = Object.fromEntries(PT_SAMPLES.map((v) => [v, v])) as Record<(typeof PT_SAMPLES)[number], string>
+const PT_BOUNCES = ['2', '4', '6', '8'] as const
+const PT_BOUNCES_LABEL = Object.fromEntries(PT_BOUNCES.map((v) => [v, v])) as Record<(typeof PT_BOUNCES)[number], string>
+const PT_RES = ['0.5', '0.75', '1'] as const
+const PT_RES_LABEL: Record<(typeof PT_RES)[number], string> = { '0.5': '50%', '0.75': '75%', '1': '100%' }
 
 const fixed = (digits: number, unit = '') => (v: number) => `${v.toFixed(digits)}${unit}`
 const signed = (digits: number, unit = '') => (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(digits)}${unit}`
@@ -120,6 +131,51 @@ export function graphicsPage(post: PostProcessing): Page {
         }),
       )
       body.append(detail)
+
+      // ─── path tracing ───────────────────────────────────────────────────
+      const pt = s.pathTracing
+      const trace = section(
+        'Path tracing',
+        toggle(pt.enabled, 'path tracing', (on) => {
+          post.set('pathTracing', { enabled: on })
+          structural()
+        }),
+      )
+      trace.append(
+        el(
+          'p',
+          'cfg-note',
+          pt.enabled
+            ? 'Once the camera rests, light is traced for real — soft shadows, bounce light, true reflections — and the picture refines until it reaches the sample count. Moving shows the fast renderer again.'
+            : 'Photoreal stills: when the camera rests, trace light paths instead of rasterising. Heavy on the GPU while it refines, free once it’s done.',
+        ),
+      )
+      if (pt.enabled) {
+        trace.append(
+          el('div', 'cfg-label cfg-sub', 'Samples per pixel'),
+          segmented(PT_SAMPLES, PT_SAMPLES_LABEL, String(pt.samples) as (typeof PT_SAMPLES)[number], (v) => {
+            post.set('pathTracing', { samples: Number(v) })
+            structural()
+          }),
+          el('div', 'cfg-label cfg-sub', 'Bounces'),
+          segmented(PT_BOUNCES, PT_BOUNCES_LABEL, String(pt.bounces) as (typeof PT_BOUNCES)[number], (v) => {
+            post.set('pathTracing', { bounces: Number(v) })
+            structural()
+          }),
+          el('div', 'cfg-label cfg-sub', 'Resolution'),
+          segmented(PT_RES, PT_RES_LABEL, String(pt.resolution) as (typeof PT_RES)[number], (v) => {
+            post.set('pathTracing', { resolution: Number(v) })
+            structural()
+          }),
+          el('div', 'cfg-label cfg-sub', 'Denoise'),
+          segmented(['on', 'off'] as const, { on: 'On', off: 'Off' }, pt.denoise ? 'on' : 'off', (v) => {
+            post.set('pathTracing', { denoise: v === 'on' })
+            structural()
+          }),
+          el('p', 'cfg-note', 'Paint patterns (stripes, carbon, camo) are traced in their main colour, and headlight beams — a raster effect — fade out as the traced image comes in.'),
+        )
+      }
+      body.append(trace)
 
       // ─── ambient occlusion ──────────────────────────────────────────────
       const ao = section(
@@ -218,6 +274,59 @@ export function graphicsPage(post: PostProcessing): Page {
         )
       }
       body.append(vignette)
+
+      // ─── atmosphere ─────────────────────────────────────────────────────
+      const air = section(
+        'Atmosphere',
+        toggle(s.atmosphere.enabled, 'atmosphere', (on) => {
+          post.set('atmosphere', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.atmosphere.enabled) {
+        air.append(
+          slider('Strength', s.atmosphere.strength, { min: 0, max: 3, step: 0.05 }, fixed(2), (v) => post.set('atmosphere', { strength: v })),
+        )
+      }
+      air.append(el('p', 'cfg-note', 'Open-air garages: distance haze over the land, thinning with height.'))
+      body.append(air)
+
+      // ─── volumetric light ───────────────────────────────────────────────
+      const shafts = section(
+        'Volumetric light',
+        toggle(s.volumetric.enabled, 'volumetric light', (on) => {
+          post.set('volumetric', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.volumetric.enabled) {
+        shafts.append(
+          slider('Strength', s.volumetric.strength, { min: 0, max: 4, step: 0.05 }, fixed(2), (v) => post.set('volumetric', { strength: v })),
+          el('div', 'cfg-label cfg-sub', 'Quality'),
+          segmented(Object.keys(VOLUMETRIC_LABEL) as VolumetricQuality[], VOLUMETRIC_LABEL, s.volumetric.quality, (quality) => {
+            post.set('volumetric', { quality })
+            structural() // redraw the page so the picked option shows
+          }),
+        )
+      }
+      shafts.append(el('p', 'cfg-note', 'Open-air garages: sunbeams through the air where the sun gets in — through the skylight, past the columns.'))
+      body.append(shafts)
+
+      // ─── lens flare ─────────────────────────────────────────────────────
+      const flare = section(
+        'Lens flare',
+        toggle(s.lensFlare.enabled, 'lens flare', (on) => {
+          post.set('lensFlare', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.lensFlare.enabled) {
+        flare.append(
+          slider('Intensity', s.lensFlare.intensity, { min: 0, max: 3, step: 0.05 }, fixed(2), (v) => post.set('lensFlare', { intensity: v })),
+        )
+      }
+      flare.append(el('p', 'cfg-note', 'Glare, starburst and ghosts when the sun is in view; anything in front of it puts them out.'))
+      body.append(flare)
 
       body.append(
         actionButton('Reset graphics', () => {
