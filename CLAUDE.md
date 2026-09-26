@@ -69,8 +69,13 @@ Rendering model:
   (camera moved, setting changed, panel interaction, car/garage load). Anything that
   changes the picture outside those paths must call `invalidate()` (console:
   `garage.invalidate()`). Hidden tabs cancel the rAF loop entirely.
-- Camera: OrbitControls, never below 84° polar, clamped inside `room.bounds` with FOV
-  compensation (dolly-zoom) and a view offset so the car sits beside the panel.
+- Camera: OrbitControls, never below 84° polar, zoom 3.4–100 m, clamped inside `room.bounds`
+  with FOV compensation (dolly-zoom) and a view offset so the car sits beside the panel.
+  The orbit centre can be moved: right-drag pans (screen space), A/D W/S E/Q (or arrows,
+  PageUp/Down) translate it along the camera's level right / forward and world up at 0.5 ×
+  orbit distance per second (shift ×3), R/Home or a garage switch recentres on the car.
+  `keepTargetInRoom()` keeps the centre inside `room.bounds` — the dolly-zoom measures from
+  it and inverts if it's outside (Fuji Meadow's bounds are ±24 m).
 - Environment map is captured from the room itself (PMREM) whenever a garage is
   installed, so the car reflects the real lights.
 - While a video preview/export runs (`directing` in `main.ts`) the app's frame loop draws
