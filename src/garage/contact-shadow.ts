@@ -26,7 +26,7 @@ export function bakeContactShadow(
   object: THREE.Object3D,
   opts: ContactShadowOptions,
 ): THREE.Mesh {
-  const { width, depth, height, resolution = 1024, blur = 3, darkness = 1.5, opacity = 0.95 } = opts
+  const { width, depth, height, resolution = 1024, blur = 6, darkness = 1.3, opacity = 0.9 } = opts
 
   const target = new THREE.WebGLRenderTarget(resolution, resolution)
   const scratch = new THREE.WebGLRenderTarget(resolution, resolution)
@@ -37,12 +37,15 @@ export function bakeContactShadow(
   cam.position.set(center.x, 0, center.z)
   cam.updateMatrixWorld()
 
-  // alpha = how close the surface is to the ground
+  // alpha = how close the surface is to the ground, falling off quadratically: tyres and sills
+  // right on the floor darken it most, the underbody a little way up much less. (Linear and ×1.5
+  // it clamped to 1 under the whole car — a flat black slab whose edge read as cut off.)
   const depthMat = new THREE.MeshDepthMaterial()
   depthMat.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
-      `gl_FragColor = vec4( vec3( 0.0 ), ( 1.0 - fragCoordZ ) * ${darkness.toFixed(3)} );`,
+      `float near = 1.0 - fragCoordZ;
+      gl_FragColor = vec4( vec3( 0.0 ), near * near * ${darkness.toFixed(3)} );`,
     )
   }
   depthMat.side = THREE.DoubleSide
@@ -87,8 +90,11 @@ export function bakeContactShadow(
     renderer.setRenderTarget(target)
     quad.render(renderer)
   }
+  // three passes, wide to narrow: a broad soft falloff (~0.5 m) round the car, the tighter passes
+  // smoothing the box-filter banding. One 3-tap-wide pass left a ~0.25 m edge that looked clipped.
   blurPass(blur)
-  blurPass(blur * 0.4) // second, tighter pass smooths the box-filter banding
+  blurPass(blur * 0.6)
+  blurPass(blur * 0.3)
 
   renderer.setRenderTarget(prevTarget)
   renderer.setClearColor(prevClear, prevAlpha)
