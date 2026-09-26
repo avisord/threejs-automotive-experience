@@ -24,6 +24,7 @@ import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { DEFAULT_CAR_SIZE, type CameraPose } from './camera-moves'
 import type { Stage } from './director'
 import { videoPage } from './ui/video-page'
+import { createCarPlacement, type CarPlacement } from './placement'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -427,10 +428,47 @@ interface Bay {
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
 
+// ─── car placement: drag the whole car around the room (Menu › Car › Position) ───
+const placement = createCarPlacement({
+  camera,
+  dom: renderer.domElement,
+  scene,
+  bounds: () => room.bounds,
+  dragging: (on) => (controls.enabled = !on), // the drag is the gizmo's, not an orbit
+  changed: () => invalidate(),
+  moved() {
+    // the car's lamps bake their shadow maps once — re-bake them where the car now stands
+    bay?.root.traverse((o) => {
+      const spot = o as THREE.SpotLight
+      if (spot.isSpotLight && spot.castShadow) spot.shadow.needsUpdate = true
+    })
+    room.shadowsChanged?.()
+    traceSceneChanged()
+    invalidate(2)
+    panelNav?.refresh() // the Car page shows where it is
+  },
+  done: () => centreOnCar(), // placing finished: orbit round the car where it now stands
+})
+/** the car's centre at orbit height — what the camera turns around */
+function carCentre(out = new THREE.Vector3()): THREE.Vector3 {
+  out.set(0, 0.6, 0)
+  if (bay) out.add(bay.root.position)
+  return out
+}
+/** bring the orbit round to the car, keeping the camera's angle and distance */
+function centreOnCar(): void {
+  const centre = carCentre()
+  camera.position.add(offset.subVectors(centre, controls.target))
+  controls.target.copy(centre)
+  controls.update()
+  invalidate()
+}
+
 /** swap the car in the bay; a newer request supersedes one still loading */
 /** take the car out of the bay and free it */
 function clearBay(): void {
   if (!bay) return
+  placement.attach(null)
   scene.remove(bay.root, bay.shadow)
   room.floorLayers.splice(room.floorLayers.indexOf(bay.shadow), 1)
   bay.lamps.dispose() // put the lenses back before the car is taken apart
@@ -496,6 +534,8 @@ async function showCar(id: string): Promise<void> {
       traceSceneChanged()
     })
     bay = { id: profile.id, root, shadow, configurator, groups, lamps, size }
+    placement.attach({ id: profile.id, root, shadow, size }) // its saved place (the shadow was baked at the origin)
+    centreOnCar()
     room.shadowsChanged?.()
     traceSceneChanged()
     post.refreshGlow()
@@ -565,6 +605,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   room = def.create()
   if (bay) room.floorLayers.push(bay.shadow)
   installRoom()
+  placement.refit() // a smaller room may not fit where the car stood
   post.setAtmosphere(room.atmosphere ?? null)
   applyQuality() // floor mirror size and texture filtering for the new room
   post.refreshGlow()
@@ -637,6 +678,7 @@ const videoStage: Stage = (() => {
       }
       setPicking(false)
       if (tracedShown) hideTraced()
+      placement.helper.visible = false // never in a video
       directing = { size }
       app.classList.add('is-directing')
       resize()
@@ -650,6 +692,7 @@ const videoStage: Stage = (() => {
         controls.update()
       }
       saved = null
+      placement.helper.visible = true
       directing = null
       app.classList.remove('is-directing')
       resize()
@@ -667,6 +710,12 @@ const videoStage: Stage = (() => {
     },
     draw(pose: CameraPose, dt, black) {
       baseFov = pose.fov ?? post.settings.display.fov // the room clamps widen from this lens
+      // moves are laid out around a car at the origin: carry them to wherever it's been moved
+      const at = bay?.root.position
+      if (at) {
+        pose.position.add(at)
+        pose.target.add(at)
+      }
       camera.position.copy(pose.position)
       controls.target.copy(pose.target)
       camera.lookAt(pose.target)
@@ -711,7 +760,7 @@ const pages: Record<string, Page> = {
     loading: () => loadingId,
     select: (id) => void showCar(id),
   }),
-  car: carPage(() => bay?.configurator, bayPlaceholder),
+  car: carPage(() => bay?.configurator, bayPlaceholder, placement),
   lights: lightsPage(() => bay?.lamps, bayPlaceholder),
   parts: partsPage({
     editor: () => bay?.groups,
@@ -823,6 +872,8 @@ const garage: {
   configurator?: CarConfigurator
   /** the car's own lights: garage.lamps.set('head', { on: false }) */
   lamps?: LampSystem
+  /** move the car: garage.placement.setActive(true) shows the gizmo; garage.placement.position */
+  placement: CarPlacement
   /** redraw after changing things from the console while rendering on demand */
   invalidate: typeof invalidate
   /** the path tracer while it's switched on (Settings › Graphics) */
@@ -839,6 +890,7 @@ const garage: {
   setSun,
   post,
   invalidate,
+  placement,
   get tracer() {
     return tracer
   },

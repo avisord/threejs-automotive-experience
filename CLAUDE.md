@@ -52,6 +52,7 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `lights.ts` | Head/tail lamps: lens emissive clones + real **spot** lights (tails aim back/down) with one-shot baked shadow maps, optional beam cone shader. Per car. |
 | `garages/interior.ts` | A room's own light fittings in user-settable groups (`Room.interior`): on/off, intensity, and either colour temperature (white light: blackbody ratio against the group's design kelvin, so defaults look as built) or any colour (neon/accents: the pick at each member's own brightness) + a master dimmer; drives real lights, glow strips and emissive surfaces (`fixtureMembers`/`softboxMembers` collect a fixture's). Every garage with fittings has groups: Hex Bay (hex ceiling, wall washers, accent trim, ambient), Studio (overhead, side strips, rim, ambient), Underground (magenta/cyan neon, ambient), Hangar (sunset window, pendants, sky fill, ambient), Fuji Pavilion (skylight — follows the sun — ceiling LEDs, wall cove); Fuji Meadow has none. Menu › Garage › Interior lights; saved per garage in `garage.interior.v1`; changes re-capture the env map (debounced, like the sun). Area lights are dimmed to 0, never removed (a light-count change recompiles every material). |
 | `garages/fields.ts` | Farmland layout + per-pixel field shading, shared by the terrain, the far terrain and the hedgerows (see gotchas). |
+| `placement.ts` | Menu › Car › Position: a three `TransformControls` translate gizmo on the car root (whole car: body, wheels, lamps, overlays). Kept inside `room.bounds` (footprint in, y 0…ceiling), saved per car in `garage.car-position.v1`. The contact shadow is a separate mesh: slid along under the car and faded as it's lifted (baked once at the origin). A drag end re-bakes the lamp spots' shadow maps, calls `room.shadowsChanged` and `traceSceneChanged`; putting the gizmo away (or loading a car) re-centres the orbit on the car. The gizmo is on layer 1 (`GIZMO_LAYER`): the main camera sees it, mirrors/env captures/picking rays don't; `userData.overlay` keeps it out of the path tracer; hidden while directing. Video moves are offset by the car's position (`videoStage.draw`). |
 | `contact-shadow.ts` | Baked soft ground shadow per car (depth from below + blur). |
 | `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji, fuji-meadow) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
@@ -81,7 +82,7 @@ Rendering model:
   anything that changes geometry/materials/lights must call `traceSceneChanged()`.
 
 Console handle `window.garage`: `scene, camera, controls, renderer, room, post,
-configurator, lamps, tracer, invalidate, showGarage, setSun`.
+configurator, lamps, placement, tracer, invalidate, showGarage, setSun`.
 
 ## Adding a car
 
@@ -348,7 +349,7 @@ the real GPU and looking at screenshots:
 - Useful levers: `?car=<id>`, `localStorage` keys `garage.venue.v1` (garage),
   `garage.car.v1`, `garage.graphics.v1`, `garage.reel.v1` (video shot list),
   `garage.panel-path.v1` (open panel page), `garage.sun.v1` (sun per open-air garage),
-  `garage.interior.v1` (interior lights per garage); `renderer.info` for leaks and draw counts;
+  `garage.interior.v1` (interior lights per garage), `garage.car-position.v1` (car placement per car); `renderer.info` for leaks and draw counts;
   `/sys/class/drm/card1/device/gpu_busy_percent` for GPU load (it's a smoothed value).
 - Note: setting the garage via localStorage skips its grade look — pick it through the
   UI when judging colour.
