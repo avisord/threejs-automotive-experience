@@ -122,6 +122,7 @@ export function foliage<M extends THREE.MeshStandardMaterial>(material: M, opts:
       )
     }
     if (opts.crownNormals) {
+      shader.fragmentShader = '#define CROWN_NORMALS\n' + shader.fragmentShader
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>

@@ -16,7 +16,8 @@ import {
   type Effect,
 } from 'postprocessing'
 import { N8AOPostPass } from 'n8ao'
-import { GradeEffect } from './grade-effect'
+import { AUTO_KEY, GradeEffect } from './grade-effect'
+import { ExposureMeter } from './exposure-meter'
 import { AtmosphereEffect, type AtmosphereParams } from './atmosphere-effect'
 import { LensFlareEffect } from './lens-flare-effect'
 
@@ -42,6 +43,8 @@ export interface GraphicsSettings {
     toneMapper: ToneMapper
     look: GradeLook
     exposure: number
+    /** auto exposure, 0 off … 1 full: how far the metered scene is brought to a standard brightness */
+    auto: number
     contrast: number
     saturation: number
     temperature: number
@@ -214,7 +217,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   ao: { enabled: true, intensity: 5, radius: 0.9, quality: 'High' },
   bloom: { enabled: true, lightsOnly: true, intensity: 1.4, threshold: BLOOM_THRESHOLD.lightsOnly, radius: 0.75 },
   // Neutral keeps the livery's saturated pink; AgX washes it out, ACES crushes the walls
-  grade: { enabled: true, toneMapper: 'neutral', look: 'cyber', exposure: 0, ...pick(LOOKS.cyber) },
+  grade: { enabled: true, toneMapper: 'neutral', look: 'cyber', exposure: 0, auto: 0.6, ...pick(LOOKS.cyber) },
   vignette: { enabled: true, darkness: 0.55, offset: 0.3 },
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
@@ -270,6 +273,10 @@ export interface PostProcessing {
   setFocus(target: THREE.Vector3, garage: { bokehScale: number } | null): void
   /** depth of field is currently in the picture */
   readonly dofActive: boolean
+  /** the brightness the current garage is exposed for (its `exposureKey`) */
+  setExposureKey(key: number): void
+  /** auto exposure's last metered mean log2 luminance (reads back from the GPU: for the console) */
+  readMeter(): number
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
@@ -307,6 +314,10 @@ export function createPostProcessing(
   ao.configuration.halfRes = true
   composer.addPass(ao)
 
+  // metering for auto exposure: after the scene (and its depth of field), before the effect pass
+  const meter = new ExposureMeter()
+  composer.addPass(meter)
+
   const listeners: ((sections: GraphicsSection[]) => void)[] = []
   let aoQuality: AoQuality | null = null
   let aoView: AoView = 'final'
@@ -324,6 +335,7 @@ export function createPostProcessing(
   let garageDof: { bokehScale: number } | null = null
   const dofWanted = () => settings.dof.mode === 'on' || (settings.dof.mode === 'auto' && garageDof !== null)
   let atmosphereParams: AtmosphereParams | null = null
+  let exposureKey = AUTO_KEY
   let structureKey = ''
 
   function rebuildEffects(): void {
@@ -375,7 +387,10 @@ export function createPostProcessing(
     if (s.vignette.enabled) effects.push((vignette = new VignetteEffect()))
 
     effectPass = new EffectPass(camera, ...effects)
+    composer.removePass(meter)
+    composer.addPass(meter) // (re-added each rebuild so it stays right before the effect pass)
     composer.addPass(effectPass)
+    grade?.setMeter(meter.target.texture, meter.topLevel)
 
     // SMAA gets its own pass so it finds edges in the tone-mapped image, not raw HDR
     if (s.aa.smaa !== 'off') {
@@ -418,9 +433,10 @@ export function createPostProcessing(
       bloom.luminanceMaterial.threshold = s.bloom.threshold
       bloom.mipmapBlurPass.radius = s.bloom.radius
     }
+    meter.enabled = s.grade.enabled && s.grade.auto > 0
     if (grade) {
       const look = LOOKS[s.grade.look]
-      grade.set({ ...s.grade, shadowTint: look.shadowTint, highlightTint: look.highlightTint })
+      grade.set({ ...s.grade, shadowTint: look.shadowTint, highlightTint: look.highlightTint, key: exposureKey })
     }
     if (vignette) {
       vignette.darkness = s.vignette.darkness
@@ -476,6 +492,11 @@ export function createPostProcessing(
     },
     setAtmosphere(params) {
       atmosphereParams = params
+      apply()
+    },
+    readMeter: () => meter.read(renderer),
+    setExposureKey(key) {
+      exposureKey = key
       apply()
     },
     setFocus(target, garage) {

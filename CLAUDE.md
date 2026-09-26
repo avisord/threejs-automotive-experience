@@ -342,6 +342,16 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   cell 4 (blue > green) coloured by the `bloom` vertex attribute, so flowers stay small among leaves. The
   Coast Overlook's stone is `terraceStone()` (slab joints box-filtered by pixel footprint — thinner than a
   pixel they broke into dashes). Contact shadows add a tight 7 cm bake for the tyres' crease.
+- Auto exposure (`exposure-meter.ts` + `GradeEffect`): a pass before the effect pass draws the HDR frame's
+  centre-weighted (w·log2 L, w) into a 256×144 half-float target; its top mip is the mean, read by the grade in
+  the same frame (no readback, exports stay deterministic). Each `GarageDef.exposureKey` is its default view's
+  metered mean (`garage.post.readMeter()` with auto on), so auto exposure only adapts views *within* a garage
+  (a dark neon bay stays dark); `grade.auto` is the strength (default 0.6), ±2 EV at most. Measure a new
+  garage's key before adding it.
+- Ground bounce (`far-shadow.ts` `GROUND_BOUNCE`): landscape materials add ρ·E_sun (×2 for multiple bounces) on
+  down-facing normals (foliage with crown normals at least 0.4); set by coast/world.ts from its sun, cleared by
+  `world.dispose()`. Not a scene light: the car and room surfaces already see the sunlit ground in their env map
+  (a hemisphere light double-counted it there and did nothing for up-facing crown normals).
 - Open-air room surfaces (a terrace, not the car) need `envMapIntensity = OUTDOOR_SKY_LIGHT`: at 1 they take
   the sky at ~3× the landscape's strength — the Coast Overlook's stone was nearly as bright with the sun
   off, blue and flat.

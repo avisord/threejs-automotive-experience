@@ -218,5 +218,6 @@ export const hangar: GarageDef = {
   tag: 'Golden hour through a glass wall · tungsten pendants',
   palette: ['#ffd89a', '#ffa85a', '#e2745e', '#2b1d4a'],
   look: 'natural',
+  exposureKey: -3.1,
   create: createHangar,
 }

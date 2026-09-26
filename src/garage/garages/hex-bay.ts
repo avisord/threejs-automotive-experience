@@ -279,5 +279,6 @@ export const hexBay: GarageDef = {
   tag: 'Honeycomb LED ceiling, cyan trim · the original',
   palette: ['#e6f1ff', '#35e0ff', '#3a3f48', '#050608'],
   look: 'cyber',
+  exposureKey: -5.5,
   create: createHexBay,
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { AtmosphereParams } from '../../atmosphere-effect'
-import { aimFarShadow, createFarShadowLight } from '../far-shadow'
+import { GROUND_BOUNCE, aimFarShadow, createFarShadowLight } from '../far-shadow'
 import type { Room } from '../kit'
 import { WIND } from '../foliage'
 import { createSky, sunDirection, sunLight, type SunPosition } from '../sky'
@@ -23,6 +23,9 @@ import { ContactMap } from './contact'
  * is a sun preset away.)
  */
 export const COAST_SUN: SunPosition = { azimuth: 55, elevation: 52 }
+
+/** the mean albedo of the ground round the car (linear), for the bounce light */
+const GROUND_ALBEDO = new THREE.Color(0.26, 0.26, 0.19)
 
 export interface CoastWorldOptions {
   /** the room's own reaction to the sun (key lights, dust) */
@@ -47,6 +50,8 @@ export interface CoastWorld {
   update(dt: number): void
   /** textures only shader uniforms hold (disposeTree frees material properties, not uniforms) */
   textures: THREE.Texture[]
+  /** the world is going: free what the room's disposeTree can't reach, clear the ground bounce */
+  dispose(): void
 }
 
 /**
@@ -92,6 +97,12 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   group.add(farShadow)
   const fill = new THREE.HemisphereLight(0xbcd2f0, 0x6a6a4c, 0.45)
   group.add(fill)
+  // Bounce: sunlit ground is a big dim lamp facing up. A Lambertian plane of albedo ρ under irradiance E
+  // lights a surface facing straight down with ρ·E (and a wall with half that) — the light that fills
+  // palm crowns' undersides, the shade inside bushes and every overhang on a bright day, where a
+  // game's GI would. The landscape's materials add it (far-shadow.ts GROUND_BOUNCE). ×2 on the single
+  // bounce: sky light on the ground adds ~a fifth to E, and the light goes on bouncing between the
+  // leaves, the lawn and the stone (a tropical garden is mostly lit surfaces facing each other).
 
   // sea air: clear overhead, a salt haze low over the water that pales the far coast and the ranges
   const atmosphere: AtmosphereParams = {
@@ -126,6 +137,9 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
     sun.shadow.needsUpdate = true
     aimFarShadow(farShadow, dir)
     fill.intensity = 0.04 + 0.06 * day
+    // (ρ: the terrace's pale stone and the lawn round it, a warm grey-green)
+    const onGround = sun.intensity * Math.max(0, Math.sin(THREE.MathUtils.degToRad(sunAt.elevation))) * 2
+    GROUND_BOUNCE.value.copy(GROUND_ALBEDO).multiply(sun.color).multiplyScalar(onGround)
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
     ocean.setSunDirection(dir)
     atmosphere.sunDirection.copy(dir)
@@ -162,6 +176,10 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
     update(dt) {
       SURF.time.value += dt
       WIND.time.value += dt
+    },
+    dispose() {
+      for (const t of this.textures) t.dispose()
+      GROUND_BOUNCE.value.setRGB(0, 0, 0)
     },
     textures: [...terrain.textures, contactMap.texture, cliffMaps.maps.map, cliffMaps.maps.normalMap, cliffMaps.maps.roughnessMap, cumulus.atlas],
   }

@@ -253,6 +253,8 @@ export function graphicsPage(post: PostProcessing): Page {
             structural()
           }),
           slider('Exposure', s.grade.exposure, { min: -2, max: 2, step: 0.05 }, signed(2, ' EV'), (v) => post.set('grade', { exposure: v })),
+          // (0: the exposure slider alone; 1: every view metered to the same brightness, the slider an offset)
+          slider('Auto exposure', s.grade.auto, { min: 0, max: 1, step: 0.05 }, (v) => (v > 0 ? `${Math.round(v * 100)}%` : 'Off'), (v) => post.set('grade', { auto: v })),
           slider('Contrast', s.grade.contrast, { min: 0.6, max: 1.6, step: 0.01 }, fixed(2), (v) => post.set('grade', { contrast: v })),
           slider('Saturation', s.grade.saturation, { min: 0, max: 1.8, step: 0.01 }, fixed(2), (v) => post.set('grade', { saturation: v })),
           slider('Temperature', s.grade.temperature, { min: -1, max: 1, step: 0.01 }, signed(2), (v) => post.set('grade', { temperature: v })),

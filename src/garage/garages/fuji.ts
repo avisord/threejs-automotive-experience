@@ -296,5 +296,6 @@ export const fujiPavilion: GarageDef = {
   tag: 'Concrete and glass on a terrace above a lake, Mount Fuji across the valley',
   palette: ['#2f5f9e', '#a7bdd8', '#f4f6fa', '#5f8a2e'],
   look: 'golden',
+  exposureKey: -3.6,
   create: createFujiPavilion,
 }

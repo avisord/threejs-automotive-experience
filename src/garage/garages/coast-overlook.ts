@@ -212,7 +212,7 @@ function createCoastOverlook(): Room {
     ready: Promise.all([world.ready, stoneMaps.ready]).then(() => {}),
     dispose: () => {
       disposeTree(group)
-      for (const t of world.textures) t.dispose()
+      world.dispose()
     },
     ...world.hooks,
     depthOfField: { bokehScale: 0.7 },
@@ -225,5 +225,6 @@ export const coastOverlook: GarageDef = {
   tag: 'Out in the open on a clifftop terrace above the tropical cove, no walls between the car and the sky',
   palette: ['#1d4f7a', '#3fb2b0', '#f2c38b', '#e8dcc8'],
   look: 'daylight',
+  exposureKey: -2.1,
   create: createCoastOverlook,
 }

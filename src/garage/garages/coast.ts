@@ -237,7 +237,7 @@ function createCoastGarage(): Room {
     },
     dispose() {
       room.dispose()
-      for (const t of world.textures) t.dispose()
+      world.dispose()
     },
   }
 }
@@ -266,6 +266,7 @@ export const coastGarage: GarageDef = {
   tag: 'A glass-fronted showroom above a tropical cove on a clear day',
   palette: ['#1d4f7a', '#3fb2b0', '#f2c38b', '#4e6a2a'],
   look: 'daylight',
+  exposureKey: -3.6,
   create: createCoastGarage,
 }
 

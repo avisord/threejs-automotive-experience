@@ -359,5 +359,6 @@ export const fujiMeadow: GarageDef = {
   tag: 'Out in the open on a pebble pad in the meadow, a track winding down to the valley, Mount Fuji beyond',
   palette: ['#2f5f9e', '#a7bdd8', '#c9bfae', '#5f8a2e'],
   look: 'golden',
+  exposureKey: -3.8,
   create: createFujiMeadow,
 }

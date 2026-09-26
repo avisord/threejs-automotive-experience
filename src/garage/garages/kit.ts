@@ -19,6 +19,12 @@ export interface GarageDef {
   palette: string[]
   /** colour grade look applied when the garage is picked */
   look: GradeLook
+  /**
+   * The brightness the garage is lit and graded for: the mean log2 luminance of its default view
+   * (`garage.post.readMeter()`). Auto exposure brings every view in it toward this — looking up at a
+   * bright sky or down into shade — so the garage keeps its own mood (a dark neon bay stays dark).
+   */
+  exposureKey: number
   create(): Room
 }
 
