@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { createInteriorLights, fixtureMembers, softboxMembers, type InteriorMember } from './interior'
 import { assembleRoom, box, createFloor, floorTileTexture, glowMaterial, softbox, type GarageDef, type Room } from './kit'
 
 const ROOM = { w: 22, h: 11, d: 28 }
@@ -143,6 +144,7 @@ function createHangar(): Room {
   // ─── tungsten pendants over the car ─────────────────────────────────────
   const shade = new THREE.MeshStandardMaterial({ color: 0x23201d, roughness: 0.45, metalness: 0.8, side: THREE.DoubleSide })
   const bulb = glowMaterial(TUNGSTEN, 6)
+  const pendants: InteriorMember[] = [{ glow: bulb }]
   const dropY = 6.6
   for (const z of [-2.4, 0, 2.4]) {
     const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, h - dropY, 6), steel)
@@ -158,10 +160,11 @@ function createHangar(): Room {
     const light = new THREE.PointLight(TUNGSTEN, 160, 0, 2)
     light.position.set(0, dropY - 0.35, z)
     group.add(light)
+    pendants.push({ light })
   }
 
   // cool sky fill from the front, so the car's face isn't lost against the sunset
-  softbox(group, { size: [12, 3], position: [0, 6, d / 2 - 0.3], target: [0, 1, 0], color: 0x9fb8ff, intensity: 1.2, glow: 0.4 })
+  const skyFill = softbox(group, { size: [12, 3], position: [0, 6, d / 2 - 0.3], target: [0, 1, 0], color: 0x9fb8ff, intensity: 1.2, glow: 0.4 })
 
   // ─── a few things a garage collects ─────────────────────────────────────
   const red = new THREE.MeshStandardMaterial({ color: 0xb3202a, roughness: 0.35, metalness: 0.6 })
@@ -180,9 +183,25 @@ function createHangar(): Room {
     group.add(tyre)
   }
 
-  group.add(new THREE.HemisphereLight(0xffd2a8, 0x1a1210, 0.2))
+  const ambient = new THREE.HemisphereLight(0xffd2a8, 0x1a1210, 0.2)
+  group.add(ambient)
 
-  return assembleRoom(group, floor, {
+  // the light the user can switch, dim and warm (Menu › Garage › Interior lights) — the sunset
+  // included: it's painted on the glass, so it can be anything from a pale noon to a deep red
+  const interior = createInteriorLights([
+    {
+      id: 'window',
+      name: 'Sunset window',
+      hint: 'The glass wall behind the car, the low sun in it and the light pouring through',
+      kelvin: 2600,
+      members: [{ glow: pane.material as THREE.MeshBasicMaterial }, { glow: sun.material as THREE.MeshBasicMaterial }, { light: windowLight }, { light: sunLight }],
+    },
+    { id: 'pendants', name: 'Tungsten pendants', hint: 'The three lamps hanging over the car', kelvin: 2900, members: pendants },
+    { id: 'fill', name: 'Sky fill', hint: 'The cool box at the front, so the car’s face isn’t lost against the sunset', kelvin: 9500, members: softboxMembers(skyFill) },
+    { id: 'ambient', name: 'Ambient fill', hint: 'Warm bounce from the whole hangar', kelvin: 3600, members: fixtureMembers(ambient) },
+  ])
+
+  const room = assembleRoom(group, floor, {
     bounds: [
       [-w / 2 + 1.8, 0.3, -d / 2 + 0.8],
       [w / 2 - 1.8, h - 2.2, d / 2 - 0.8],
@@ -190,6 +209,7 @@ function createHangar(): Room {
     background: 0x0d0907,
     environmentIntensity: 1,
   })
+  return { ...room, interior }
 }
 
 export const hangar: GarageDef = {

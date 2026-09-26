@@ -16,15 +16,20 @@ import {
 } from 'postprocessing'
 import { N8AOPostPass } from 'n8ao'
 import { GradeEffect } from './grade-effect'
+import { AtmosphereEffect, type AtmosphereParams } from './atmosphere-effect'
+import { LensFlareEffect } from './lens-flare-effect'
 
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 export type ToneMapper = 'agx' | 'aces' | 'neutral'
-export type GradeLook = 'natural' | 'cyber' | 'warm' | 'cold' | 'noir'
+export type GradeLook = 'natural' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
 export type Msaa = 0 | 2 | 4 | 8
 export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
 /** floor mirror resolution relative to the canvas; 0 turns the mirror off */
 export type Reflections = 'off' | 'low' | 'medium' | 'high'
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra'
+export type VolumetricQuality = 'low' | 'medium' | 'high'
+/** ray-march steps per pixel for each volumetric quality */
+const VOLUMETRIC_STEPS: Record<VolumetricQuality, number> = { low: 14, medium: 28, high: 48 }
 
 export interface GraphicsSettings {
   ao: { enabled: boolean; intensity: number; radius: number; quality: AoQuality }
@@ -54,6 +59,12 @@ export interface GraphicsSettings {
     fov: number
     showFps: boolean
   }
+  /** distance haze in open-air garages — see atmosphere-effect.ts */
+  atmosphere: { enabled: boolean; strength: number }
+  /** sunlight shafts through the air (ray-marched through the sun's shadow map), open-air garages */
+  volumetric: { enabled: boolean; strength: number; quality: VolumetricQuality }
+  /** glare, starburst and ghosts when the sun is in view — see lens-flare-effect.ts */
+  lensFlare: { enabled: boolean; intensity: number }
   /** progressive path tracing once the camera rests — see pathtrace.ts */
   pathTracing: {
     enabled: boolean
@@ -176,6 +187,8 @@ interface Look {
 /** a look sets the grade sliders to a starting point; the sliders fine-tune from there */
 export const LOOKS: Record<GradeLook, Look> = {
   natural: { contrast: 1, saturation: 1, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff },
+  // late-afternoon landscape photography: a touch warm, cool shadows, gold highlights, more bite
+  golden: { contrast: 1.14, saturation: 1.1, temperature: 0.12, split: 0.3, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
   cyber: { contrast: 1.12, saturation: 1.1, temperature: -0.1, split: 0.3, shadowTint: 0x1fb6c9, highlightTint: 0xff7ad9 },
   warm: { contrast: 1.08, saturation: 1.05, temperature: 0.45, split: 0.2, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
   cold: { contrast: 1.1, saturation: 0.9, temperature: -0.5, split: 0.2, shadowTint: 0x2a4a8a, highlightTint: 0xd8f0ff },
@@ -193,7 +206,11 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   vignette: { enabled: true, darkness: 0.55, offset: 0.3 },
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
-  display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 42, showFps: true },
+  // ~37 mm on full frame: a photographer's lens for a car, not a wide game camera
+  display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 36, showFps: true },
+  atmosphere: { enabled: true, strength: 1 },
+  volumetric: { enabled: true, strength: 1, quality: 'medium' },
+  lensFlare: { enabled: true, intensity: 1 },
   pathTracing: { enabled: false, bounces: 4, samples: 256, resolution: 0.75, denoise: true },
 }
 
@@ -231,6 +248,8 @@ export interface PostProcessing {
   refreshGlow(): void
   /** overlay the path-traced image (null = raster only) */
   showPathTraced(texture: THREE.Texture | null, weight: number): void
+  /** the current garage's air (open-air garages), or null for none */
+  setAtmosphere(params: AtmosphereParams | null): void
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
@@ -263,6 +282,9 @@ export function createPostProcessing(
 
   const ao = new N8AOPostPass(scene, camera, window.innerWidth, window.innerHeight)
   ao.configuration.gammaCorrection = false // the effect pass after it handles output colour
+  // half resolution, upsampled along depth edges: contact shadows under a car are soft anyway, and
+  // at full resolution AO was the single most expensive pass (~5 ms at 1080p on an RX 7600)
+  ao.configuration.halfRes = true
   composer.addPass(ao)
 
   const listeners: ((sections: GraphicsSection[]) => void)[] = []
@@ -274,6 +296,9 @@ export function createPostProcessing(
   let bloom: BloomEffect | null = null
   let grade: GradeEffect | null = null
   let vignette: VignetteEffect | null = null
+  let atmosphere: AtmosphereEffect | null = null
+  let lensFlare: LensFlareEffect | null = null
+  let atmosphereParams: AtmosphereParams | null = null
   let structureKey = ''
 
   function rebuildEffects(): void {
@@ -285,11 +310,25 @@ export function createPostProcessing(
     smaaPass = null
     const s = settings
     const effects: Effect[] = []
-    bloom = grade = vignette = null
+    bloom = grade = vignette = atmosphere = lensFlare = null
+    // the air goes first: haze and shafts are part of the scene's light, graded and tone mapped with it
+    if ((s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams) {
+      atmosphere = new AtmosphereEffect(camera)
+      atmosphere.setParams(atmosphereParams)
+      effects.push(atmosphere)
+    }
+    // the lens sees the scene's light, air included, before it's graded
+    if (s.lensFlare.enabled && atmosphereParams) {
+      lensFlare = new LensFlareEffect(camera)
+      effects.push(lensFlare)
+    }
     if (s.bloom.enabled) {
       const options = { mipmapBlur: true, blendFunction: BlendFunction.ADD, luminanceSmoothing: 0.1 }
       if (s.bloom.lightsOnly) {
         const selective = new SelectiveBloomEffect(scene, camera, options)
+        // by default it keeps whatever sits at the far plane — an analytic sky is drawn there, and
+        // bloomed whole it laid a milky veil over every open-air view
+        selective.ignoreBackground = true
         selective.selection.set(glowMeshes())
         bloom = selective
       } else {
@@ -313,7 +352,16 @@ export function createPostProcessing(
 
   function apply(): void {
     const s = settings
-    const key = [s.bloom.enabled, s.bloom.lightsOnly, s.grade.enabled, s.grade.toneMapper, s.vignette.enabled, s.aa.smaa].join()
+    const key = [
+      s.bloom.enabled,
+      s.bloom.lightsOnly,
+      s.grade.enabled,
+      s.grade.toneMapper,
+      s.vignette.enabled,
+      s.aa.smaa,
+      (s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams !== null,
+      s.lensFlare.enabled && atmosphereParams !== null,
+    ].join()
     if (key !== structureKey) {
       structureKey = key
       rebuildEffects()
@@ -342,6 +390,16 @@ export function createPostProcessing(
     if (vignette) {
       vignette.darkness = s.vignette.darkness
       vignette.offset = s.vignette.offset
+    }
+    if (atmosphere) {
+      atmosphere.setParams(atmosphereParams)
+      atmosphere.strength = s.atmosphere.enabled ? s.atmosphere.strength : 0
+      atmosphere.shaftStrength = s.volumetric.enabled ? s.volumetric.strength : 0
+      atmosphere.shaftSteps = VOLUMETRIC_STEPS[s.volumetric.quality]
+    }
+    if (lensFlare) {
+      lensFlare.setSun(atmosphereParams?.sunDirection ?? null, atmosphereParams?.sunColor ?? null)
+      lensFlare.intensity = s.lensFlare.intensity
     }
   }
 
@@ -374,6 +432,10 @@ export function createPostProcessing(
     },
     onChange(listener) {
       listeners.push(listener)
+    },
+    setAtmosphere(params) {
+      atmosphereParams = params
+      apply()
     },
     showPathTraced(texture, weight) {
       blend.show(texture, weight)

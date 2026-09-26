@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { createInteriorLights, fixtureMembers } from './interior'
 import { assembleRoom, box, concreteTexture, createFloor, glowMaterial, type GarageDef, type Room } from './kit'
 
 const ROOM = { w: 20, h: 5.2, d: 26 }
@@ -104,6 +105,7 @@ function createUnderground(): Room {
   // ─── neon ────────────────────────────────────────────────────────────────
   // two long tubes run the length of the ceiling between the beams, one per colour
   const tubeLen = d - 4
+  const tubeLights: THREE.RectAreaLight[] = []
   for (const [x, color, material] of [
     [-2.2, MAGENTA, magenta],
     [2.2, CYAN, cyan],
@@ -113,6 +115,7 @@ function createUnderground(): Room {
     light.position.set(x, h - 0.66, 0)
     light.rotation.x = -Math.PI / 2
     group.add(light)
+    tubeLights.push(light)
   }
   // neon cross-bars on the back wall behind the car, washing it magenta
   for (const y of [1.4, 2.2]) box(group, [9, 0.06, 0.06], magenta, [0, y, -d / 2 + 0.05])
@@ -126,9 +129,29 @@ function createUnderground(): Room {
   sign.rotation.y = Math.PI / 2
   group.add(sign)
 
-  group.add(new THREE.HemisphereLight(0x6a5a8a, 0x0a0710, 0.12))
+  const ambient = new THREE.HemisphereLight(0x6a5a8a, 0x0a0710, 0.12)
+  group.add(ambient)
 
-  return assembleRoom(group, floor, {
+  // the fittings the user can switch, dim and recolour (Menu › Garage › Interior lights)
+  const interior = createInteriorLights([
+    {
+      id: 'magenta',
+      name: 'Magenta neon',
+      hint: 'The ceiling tube on the left and the bars on the back wall',
+      color: MAGENTA,
+      members: [{ glow: magenta }, { light: tubeLights[0] }, { light: backWash }],
+    },
+    {
+      id: 'cyan',
+      name: 'Cyan neon',
+      hint: 'The ceiling tube on the right and the strips down the pillars',
+      color: CYAN,
+      members: [{ glow: cyan }, { light: tubeLights[1] }],
+    },
+    { id: 'ambient', name: 'Ambient fill', hint: 'The faint glow of the car park around the bay', kelvin: 6500, members: fixtureMembers(ambient) },
+  ])
+
+  const room = assembleRoom(group, floor, {
     bounds: [
       [-PILLAR_X + PILLAR / 2 + 0.4, 0.3, -d / 2 + 0.6],
       [PILLAR_X - PILLAR / 2 - 0.4, h - 0.75, d / 2 - 0.6],
@@ -136,6 +159,7 @@ function createUnderground(): Room {
     background: 0x050407,
     environmentIntensity: 1,
   })
+  return { ...room, interior }
 }
 
 export const underground: GarageDef = {

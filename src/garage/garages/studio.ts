@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { createInteriorLights, fixtureMembers, softboxMembers } from './interior'
 import { assembleRoom, createFloor, softbox, type GarageDef, type Room } from './kit'
 
 /** flat floor radius — past this the floor sweeps up into the wall */
@@ -62,8 +63,8 @@ function createStudio(): Room {
 
   // ─── lights ──────────────────────────────────────────────────────────────
   const WHITE = 0xfffaf2
-  softbox(group, { size: [6, 10], position: [0, 7.4, 0], target: [0, 0, 0], color: WHITE, intensity: 5, glow: 1.8 })
-  for (const side of [-1, 1]) {
+  const overhead = softbox(group, { size: [6, 10], position: [0, 7.4, 0], target: [0, 0, 0], color: WHITE, intensity: 5, glow: 1.8 })
+  const strips = [-1, 1].map((side) =>
     softbox(group, {
       size: [0.8, 10],
       position: [side * 4.4, 6.2, 0],
@@ -71,15 +72,24 @@ function createStudio(): Room {
       color: WHITE,
       intensity: 14,
       glow: 2.4,
-    })
-  }
+    }),
+  )
   // cool rim from behind, so the roofline separates from the cyc
-  softbox(group, { size: [8, 2.4], position: [0, 3.2, -9.4], target: [0, 1, 0], color: 0xdfe8ff, intensity: 3, glow: 1.4 })
+  const rim = softbox(group, { size: [8, 2.4], position: [0, 3.2, -9.4], target: [0, 1, 0], color: 0xdfe8ff, intensity: 3, glow: 1.4 })
 
-  group.add(new THREE.HemisphereLight(0xffffff, 0x8a8e95, 0.35))
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x8a8e95, 0.35)
+  group.add(ambient)
+
+  // the fittings the user can switch, dim and warm (Menu › Garage › Interior lights)
+  const interior = createInteriorLights([
+    { id: 'overhead', name: 'Overhead softbox', hint: 'The big diffuser straight above the car: its key light', kelvin: 6200, members: softboxMembers(overhead) },
+    { id: 'strips', name: 'Side strips', hint: 'The two tall strip boxes that draw the long highlights down the flanks', kelvin: 6200, members: strips.flatMap(softboxMembers) },
+    { id: 'rim', name: 'Rim light', hint: 'The cool box behind, separating the roofline from the cyc', kelvin: 7800, members: softboxMembers(rim) },
+    { id: 'ambient', name: 'Ambient fill', hint: 'Soft light from everywhere: lifts the shadows', kelvin: 6500, members: fixtureMembers(ambient) },
+  ])
 
   const r = 6.2 // box corners stay clear of the cove
-  return assembleRoom(group, floor, {
+  const room = assembleRoom(group, floor, {
     bounds: [
       [-r, 0.3, -r],
       [r, H - 0.6, r],
@@ -87,6 +97,7 @@ function createStudio(): Room {
     background: 0x9ea2a8,
     environmentIntensity: 1,
   })
+  return { ...room, interior }
 }
 
 export const studio: GarageDef = {

@@ -18,6 +18,12 @@ import { createGroupEditor, type GroupEditor } from './groups'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
 import type { PathTracer } from './pathtrace'
+import type { InteriorSettings } from './garages/interior'
+import type { SunPosition } from './garages/sky'
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
+import { DEFAULT_CAR_SIZE, type CameraPose } from './camera-moves'
+import type { Stage } from './director'
+import { videoPage } from './ui/video-page'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -35,6 +41,11 @@ const scene = new THREE.Scene()
 
 /** the car currently in the bay (see showCar) — declared early, the garage reads it */
 let bay: Bay | null = null
+/**
+ * Set while a video preview or export has the view (see the video section):
+ * the frame fills the window, or is rendered at `size`. Declared early, resize() reads it.
+ */
+let directing: { size: { width: number; height: number } | null } | null = null
 
 // path tracing state (see the path tracing section) — declared early, resize() reads it
 /** how long the camera must rest before tracing starts */
@@ -46,8 +57,11 @@ let lastActivity = 0
 let traceTimer = 0
 
 // ─── camera: orbit around the car, never from below ─────────────────────────
-const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 100)
-camera.position.set(4.4, 2.5, 5.6) // front-left, from above
+// Far enough for open-air garages' landscapes (garages/site.ts draws its far layers within ~6 km).
+// A 0.1 m near plane still clears close-up camera moves and keeps depth precision workable at a few km.
+const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 12000)
+// front-left, from above — a touch farther back than before, for the longer default lens (Display › Field of view)
+camera.position.set(5.0, 2.8, 6.4)
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, 0.6, 0)
 controls.enableDamping = true
@@ -56,7 +70,7 @@ controls.enablePan = false // keep the car centred
 controls.minPolarAngle = 0.02 // straight-down top view is fine
 controls.maxPolarAngle = THREE.MathUtils.degToRad(84) // …but never below the floor line
 controls.minDistance = 3.4
-controls.maxDistance = 10
+controls.maxDistance = 20
 controls.update()
 
 // ─── keyboard zoom: + / - ───────────────────────────────────────────────────
@@ -128,6 +142,24 @@ let garageDef: GarageDef =
 let room: Room = garageDef.create()
 /** what scene.environment is drawn from — the render target, not just its texture, has to be freed */
 let environmentTarget: THREE.WebGLRenderTarget | null = null
+/** open-air rooms: the sky-lit environment map their outdoor meshes use (see captureEnvironment) */
+let outdoorTarget: THREE.WebGLRenderTarget | null = null
+const SUN_KEY = 'garage.sun.v1'
+/** sun positions picked per garage */
+let savedSuns: Record<string, SunPosition> = {}
+try {
+  savedSuns = JSON.parse(localStorage.getItem(SUN_KEY) ?? '{}') as Record<string, SunPosition>
+} catch {
+  // defaults
+}
+const INTERIOR_KEY = 'garage.interior.v1'
+/** interior light settings picked per garage */
+let savedInteriors: Record<string, InteriorSettings> = {}
+try {
+  savedInteriors = JSON.parse(localStorage.getItem(INTERIOR_KEY) ?? '{}') as Record<string, InteriorSettings>
+} catch {
+  // defaults
+}
 installRoom()
 
 /** put `room` in the scene and light the car with it */
@@ -139,7 +171,19 @@ function installRoom(): void {
   scene.add(room.group)
   scene.background = room.background
   scene.environmentIntensity = room.environmentIntensity
+  const sun = savedSuns[garageDef.id]
+  if (room.sun && sun) room.sun.set(sun)
+  const interior = savedInteriors[garageDef.id]
+  if (room.interior && interior) room.interior.set(interior)
   captureEnvironment()
+  // a sky still loading: capture again once it's in, if this room is still up
+  const installed = room
+  installed.ready?.then(() => {
+    if (room !== installed) return
+    captureEnvironment()
+    traceSceneChanged()
+    invalidate(4)
+  })
 }
 
 /**
@@ -150,16 +194,87 @@ function captureEnvironment(): void {
   const pmrem = new THREE.PMREMGenerator(renderer)
   const hidden = [room.reflector, ...(bay ? [bay.root, bay.shadow] : [])]
   for (const o of hidden) o.visible = false
+  room.outdoor?.beforeCapture?.()
   // the room must not reflect the previous garage's map while it's captured
   environmentTarget?.dispose()
   scene.environment = null
-  environmentTarget = pmrem.fromScene(scene, 0, 0.1, 60, {
+  environmentTarget = pmrem.fromScene(scene, 0, 0.1, 12000, {
     size: 512,
     position: new THREE.Vector3(0, 1.2, 0),
   })
   scene.environment = environmentTarget.texture
+  // A material's envMapIntensity only counts when it has its own envMap (three uses
+  // scene.environmentIntensity for scene.environment): room materials that ask for a weaker or
+  // stronger reflection — the Fuji deck's polished floor — get the map handed over explicitly.
+  room.group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const standard = m as THREE.MeshStandardMaterial
+      if (standard.isMeshStandardMaterial && standard.envMapIntensity !== 1 && (!standard.envMap || standard.userData.roomEnv)) {
+        standard.envMap = environmentTarget!.texture
+        standard.userData.roomEnv = true
+      }
+    }
+  })
+  // Open-air rooms: the interior capture sees a roof overhead, so the land
+  // outside would be lit by concrete instead of sky. It gets its own map,
+  // captured out in the open.
+  outdoorTarget?.dispose()
+  outdoorTarget = null
+  if (room.outdoor) {
+    outdoorTarget = pmrem.fromScene(scene, 0, 0.1, 12000, { size: 256, position: room.outdoor.probe })
+    const map = outdoorTarget.texture
+    room.outdoor.root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh
+      if (!mesh.isMesh) return
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const standard = m as THREE.MeshStandardMaterial
+        if (standard.isMeshStandardMaterial) standard.envMap = map
+      }
+    })
+  }
+  room.outdoor?.afterCapture?.()
   for (const o of hidden) o.visible = true
   pmrem.dispose()
+}
+
+let recaptureTimer = 0
+/** move the sun of an open-air room; the environment catches up once the slider rests */
+function setSun(sun: SunPosition): void {
+  if (!room.sun) return
+  room.sun.set(sun)
+  savedSuns[garageDef.id] = sun
+  try {
+    localStorage.setItem(SUN_KEY, JSON.stringify(savedSuns))
+  } catch {
+    // not remembered — fine
+  }
+  lightingChanged()
+}
+
+/** switch, dim or warm the room's own lights; the car's reflections catch up once the slider rests */
+function setInterior(settings: InteriorSettings): void {
+  if (!room.interior) return
+  room.interior.set(settings)
+  savedInteriors[garageDef.id] = room.interior.get()
+  try {
+    localStorage.setItem(INTERIOR_KEY, JSON.stringify(savedInteriors))
+  } catch {
+    // not remembered — fine
+  }
+  lightingChanged()
+}
+
+/** the room's light changed: draw now, re-capture the environment (and restart a trace) once it settles */
+function lightingChanged(): void {
+  invalidate(2)
+  clearTimeout(recaptureTimer)
+  recaptureTimer = window.setTimeout(() => {
+    captureEnvironment()
+    traceSceneChanged()
+    invalidate(3)
+  }, 180)
 }
 
 // ─── post: AO, bloom, grade, vignette, AA ───────────────────────────────────
@@ -168,6 +283,7 @@ const post = createPostProcessing(renderer, scene, camera, () => [
   ...collectGlowMeshes(room.group),
   ...(bay ? collectGlowMeshes(bay.root) : []),
 ])
+post.setAtmosphere(room.atmosphere ?? null) // later rooms: swapRoom
 
 /**
  * Frames still to draw. In on-demand mode (the default) nothing is drawn
@@ -204,6 +320,7 @@ const PANEL_INSET = 328
 const SHEET_INSET = 0.45
 
 function resize(): void {
+  if (directing) return layoutForVideo(directing.size)
   const w = window.innerWidth
   const h = window.innerHeight
   // Shift the projection centre into the area the panel leaves free, so the
@@ -235,6 +352,22 @@ function resize(): void {
   invalidate()
 }
 window.addEventListener('resize', resize)
+
+/** a plain centred lens over the whole frame: the window (preview) or the video size (export) */
+function layoutForVideo(size: { width: number; height: number } | null): void {
+  const w = size?.width ?? window.innerWidth
+  const h = size?.height ?? window.innerHeight
+  baseFov = post.settings.display.fov
+  camera.fov = baseFov
+  camera.aspect = w / h
+  camera.clearViewOffset()
+  camera.updateProjectionMatrix()
+  // an export renders exactly its pixel size, whatever the display's pixel ratio
+  renderer.setPixelRatio(size ? 1 : Math.min(window.devicePixelRatio, 2) * post.settings.quality.renderScale)
+  post.setSize(w, h)
+  room.resize(w, h, renderer.getPixelRatio())
+  invalidate()
+}
 
 /** resolution, floor mirror and texture filtering — the settings outside the composer */
 function applyQuality(): void {
@@ -288,6 +421,8 @@ interface Bay {
   configurator: CarConfigurator
   groups: GroupEditor
   lamps: LampSystem
+  /** width, height, length — what camera moves frame */
+  size: THREE.Vector3
 }
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
@@ -315,6 +450,7 @@ async function showCar(id: string): Promise<void> {
     loadingId = null // also abandons a car still loading
     setPicking(false)
     clearBay()
+    room.shadowsChanged?.()
     try {
       localStorage.setItem(CAR_KEY, NO_CAR)
     } catch {
@@ -359,7 +495,8 @@ async function showCar(id: string): Promise<void> {
       post.refreshGlow()
       traceSceneChanged()
     })
-    bay = { id: profile.id, root, shadow, configurator, groups, lamps }
+    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size }
+    room.shadowsChanged?.()
     traceSceneChanged()
     post.refreshGlow()
     invalidate(4) // first frames also compile the new car's shaders
@@ -411,26 +548,32 @@ async function showGarage(id: string): Promise<void> {
   panelNav.refresh()
   fade.classList.add('is-on')
   await new Promise((resolve) => setTimeout(resolve, FADE_MS))
-
-  scene.remove(room.group)
-  room.dispose()
-  garageDef = def
-  room = def.create()
-  if (bay) room.floorLayers.push(bay.shadow)
-  installRoom()
-  applyQuality() // floor mirror size and texture filtering for the new room
-  post.refreshGlow()
-  traceSceneChanged()
-  adoptGarage(def)
-  // compile the new room's shaders behind the fade, not on the first visible frame
-  await renderer.compileAsync(scene, camera).catch(() => {})
-  invalidate(4)
+  await swapRoom(def)
   switchingTo = null
   panelNav.refresh()
   // uncover once the new room has been drawn
   requestAnimationFrame(() => requestAnimationFrame(() => fade.classList.remove('is-on')))
   announceGarage(def)
   console.info(`[garage] now in ${def.id}`)
+}
+
+/** replace the room — geometry, lights, reflections, grade look — ready to draw when it resolves */
+async function swapRoom(def: GarageDef): Promise<void> {
+  scene.remove(room.group)
+  room.dispose()
+  garageDef = def
+  room = def.create()
+  if (bay) room.floorLayers.push(bay.shadow)
+  installRoom()
+  post.setAtmosphere(room.atmosphere ?? null)
+  applyQuality() // floor mirror size and texture filtering for the new room
+  post.refreshGlow()
+  traceSceneChanged()
+  adoptGarage(def)
+  await room.ready // a video must not show the room before its sky is in
+  // compile the new room's shaders now (behind the fade), not on the first visible frame
+  await renderer.compileAsync(scene, camera).catch(() => {})
+  invalidate(4)
 }
 
 /** arriving somewhere new: take on its grade look and remember it */
@@ -447,18 +590,121 @@ function adoptGarage(def: GarageDef): void {
 // opened by link somewhere other than last time: as if picked. A reload keeps any grade tweaks.
 if (garageDef.id !== savedGarage) adoptGarage(garageDef)
 
+// ─── video: camera moves played back or exported (Menu › Video) ────────────
+const fadeQuad = new FullScreenQuad(new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthTest: false }))
+
+const sightRay = new THREE.Raycaster()
+const sightBox = new THREE.Box3()
+const sightSize = new THREE.Vector3()
+/**
+ * Room geometry between the car and the camera (a pendant over the car, a
+ * pillar) would fill the frame: pull the camera in front of it and widen the
+ * lens to keep the framing, the same dolly-zoom fitCameraInRoom() does at the walls.
+ */
+function clearLineOfSight(target: THREE.Vector3): void {
+  offset.subVectors(camera.position, target)
+  const distance = offset.length()
+  sightRay.set(target, offset.divideScalar(distance))
+  sightRay.far = distance
+  const skip = new Set<THREE.Object3D>([room.reflector, ...room.floorLayers])
+  const hit = sightRay.intersectObject(room.group, true).find((h) => {
+    if (skip.has(h.object) || !h.object.visible) return false
+    // cords and strips are too thin to hide anything — pulling in for them would just pop the framing
+    const g = (h.object as THREE.Mesh).geometry
+    if (!g.boundingBox) g.computeBoundingBox()
+    sightBox.copy(g.boundingBox!).getSize(sightSize)
+    return Math.min(sightSize.x, sightSize.y, sightSize.z) > 0.05 || Math.max(sightSize.x, sightSize.y, sightSize.z) < 0.3
+  })
+  if (!hit) return
+  const pulled = Math.max(0.5, hit.distance - 0.2)
+  camera.position.copy(target).addScaledVector(offset, pulled)
+  const k = pulled / distance
+  camera.fov = Math.min(75, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / k)))
+  camera.updateProjectionMatrix()
+}
+
+/** what preview and export borrow from the app; they give it back as it was */
+const videoStage: Stage = (() => {
+  let saved: { position: THREE.Vector3; target: THREE.Vector3; garage: string; grade: typeof post.settings.grade } | null = null
+  return {
+    canvas: renderer.domElement,
+    begin(size) {
+      saved = {
+        position: camera.position.clone(),
+        target: controls.target.clone(),
+        garage: garageDef.id,
+        grade: { ...post.settings.grade },
+      }
+      setPicking(false)
+      if (tracedShown) hideTraced()
+      directing = { size }
+      app.classList.add('is-directing')
+      resize()
+    },
+    async end() {
+      if (saved && saved.garage !== garageDef.id) await swapRoom(garageById(saved.garage)!)
+      if (saved) {
+        post.set('grade', saved.grade) // the garages visited set their own looks
+        camera.position.copy(saved.position)
+        controls.target.copy(saved.target)
+        controls.update()
+      }
+      saved = null
+      directing = null
+      app.classList.remove('is-directing')
+      resize()
+      noteActivity()
+    },
+    framing() {
+      // not baseFov: draw() sets that to each pose's own lens
+      return { size: bay?.size ?? DEFAULT_CAR_SIZE, fov: post.settings.display.fov, aspect: camera.aspect }
+    },
+    async setGarage(id) {
+      const def = garageById(id)
+      if (!def || def.id === garageDef.id) return false
+      await swapRoom(def)
+      return true
+    },
+    draw(pose: CameraPose, dt, black) {
+      baseFov = pose.fov ?? post.settings.display.fov // the room clamps widen from this lens
+      camera.position.copy(pose.position)
+      controls.target.copy(pose.target)
+      camera.lookAt(pose.target)
+      if (pose.roll) camera.rotateZ(pose.roll)
+      bay?.configurator.update()
+      room.update?.(dt)
+      fitCameraInRoom() // moves only along the view ray, so the look direction holds
+      clearLineOfSight(pose.target)
+      post.render(dt)
+      if (black > 0.001) {
+        ;(fadeQuad.material as THREE.MeshBasicMaterial).opacity = black
+        const autoClear = renderer.autoClear
+        renderer.autoClear = false
+        renderer.setRenderTarget(null)
+        fadeQuad.render(renderer)
+        renderer.autoClear = autoClear
+      }
+    },
+  }
+})()
+
 // ─── side panel: Menu › Garage · Collection · Car · Parts · Settings ───────
 /** Menu › Parts: clicks on the car select parts (declared before the panel renders) */
 let picking = false
 const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
-    render: (body, nav) => body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'lights', 'settings'], nav)),
+    render: (body, nav) =>
+      body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'lights', 'video', 'settings'], nav)),
   },
   garage: garagePage({
     current: () => garageDef.id,
     switching: () => switchingTo,
     select: (id) => void showGarage(id),
+    sun: () => room.sun?.get() ?? null,
+    setSun,
+    interior: () => (room.interior ? { groups: room.interior.groups, settings: room.interior.get(), defaults: room.interior.defaults() } : null),
+    setInterior,
   }),
   collection: collectionPage({
     current: () => bay?.id ?? (loadingId ? null : NO_CAR),
@@ -478,6 +724,7 @@ const pages: Record<string, Page> = {
     hint: 'Graphics, display',
     render: (body, nav) => body.append(menuList(pages, ['graphics', 'display'], nav)),
   },
+  video: videoPage(app, () => videoStage, () => garageDef.id),
   graphics: graphicsPage(post),
   display: displayPage(post),
 }
@@ -568,6 +815,8 @@ const garage: {
   readonly room: Room
   /** switch garage from the console: garage.showGarage('studio') */
   showGarage: typeof showGarage
+  /** move an open-air garage's sun: garage.setSun({ azimuth: -110, elevation: 8 }) */
+  setSun: typeof setSun
   /** graphics from the console: garage.post.set('bloom', { intensity: 2 }) */
   post: PostProcessing
   /** repaint from the console: garage.configurator.set('body', { material: 'chrome' }) */
@@ -587,6 +836,7 @@ const garage: {
     return room
   },
   showGarage,
+  setSun,
   post,
   invalidate,
   get tracer() {
@@ -643,7 +893,7 @@ function hideTraced(): void {
 
 /** tracing runs while the camera rests — but not while picking parts, which needs the overlays */
 function tracerWanted(now: number): boolean {
-  return tracer !== null && now - lastActivity > TRACE_DELAY && !picking && !bay?.groups.overlaysVisible
+  return tracer !== null && now - lastActivity > TRACE_DELAY && !picking && !bay?.groups.overlaysVisible && !directing
 }
 
 function traceStep(): void {
@@ -712,6 +962,7 @@ let lastFrameAt = 0
 
 function frame(timestamp: number): void {
   rafId = requestAnimationFrame(frame)
+  if (directing) return // the director draws its own frames
   tickFps(timestamp)
   const { fpsCap, onDemand } = post.settings.display
   if (fpsCap > 0) {
@@ -735,6 +986,7 @@ function frame(timestamp: number): void {
   dirtyFrames = Math.max(0, dirtyFrames - 1)
 
   bay?.configurator.update()
+  room.update?.(dt)
   fitCameraInRoom()
   if (tracing) traceStep()
   post.render(dt)
