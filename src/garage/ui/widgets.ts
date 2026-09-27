@@ -124,3 +124,64 @@ export function actionButton(text: string, onClick: () => void): HTMLButtonEleme
   b.addEventListener('click', onClick)
   return b
 }
+
+/**
+ * A colourist's wheel: drag the dot toward a hue (0° red, 120° green, 240° blue, counter-clockwise
+ * from the right), the slider under it for brighter or darker; double-click the wheel to centre it.
+ */
+export function colourWheel(
+  label: string,
+  value: { x: number; y: number; l: number },
+  onInput: (v: { x: number; y: number; l: number }) => void,
+): HTMLDivElement {
+  const v = { ...value }
+  const box = el('div', 'cfg-wheel')
+  box.append(el('div', 'cfg-label', label))
+  const disc = el('div', 'cfg-wheel-disc')
+  const dot = el('div', 'cfg-wheel-dot')
+  disc.append(dot)
+  const place = () => {
+    dot.style.left = `${50 + v.x * 50}%`
+    dot.style.top = `${50 - v.y * 50}%`
+  }
+  place()
+  const pick = (e: PointerEvent) => {
+    const r = disc.getBoundingClientRect()
+    let x = ((e.clientX - r.left) / r.width) * 2 - 1
+    let y = 1 - ((e.clientY - r.top) / r.height) * 2
+    const len = Math.hypot(x, y)
+    if (len > 1) {
+      x /= len
+      y /= len
+    }
+    v.x = x
+    v.y = y
+    place()
+    onInput({ ...v })
+  }
+  disc.addEventListener('pointerdown', (e) => {
+    disc.setPointerCapture(e.pointerId)
+    pick(e)
+  })
+  disc.addEventListener('pointermove', (e) => {
+    if (disc.hasPointerCapture(e.pointerId)) pick(e)
+  })
+  disc.addEventListener('dblclick', () => {
+    v.x = v.y = 0
+    place()
+    onInput({ ...v })
+  })
+  const level = el('input')
+  level.type = 'range'
+  level.min = '-1'
+  level.max = '1'
+  level.step = '0.01'
+  level.value = String(v.l)
+  level.title = 'darker … brighter'
+  level.addEventListener('input', () => {
+    v.l = Number(level.value)
+    onInput({ ...v })
+  })
+  box.append(disc, level)
+  return box
+}
