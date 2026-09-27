@@ -489,8 +489,8 @@ function applyQuality(): void {
 // ─── hud ────────────────────────────────────────────────────────────────────
 const HINTS: Record<CameraMode, string> = {
   orbit: 'drag to orbit · scroll or +/− to zoom',
-  walk: 'click to look · wasd walk · shift runs · esc frees the mouse',
-  fly: 'click to look · wasd · space up · shift/ctrl down · scroll: speed',
+  walk: 'click to look · wasd walk · shift runs · scroll zooms · esc frees the mouse',
+  fly: 'click to look · wasd · shift fast · space/e up · c/q down · scroll zooms',
 }
 const PICK_HINT = 'click to select · click again: next layer in · alt+click lists every layer · h hides · shift+h shows all · esc clears'
 const hint = document.createElement('div')
@@ -1617,9 +1617,12 @@ function frame(timestamp: number): void {
 
   bay?.configurator.update()
   room.update?.(dt)
-  // no mode is held inside the room (videos still are, see videoStage.draw): the lens as set
-  if (camera.fov !== baseFov) {
-    camera.fov = baseFov
+  // no mode is held inside the room (videos still are, see videoStage.draw): the lens as set,
+  // zoomed by the wheel while walking or flying (a longer focal length, same framing centre)
+  const fov =
+    freeCam.zoom === 1 ? baseFov : THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(baseFov / 2)) / freeCam.zoom))
+  if (camera.fov !== fov) {
+    camera.fov = fov
     camera.updateProjectionMatrix()
   }
   if (tracing) traceStep()
