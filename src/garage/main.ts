@@ -3,7 +3,25 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { DEFAULT_GARAGE, GARAGES, collectGlowMeshes, type GarageDef, type Room } from './garages'
 import { disposeCar, loadCar } from './car'
-import { CARS, DEFAULT_CAR, NO_CAR, carTitle } from './cars'
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { CARS, DEFAULT_CAR, NO_CAR, carTitle, type CarProfile } from './cars'
+import {
+  collectFiles,
+  deleteUpload,
+  droppedFiles,
+  getUpload,
+  guessSetup,
+  loadUploads,
+  nameFromFile,
+  newUploadId,
+  saveUpload,
+  uploadProfile,
+  uploads,
+  type UploadRecord,
+} from './uploads'
+import { uploadPage } from './ui/upload-page'
+import { ROLES, createRoleTint, loadRoles, partKey, profileWithRoles, saveRoles, type HiddenPart, type RoleId, type RoleMap } from './roles'
+import { rolesPage } from './ui/roles-page'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
 import { LOOKS, REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
@@ -14,7 +32,8 @@ import { garagePage } from './ui/garage-page'
 import { graphicsPage } from './ui/graphics-page'
 import { displayPage } from './ui/display-page'
 import { partsPage } from './ui/parts-page'
-import { createGroupEditor, type GroupEditor } from './groups'
+import { createGroupEditor, meshLabel, type GroupEditor } from './groups'
+import { findOccluders, type MeshCast } from './xray'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
 import type { PathTracer } from './pathtrace'
@@ -81,7 +100,7 @@ const freeCam = createFreeCamera({
   camera,
   dom: renderer.domElement,
   groundAt,
-  obstacles: () => (bay ? [carBox.copy(bay.box).translate(bay.root.position)] : []),
+  obstacles: () => (bay ? [carBox.copy(bay.box).applyMatrix4(bay.root.matrixWorld)] : []), // moved and turned
   canLock: () => !picking && !placement.active, // those need the pointer for clicks and the gizmo
 })
 
@@ -133,12 +152,19 @@ function groundAt(x: number, z: number, fromY: number): number | null {
   return null
 }
 
+/** fetch three-mesh-bvh once (walking needs it for the ground, picking for fast raycasts) */
+let bvhLoading: Promise<void> | null = null
+function loadBVH(): Promise<void> {
+  bvhLoading ??= import('three-mesh-bvh').then((m) => void (meshBVH = m))
+  return bvhLoading
+}
+
 /** the orbit camera's place while walking or flying — the orbit comes back to it */
 let orbitHome: THREE.Vector3 | null = null
 async function setCameraMode(mode: CameraMode): Promise<void> {
   if (mode === freeCam.mode) return
   if (mode !== 'orbit' && !meshBVH) {
-    meshBVH = await import('three-mesh-bvh')
+    await loadBVH()
     if (mode === freeCam.mode) return
   }
   if (freeCam.mode === 'orbit') orbitHome = camera.position.clone()
@@ -466,7 +492,7 @@ const HINTS: Record<CameraMode, string> = {
   walk: 'click to look · wasd walk · shift runs · esc frees the mouse',
   fly: 'click to look · wasd · space up · shift/ctrl down · scroll: speed',
 }
-const PICK_HINT = 'click a part to select · shift+click to add · alt+click picks behind · esc clears'
+const PICK_HINT = 'click to select · click again: next layer in · alt+click lists every layer · h hides · shift+h shows all · esc clears'
 const hint = document.createElement('div')
 hint.className = 'hint'
 hint.textContent = HINTS.orbit
@@ -542,6 +568,8 @@ interface Bay {
   size: THREE.Vector3
   /** its bounds where it was loaded, at the origin (walk/fly keep out of it) */
   box: THREE.Box3
+  /** what each mesh is (Menu › Car › Part roles): saved by the user, or guessed */
+  roles: { map: RoleMap; saved: boolean; hidden: HiddenPart[] }
 }
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
@@ -584,10 +612,28 @@ function centreOnCar(): void {
   invalidate()
 }
 
+/**
+ * Keep the framing from one vehicle to the next: the orbit's distance scales with the
+ * length (a bike after a car comes in close). Cars of a size barely move it.
+ */
+let framedLength = 4.5
+function frameLength(length: number): void {
+  const ratio = length / framedLength
+  framedLength = length
+  if (Math.abs(ratio - 1) < 0.15) return
+  const home = freeCam.mode === 'orbit' ? camera.position : orbitHome
+  if (!home) return
+  offset.subVectors(home, controls.target).multiplyScalar(ratio)
+  offset.setLength(THREE.MathUtils.clamp(offset.length(), controls.minDistance, controls.maxDistance))
+  home.copy(controls.target).add(offset)
+}
+
 /** swap the car in the bay; a newer request supersedes one still loading */
 /** take the car out of the bay and free it */
 function clearBay(): void {
   if (!bay) return
+  roleTint.set(null) // overlays on the car's meshes
+  roleDraft = null
   placement.attach(null)
   scene.remove(bay.root, bay.shadow)
   room.floorLayers.splice(room.floorLayers.indexOf(bay.shadow), 1)
@@ -603,7 +649,9 @@ function clearBay(): void {
 /** what car-dependent pages show when there's no car to work on */
 const bayPlaceholder = () => (loadingId ? 'Loading car…' : 'No car in the bay — pick one in Collection.')
 
-async function showCar(id: string): Promise<void> {
+/** `quiet`: the same car again with a new setup or roles — no loading screen over it */
+async function showCar(id: string, { quiet = false } = {}): Promise<void> {
+  if (parsedUpload && parsedUpload.id !== id) parsedUpload = null // only the upload in the bay is kept parsed
   if (id === NO_CAR) {
     loadingId = null // also abandons a car still loading
     setPicking(false)
@@ -622,14 +670,18 @@ async function showCar(id: string): Promise<void> {
     console.info('[garage] bay emptied')
     return
   }
-  const profile = CARS.find((c) => c.id === id) ?? CARS[0]
+  const profile = findProfile(id) ?? CARS[0]
   loadingId = profile.id
-  loader.classList.remove('done')
+  if (!quiet) loader.classList.remove('done')
   loader.querySelector('.loader-label')!.textContent = `loading ${carTitle(profile)}`
   loaderFill.style.transform = 'scaleX(0)'
   panelNav?.refresh()
   try {
-    const root = await loadCar(profile, (f) => (loaderFill.style.transform = `scaleX(${f})`))
+    const savedRoles = loadRoles(profile.id)
+    const loaded = await loadCar(profile, (f) => (loaderFill.style.transform = `scaleX(${f})`), savedRoles, !!profile.open)
+    const root = loaded.root
+    // roles decide what's painted and what glows once saved — or always, for an upload
+    const dressed = savedRoles || profile.open ? profileWithRoles(profile, loaded.roles) : profile
     if (loadingId !== profile.id) {
       disposeCar(root) // the user picked another car meanwhile
       return
@@ -641,22 +693,25 @@ async function showCar(id: string): Promise<void> {
     const shadow = bakeContactShadow(renderer, root, { width: size.x + 2.4, depth: size.z + 2.4, height: 0.9 }) // room for the blur
     scene.add(shadow)
     room.floorLayers.push(shadow)
-    const configurator = createConfigurator(root, profile, traceSceneChanged)
+    const configurator = createConfigurator(root, dressed, traceSceneChanged)
     applyAnisotropy(root)
     const groups = createGroupEditor(root, profile, configurator.carSpace, (materials) => {
+      scheduleGhosts()
       invalidate()
       post.refreshGlow()
       if (materials) traceSceneChanged()
     })
     groups.setOverlaysVisible(false) // the Parts page shows them
-    const lamps = createLampSystem(root, profile, () => {
+    const lamps = createLampSystem(root, dressed, () => {
       invalidate()
       post.refreshGlow()
       traceSceneChanged()
     })
-    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size, box }
+    const roles = { map: loaded.roles, saved: !!savedRoles, hidden: loaded.hidden }
+    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size, box, roles }
     applyDaylight()
     placement.attach({ id: profile.id, root, shadow, size }) // its saved place (the shadow was baked at the origin)
+    frameLength(Math.max(size.x, size.z))
     centreOnCar()
     room.shadowsChanged?.()
     traceSceneChanged()
@@ -835,11 +890,11 @@ const videoStage: Stage = (() => {
     },
     draw(pose: CameraPose, dt, black) {
       baseFov = pose.fov ?? post.settings.display.fov // the room clamps widen from this lens
-      // moves are laid out around a car at the origin: carry them to wherever it's been moved
-      const at = bay?.root.position
-      if (at) {
-        pose.position.add(at)
-        pose.target.add(at)
+      // moves are laid out around a car at the origin, nose to +z: carry them to wherever it's been moved and turned
+      if (bay) {
+        bay.root.updateMatrixWorld()
+        pose.position.applyMatrix4(bay.root.matrixWorld)
+        pose.target.applyMatrix4(bay.root.matrixWorld)
       }
       camera.position.copy(pose.position)
       controls.target.copy(pose.target)
@@ -862,14 +917,136 @@ const videoStage: Stage = (() => {
   }
 })()
 
+// ─── part roles (Menu › Car › Part roles) ───────────────────────────────────
+/** roles as being edited on the page; applied by reloading the car */
+let roleDraft: RoleMap | null = null
+let roleTintOn = true
+let rolesShowing = false
+const roleTint = createRoleTint()
+function draftRoles(): RoleMap {
+  if (!roleDraft) roleDraft = { ...(bay?.roles.map ?? {}) }
+  return roleDraft
+}
+function rolesDirty(): boolean {
+  if (!roleDraft || !bay) return false
+  const saved = bay.roles.map
+  return Object.keys(roleDraft).some((k) => roleDraft![k] !== saved[k])
+}
+/** role colours over the car while the page shows them (not on ghosted or hidden parts) */
+function syncRoleTint(): void {
+  if (!bay || !rolesShowing || !roleTintOn) {
+    roleTint.set(null)
+    return invalidate()
+  }
+  const draft = draftRoles()
+  const { ghosts, hidden } = bay.groups.xray
+  const tints = new Map<THREE.Mesh, RoleId>()
+  for (const mesh of bay.groups.pickable) {
+    const role = draft[partKey(mesh) ?? '']
+    if (role && !ghosts.has(mesh) && !hidden.has(mesh)) tints.set(mesh, role)
+  }
+  roleTint.set(tints)
+  invalidate()
+}
+function applyRoles(): void {
+  if (!bay || !roleDraft) return
+  saveRoles(bay.id, roleDraft)
+  roleDraft = null
+  void showCar(bay.id, { quiet: true })
+}
+
+// ─── uploads: the user's own models (Menu › Collection › Upload) ─────────────
+/**
+ * The upload in the bay as parsed, never shown itself: each load takes a clone (sharing
+ * geometry, materials and textures), so turning or re-roling it doesn't parse the files
+ * again. Disposing a clone only frees GPU copies — the next clone uploads them anew.
+ */
+let parsedUpload: { id: string; model: THREE.Object3D } | null = null
+let uploadStatus: { text: string; error: boolean } | null = null
+
+/** built-in car or upload by id */
+function findProfile(id: string): CarProfile | undefined {
+  const car = CARS.find((c) => c.id === id)
+  if (car) return car
+  const record = getUpload(id)
+  return record && uploadProfile(record, (onProgress) => openUpload(record, onProgress))
+}
+
+async function openUpload(record: UploadRecord, onProgress?: (f: number) => void): Promise<THREE.Object3D> {
+  if (parsedUpload?.id !== record.id) {
+    const { parseModel } = await import('./model-import')
+    parsedUpload = { id: record.id, model: await parseModel(record.files, record.main, renderer, onProgress) }
+  }
+  return cloneSkinned(parsedUpload.model) // skinned exports need their bones cloned too
+}
+
+function setUploadStatus(text: string | null, error = false): void {
+  uploadStatus = text ? { text, error } : null
+  panelNav?.refresh()
+}
+const storageFailed = (err: unknown) =>
+  setUploadStatus(`Couldn’t keep it in this browser (${(err as Error)?.name ?? err}) — it’s here until you reload.`, true)
+
+async function importUpload(input: { file: File; path: string }[]): Promise<void> {
+  try {
+    setUploadStatus('Reading files…')
+    const { files, main } = await collectFiles(input)
+    setUploadStatus(`Loading ${main.split('/').pop()}…`)
+    const { parseModel } = await import('./model-import')
+    const model = await parseModel(files, main, renderer)
+    let meshes = 0
+    model.traverse((o) => (o as THREE.Mesh).isMesh && meshes++)
+    if (meshes === 0) throw new Error('the file has no meshes')
+    const name = nameFromFile(main)
+    const setup = guessSetup(model, name, main.slice(main.lastIndexOf('.') + 1).toLowerCase())
+    const record: UploadRecord = { id: newUploadId(), name, created: Date.now(), main, files, setup, guess: { ...setup } }
+    parsedUpload = { id: record.id, model }
+    setUploadStatus(null)
+    await saveUpload(record).catch(storageFailed)
+    void navigator.storage?.persist?.() // ask the browser not to evict it under storage pressure
+    await showCar(record.id)
+    console.info(`[garage] uploaded ${main}: ${meshes} meshes, guessed`, setup)
+  } catch (err) {
+    console.error('[garage] upload failed', err)
+    setUploadStatus(`Couldn’t load that: ${(err as Error)?.message ?? err}`, true)
+  }
+}
+
+/** a change to how the upload in the bay is turned or sized — saved, then the model re-read */
+function setSetup(patch: Partial<UploadRecord['setup']>): void {
+  const record = bay && getUpload(bay.id)
+  if (!record) return
+  record.setup = { ...record.setup, ...patch }
+  void saveUpload(record).catch(storageFailed)
+  void showCar(record.id, { quiet: true })
+}
+
+// a model dropped anywhere on the page is uploaded
+app.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+  app.classList.add('is-dropping')
+})
+app.addEventListener('dragleave', (e) => {
+  if (e.relatedTarget === null) app.classList.remove('is-dropping')
+})
+app.addEventListener('drop', (e) => {
+  app.classList.remove('is-dropping')
+  if (!e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+  void droppedFiles(e.dataTransfer).then((files) => void (files.length && importUpload(files)))
+})
+
 // ─── side panel: Menu › Garage · Collection · Car · Parts · Settings ───────
 /** Menu › Parts: clicks on the car select parts (declared before the panel renders) */
 let picking = false
+/** Menu › Parts: ghost whatever stands in front of the part being worked on */
+let xrayOn = true
 const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
     render: (body, nav) =>
-      body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'lights', 'video', 'settings'], nav)),
+      body.append(menuList(pages, ['garage', 'collection', 'car', 'roles', 'parts', 'lights', 'video', 'settings'], nav)),
   },
   garage: garagePage({
     current: () => garageDef.id,
@@ -884,13 +1061,92 @@ const pages: Record<string, Page> = {
     current: () => bay?.id ?? (loadingId ? null : NO_CAR),
     loading: () => loadingId,
     select: (id) => void showCar(id),
+    uploads: () => uploads().map((r) => findProfile(r.id)!),
+  }),
+  upload: uploadPage({
+    current: () => (bay ? getUpload(bay.id) ?? null : null),
+    size: () => (bay ? new THREE.Vector3(bay.size.x, bay.size.y, bay.size.z) : null),
+    status: () => uploadStatus,
+    list: uploads,
+    importFiles: (files) => void importUpload(files),
+    setSetup,
+    rename(name) {
+      const record = bay && getUpload(bay.id)
+      if (!record || !name.trim()) return
+      record.name = name.trim()
+      void saveUpload(record).catch(storageFailed)
+      panelNav.refresh()
+    },
+    show: (id) => void showCar(id),
+    remove(id) {
+      if (bay?.id === id || loadingId === id) void showCar(NO_CAR)
+      uploadStatus = null
+      void deleteUpload(id).then(() => panelNav.refresh())
+    },
   }),
   car: carPage(() => bay?.configurator, bayPlaceholder, placement),
   lights: lightsPage(() => bay?.lamps, bayPlaceholder),
+  roles: rolesPage({
+    editor: () => bay?.groups,
+    roleOf: (mesh) => draftRoles()[partKey(mesh) ?? ''] ?? 'other',
+    hiddenAtLoad: () => (bay?.roles.hidden ?? []).filter((h) => draftRoles()[h.key] === 'hidden'), // ↺ takes one off
+    curated: () => !!bay && !bay.roles.saved && !bay.configurator.profile.open,
+    upload: () => !!bay?.configurator.profile.open,
+    dirty: rolesDirty,
+    assign(meshes, role) {
+      const draft = draftRoles()
+      for (const m of meshes) draft[partKey(m) ?? ''] = role
+      // a hidden part leaves the view now (for real once applied)
+      if (role === 'hidden') bay?.groups.xray.hide(meshes)
+      syncRoleTint()
+    },
+    unhide(key) {
+      draftRoles()[key] = 'other'
+    },
+    apply: applyRoles,
+    discard() {
+      roleDraft = null
+      bay?.groups.xray.unhideAll()
+      syncRoleTint()
+    },
+    reset() {
+      if (!bay) return
+      saveRoles(bay.id, null)
+      roleDraft = null
+      void showCar(bay.id, { quiet: true })
+    },
+    picking: () => picking,
+    setPicking,
+    tint: () => roleTintOn,
+    setTint(on) {
+      roleTintOn = on
+      syncRoleTint()
+    },
+    showing(on) {
+      rolesShowing = on
+      syncRoleTint()
+    },
+    placeholder: bayPlaceholder,
+  }),
   parts: partsPage({
     editor: () => bay?.groups,
     picking: () => picking,
     setPicking,
+    xray: () => xrayOn,
+    setXray(on) {
+      xrayOn = on
+      scheduleGhosts(0)
+    },
+    hide: hideParts,
+    unhideAll,
+    roleGroups() {
+      if (!bay) return []
+      const roles = bay.roles.map
+      // lamps are styled on the Lights page — a group's material would take over their glowing lenses
+      return ROLES.filter((r) => r.id !== 'hidden' && r.id !== 'headlights' && r.id !== 'taillights')
+        .map((r) => ({ name: r.label, meshes: bay!.groups.pickable.filter((m) => roles[partKey(m) ?? ''] === r.id) }))
+        .filter((e) => e.meshes.length > 0)
+    },
     placeholder: bayPlaceholder,
   }),
   settings: {
@@ -916,29 +1172,178 @@ try {
 function setPicking(on: boolean): void {
   picking = on
   if (on && document.pointerLockElement) document.exitPointerLock() // the pointer is needed to pick
+  if (on) void loadBVH() // a pick over a million-triangle car takes tens of ms without it
   renderer.domElement.style.cursor = on ? 'crosshair' : ''
   syncCameraHud()
-  if (!on) bay?.groups.highlight('hover', [])
+  if (!on) {
+    bay?.groups.highlight('hover', [])
+    closeLayerMenu()
+    pickTip.classList.remove('is-shown')
+    pickCycle = null
+  }
   invalidate()
 }
 
+/** one mesh into `hits`: through a BVH (built the first time a ray comes near) once it's loaded */
+const castMesh: MeshCast = (mesh, ray, hits) => {
+  if (!meshBVH) return mesh.raycast(ray, hits)
+  // indirect: leaves the geometry's index as it is (overlays and ghosts share it)
+  mesh.geometry.boundsTree ??= new meshBVH.MeshBVH(mesh.geometry, { indirect: true })
+  meshBVH.acceleratedRaycast.call(mesh, ray, hits)
+}
+
 const raycaster = new THREE.Raycaster()
+;(raycaster as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true // one hit per mesh is all a pick needs
 const ndc = new THREE.Vector2()
-/** meshes under a canvas point, nearest first, one entry per mesh */
+const pickHits: THREE.Intersection[] = []
+/** every layer under a canvas point, nearest first, one entry per mesh — ghosts included, hidden parts not */
 function meshesAt(clientX: number, clientY: number): THREE.Mesh[] {
   if (!bay) return []
   const rect = renderer.domElement.getBoundingClientRect()
   ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
   // camera.matrixWorld is still the pose last drawn, so rays match the picture
   raycaster.setFromCamera(ndc, camera)
-  const seen = new Set<THREE.Object3D>()
+  pickHits.length = 0
+  const hidden = bay.groups.xray.hidden
+  for (const mesh of bay.groups.pickable) if (!hidden.has(mesh)) castMesh(mesh, raycaster, pickHits)
+  pickHits.sort((a, b) => a.distance - b.distance)
   const out: THREE.Mesh[] = []
-  for (const hit of raycaster.intersectObjects(bay.groups.pickable, false)) {
-    if (seen.has(hit.object)) continue
-    seen.add(hit.object)
-    out.push(hit.object as THREE.Mesh)
-  }
+  for (const hit of pickHits) if (!out.includes(hit.object as THREE.Mesh)) out.push(hit.object as THREE.Mesh)
   return out
+}
+
+/** where a plain click lands: the first layer that isn't ghosted — what you see is what you pick */
+function surfaceIndex(stack: THREE.Mesh[]): number {
+  const ghosts = bay?.groups.xray.ghosts
+  const i = stack.findIndex((m) => !ghosts?.has(m))
+  return i < 0 ? 0 : i
+}
+
+/**
+ * Clicking again on the same spot goes one layer in (paint → glass → seat → floor…),
+ * wrapping round at the last. Moving the pointer or the camera starts over.
+ */
+let pickCycle: { x: number; y: number; stack: THREE.Mesh[]; index: number; added: boolean } | null = null
+const sameStack = (a: THREE.Mesh[], b: THREE.Mesh[]) => a.length === b.length && a.every((m, i) => m === b[i])
+function cycleAt(x: number, y: number, stack: THREE.Mesh[]): number | null {
+  if (!pickCycle || Math.hypot(x - pickCycle.x, y - pickCycle.y) > 4 || !sameStack(pickCycle.stack, stack)) return null
+  return (pickCycle.index + 1) % stack.length
+}
+
+// a small label by the pointer: the part a click would take, and how deep it is
+const pickTip = document.createElement('div')
+pickTip.className = 'pick-tip'
+app.appendChild(pickTip)
+function showPickTip(x: number, y: number, stack: THREE.Mesh[], index: number, picked: boolean): void {
+  pickTip.replaceChildren()
+  const name = document.createElement('b')
+  name.textContent = meshLabel(stack[index])
+  const depth = document.createElement('span')
+  const n = stack.length
+  // once picked, say what the next click on this spot would take
+  if (n > 1) depth.textContent = `layer ${index + 1}/${n}${picked ? ` · again: ${meshLabel(stack[(index + 1) % n])}` : ''}`
+  pickTip.append(name, depth)
+  pickTip.style.transform = `translate(${x + 14}px, ${y + 16}px)`
+  pickTip.classList.add('is-shown')
+}
+
+// Alt+click: every layer under the pointer as a list — hover one to see it, click to select
+const layerMenu = document.createElement('div')
+layerMenu.className = 'pick-menu'
+app.appendChild(layerMenu)
+function closeLayerMenu(): void {
+  if (!layerMenu.classList.contains('is-shown')) return
+  layerMenu.classList.remove('is-shown')
+  layerMenu.replaceChildren()
+  bay?.groups.highlight('hover', [])
+}
+function openLayerMenu(x: number, y: number, stack: THREE.Mesh[]): void {
+  const editor = bay?.groups
+  if (!editor) return
+  layerMenu.replaceChildren()
+  const title = document.createElement('div')
+  title.className = 'pick-menu-title'
+  title.textContent = `${stack.length} layer${stack.length === 1 ? '' : 's'} here · shift adds`
+  layerMenu.append(title)
+  stack.forEach((mesh, i) => {
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.className = `pick-menu-item${editor.selection.has(mesh) ? ' is-selected' : ''}`
+    const n = document.createElement('span')
+    n.className = 'pick-menu-n'
+    n.textContent = String(i + 1)
+    const label = document.createElement('span')
+    label.textContent = meshLabel(mesh)
+    item.title = mesh.name
+    item.append(n, label)
+    item.addEventListener('pointerenter', () => editor.highlight('hover', [mesh]))
+    item.addEventListener('click', (e) => {
+      editor.select([mesh], e.shiftKey || e.ctrlKey || e.metaKey ? 'toggle' : 'replace')
+      pickCycle = { x, y, stack, index: i, added: true }
+      closeLayerMenu()
+      panelNav.refresh()
+    })
+    layerMenu.append(item)
+  })
+  layerMenu.addEventListener('pointerleave', () => editor.highlight('hover', []), { once: true })
+  // keep it on screen
+  layerMenu.classList.add('is-shown')
+  const w = layerMenu.offsetWidth
+  const h = layerMenu.offsetHeight
+  layerMenu.style.left = `${Math.min(x + 8, window.innerWidth - w - 8)}px`
+  layerMenu.style.top = `${Math.max(8, Math.min(y + 8, window.innerHeight - h - 8))}px`
+  pickTip.classList.remove('is-shown')
+}
+window.addEventListener('pointerdown', (e) => {
+  if (!layerMenu.contains(e.target as Node)) closeLayerMenu()
+})
+
+/** H: take the selection (or the hovered part) out of the view to reach what's under it */
+function hideParts(): void {
+  const editor = bay?.groups
+  if (!editor) return
+  const doomed = editor.selection.size > 0 ? [...editor.selection] : editor.targets()
+  if (doomed.length === 0) return
+  editor.xray.hide(doomed)
+  editor.highlight('hover', [])
+  editor.select([...editor.selection].filter((m) => !editor.xray.hidden.has(m)))
+  pickCycle = null
+  panelNav.refresh()
+}
+function unhideAll(): void {
+  const editor = bay?.groups
+  if (!editor || editor.xray.hidden.size === 0) return
+  editor.xray.unhideAll()
+  pickCycle = null
+  scheduleGhosts(0)
+  panelNav.refresh()
+}
+
+// ghosts follow the selection, the inspected group and the camera — worked out once things rest
+let ghostTimer = 0
+function scheduleGhosts(delay = 60): void {
+  clearTimeout(ghostTimer)
+  ghostTimer = window.setTimeout(updateGhosts, delay)
+}
+function updateGhosts(): void {
+  const editor = bay?.groups
+  if (!editor) return
+  if (!xrayOn || !editor.overlaysVisible) {
+    if (editor.xray.ghosts.size > 0) editor.xray.setGhosts([])
+    return invalidate()
+  }
+  const targets = editor.targets()
+  const skip = new Set([...targets, ...editor.xray.hidden])
+  const candidates = editor.pickable.filter((m) => !skip.has(m))
+  bay!.root.updateMatrixWorld()
+  const eye = camera.getWorldPosition(new THREE.Vector3())
+  editor.xray.setGhosts(findOccluders(targets, candidates, eye, castMesh))
+  if (rolesShowing) syncRoleTint() // tints stay off ghosted parts
+  else invalidate()
+}
+function cameraMovedForPicking(): void {
+  pickCycle = null
+  if (bay?.groups.overlaysVisible && xrayOn) scheduleGhosts(160)
 }
 
 // a click (not a drag — dragging orbits) picks; hover tints what would be picked
@@ -949,34 +1354,74 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   downAt = null
   if (!picking || !bay || !start || e.button !== 0) return
   if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 5) return
-  const hits = meshesAt(e.clientX, e.clientY)
-  const mesh = e.altKey ? hits[1] ?? hits[0] : hits[0]
+  clearTimeout(hoverTimer) // a hover still pending would overwrite the tip
+  const editor = bay.groups
+  const stack = meshesAt(e.clientX, e.clientY)
+  if (e.altKey && stack.length > 0) return openLayerMenu(e.clientX, e.clientY, stack)
   const additive = e.shiftKey || e.ctrlKey || e.metaKey
-  if (mesh) bay.groups.select([mesh], additive ? 'toggle' : 'replace')
-  else if (!additive) bay.groups.select([])
+  if (stack.length === 0) {
+    pickCycle = null
+    if (!additive) editor.select([])
+    return panelNav.refresh()
+  }
+  const next = cycleAt(e.clientX, e.clientY, stack)
+  const index = next ?? surfaceIndex(stack)
+  const mesh = stack[index]
+  let added = true
+  if (additive) {
+    // going deeper with shift swaps the layer this spot added last for the next one
+    if (next !== null && pickCycle!.added) editor.select([pickCycle!.stack[pickCycle!.index]], 'toggle')
+    added = !editor.selection.has(mesh)
+    editor.select([mesh], 'toggle')
+  } else {
+    editor.select([mesh])
+  }
+  pickCycle = { x: e.clientX, y: e.clientY, stack, index, added }
+  showPickTip(e.clientX, e.clientY, stack, index, true)
   panelNav.refresh()
 })
-// hover picks only once the pointer rests — a raycast over a million-triangle
-// car takes tens of ms, too much to repeat on every pointermove
+// hover picks only once the pointer rests (a raycast is still work on a big car)
 let hoverTimer = 0
 renderer.domElement.addEventListener('pointermove', (e) => {
   clearTimeout(hoverTimer)
-  if (!picking || downAt) return // no hover work while dragging
+  if (!picking || downAt || layerMenu.classList.contains('is-shown')) return // no hover work while dragging
   hoverTimer = window.setTimeout(() => {
-    const hits = meshesAt(e.clientX, e.clientY)
-    const mesh = e.altKey ? hits[1] ?? hits[0] : hits[0]
-    bay?.groups.highlight('hover', mesh ? [mesh] : [])
+    const stack = meshesAt(e.clientX, e.clientY)
+    if (stack.length === 0) {
+      pickTip.classList.remove('is-shown')
+      return bay?.groups.highlight('hover', [])
+    }
+    const next = cycleAt(e.clientX, e.clientY, stack)
+    const index = next ?? surfaceIndex(stack)
+    // a part reached by going in gets its cover ghosted; the surface under the pointer doesn't need it
+    bay?.groups.highlight('hover', [stack[index]], { xray: next !== null })
+    showPickTip(e.clientX, e.clientY, stack, index, false)
   }, 60)
 })
-renderer.domElement.addEventListener('pointerleave', () => bay?.groups.highlight('hover', []))
+renderer.domElement.addEventListener('pointerleave', () => {
+  clearTimeout(hoverTimer)
+  pickTip.classList.remove('is-shown')
+  bay?.groups.highlight('hover', [])
+})
 window.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !bay || bay.groups.selection.size === 0) return
-  bay.groups.select([])
-  panelNav.refresh()
+  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+  if (typing || !bay) return
+  if (e.key === 'Escape') {
+    if (layerMenu.classList.contains('is-shown')) return closeLayerMenu()
+    if (bay.groups.selection.size === 0) return
+    bay.groups.select([])
+    pickCycle = null
+    return panelNav.refresh()
+  }
+  if (e.code === 'KeyH' && bay.groups.overlaysVisible && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.shiftKey) unhideAll()
+    else hideParts()
+  }
 })
 
-const known = (id: string | null) => (id && (id === NO_CAR || CARS.some((c) => c.id === id)) ? id : null)
-void showCar(known(requested) ?? known(savedCar) ?? DEFAULT_CAR)
+const known = (id: string | null) => (id && (id === NO_CAR || findProfile(id)) ? id : null)
+// uploads first: the last car shown may be one of them
+void loadUploads().then(() => showCar(known(requested) ?? known(savedCar) ?? DEFAULT_CAR))
 
 // console handle for poking at the scene: garage.camera.position.set(…), garage.scene, …
 const garage: {
@@ -1162,6 +1607,7 @@ function frame(timestamp: number): void {
   if (orbiting ? updateControls(dt) : freeCam.update(dt)) {
     invalidate() // includes damping settling after a drag
     noteActivity()
+    cameraMovedForPicking()
   }
   const tracing = tracerWanted(timestamp)
   if (tracing && tracer!.status === 'tracing') invalidate(1) // keep sampling until it's done

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { createPaintMaterial, type PaintMaterial } from './paint'
 import type { MaterialChoice } from './materials'
 import { createHighlighter, type HighlightKind } from './highlight'
+import { createXray, type Xray } from './xray'
 import type { CarProfile } from './cars'
 
 export type GroupMaterial = MaterialChoice
@@ -56,12 +57,25 @@ export interface GroupEditor {
   /** new group from the current selection; members leave any group they were in */
   groupSelection(): MaterialGroup | null
   addSelectionTo(groupId: string): void
+  /**
+   * one group per entry (joined to a group of that name if there is one), wearing the
+   * factory look to start from; only meshes in no group yet move — earlier work stays.
+   * Returns how many meshes were grouped.
+   */
+  groupBy(entries: { name: string; meshes: THREE.Mesh[] }[]): number
   removeMember(groupId: string, mesh: THREE.Mesh): void
   deleteGroup(groupId: string): void
   rename(groupId: string, name: string): void
   setMaterial(groupId: string, patch: Partial<GroupMaterial>): void
-  /** tint hovered / inspected meshes (selection is tinted automatically) */
-  highlight(kind: Exclude<HighlightKind, 'selected'>, meshes: Iterable<THREE.Mesh>): void
+  /**
+   * tint hovered / inspected meshes (selection is tinted automatically); `xray: false` keeps a
+   * hover out of `targets()` — the part under the pointer on the car's surface needs no ghosting
+   */
+  highlight(kind: Exclude<HighlightKind, 'selected'>, meshes: Iterable<THREE.Mesh>, opts?: { xray?: boolean }): void
+  /** what X-ray clears the view to: the selection, the inspected group and a deliberate hover */
+  targets(): THREE.Mesh[]
+  /** ghosting and hiding for reaching parts under other parts */
+  readonly xray: Xray
   setOverlaysVisible(visible: boolean): void
   /** whether the Parts page is showing its overlays */
   readonly overlaysVisible: boolean
@@ -77,16 +91,22 @@ export function createGroupEditor(
   /** `materials` is true when what the car is made of changed, false for overlays and selection */
   onChange: (materials: boolean) => void,
 ): GroupEditor {
+  // members are saved by mesh key (unique — uploads repeat names or have none); older saves by name
   const byName = new Map<string, THREE.Mesh>()
+  const memberId = (m: THREE.Mesh): string => m.userData.partKey ?? m.name
   const pickable: THREE.Mesh[] = []
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh
     if (!mesh.isMesh || mesh.userData.overlay) return
-    byName.set(mesh.name, mesh)
+    if (!byName.has(mesh.name)) byName.set(mesh.name, mesh)
+    if (mesh.userData.partKey) byName.set(mesh.userData.partKey, mesh)
     pickable.push(mesh)
   })
 
   const highlighter = createHighlighter()
+  const xray = createXray()
+  const highlighted: Record<'hover' | 'focus', THREE.Mesh[]> = { hover: [], focus: [] }
+  let hoverXray = true
   let overlaysVisible = true
   const groups: MaterialGroup[] = []
   const selection = new Set<THREE.Mesh>()
@@ -102,7 +122,7 @@ export function createGroupEditor(
     const data: SavedGroup[] = groups.map((g) => ({
       id: g.id,
       name: g.name,
-      members: [...g.members].map((m) => m.name),
+      members: [...g.members].map(memberId),
       material: g.material,
     }))
     try {
@@ -224,6 +244,18 @@ export function createGroupEditor(
       syncSelection()
       changed()
     },
+    groupBy(entries) {
+      let moved = 0
+      for (const { name, meshes } of entries) {
+        const free = meshes.filter((m) => !groupOf(m))
+        if (free.length === 0) continue
+        const group = groups.find((g) => g.name === name) ?? makeGroup(name, { ...DEFAULT_GROUP_MATERIAL, material: 'original' })
+        join(group, free)
+        moved += free.length
+      }
+      if (moved > 0) changed()
+      return moved
+    },
     removeMember(groupId, mesh) {
       const group = find(groupId)
       if (!group?.members.has(mesh)) return
@@ -251,13 +283,27 @@ export function createGroupEditor(
       for (const paint of paints.get(groupId)?.values() ?? []) paint.apply({ ...group.material, opacity: null })
       changed()
     },
-    highlight(kind, meshes) {
-      highlighter.set(kind, meshes)
+    highlight(kind, meshes, opts) {
+      highlighted[kind] = [...meshes]
+      if (kind === 'hover') hoverXray = opts?.xray ?? true
+      highlighter.set(kind, highlighted[kind])
       onChange(false)
     },
+    targets() {
+      const out = new Set([...selection, ...highlighted.focus])
+      if (hoverXray) for (const m of highlighted.hover) out.add(m)
+      for (const m of xray.hidden) out.delete(m)
+      return [...out]
+    },
+    xray,
     setOverlaysVisible(visible) {
       overlaysVisible = visible
       highlighter.setVisible(visible)
+      // ghosts and hidden parts are editing aids: the car is whole again off the Parts page
+      if (!visible) {
+        xray.setGhosts([])
+        xray.unhideAll()
+      }
       onChange(false)
     },
     get overlaysVisible() {
@@ -265,6 +311,7 @@ export function createGroupEditor(
     },
     dispose() {
       highlighter.dispose()
+      xray.dispose()
       for (const g of [...groups]) {
         for (const paint of paints.get(g.id)?.values() ?? []) paint.material.dispose()
       }

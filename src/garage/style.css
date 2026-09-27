@@ -856,3 +856,255 @@ body,
 .cfg-part.is-off .cfg-note {
   opacity: 0.4;
 }
+
+/* Menu › Parts: the part a click would take, by the pointer */
+.pick-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  max-width: 260px;
+  background: rgba(8, 10, 14, 0.78);
+  border: 1px solid rgba(53, 224, 255, 0.25);
+  border-radius: 6px;
+  font: 11px/1.25 ui-monospace, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 20;
+}
+.pick-tip.is-shown {
+  opacity: 1;
+}
+.pick-tip b {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick-tip span:empty {
+  display: none;
+}
+.pick-tip span {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Alt+click: every layer under the pointer */
+.pick-menu {
+  position: fixed;
+  display: none;
+  flex-direction: column;
+  min-width: 180px;
+  max-width: 280px;
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+  padding: 4px;
+  background: rgba(8, 10, 14, 0.9);
+  border: 1px solid rgba(53, 224, 255, 0.3);
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 30;
+}
+.pick-menu.is-shown {
+  display: flex;
+}
+.pick-menu-title {
+  padding: 4px 6px 6px;
+  font: 10px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+.pick-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: rgba(255, 255, 255, 0.85);
+  font: 12px/1.2 system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.pick-menu-item > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick-menu-item:hover {
+  background: rgba(53, 224, 255, 0.14);
+}
+.pick-menu-item.is-selected {
+  color: #35e0ff;
+}
+.pick-menu-n {
+  flex: none;
+  width: 18px;
+  font: 10px/1 ui-monospace, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: right;
+}
+
+/* Menu › Collection › Upload */
+.cfg-drop {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  margin-bottom: 14px;
+  padding: 18px 12px;
+  border: 1px dashed rgba(53, 224, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(53, 224, 255, 0.04);
+  text-align: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.cfg-drop.is-over {
+  border-color: var(--cfg-accent);
+  background: rgba(53, 224, 255, 0.14);
+}
+.cfg-drop strong {
+  font-weight: 600;
+  font-size: 13px;
+}
+.cfg-drop .cfg-note {
+  margin: 0;
+}
+.cfg-status {
+  margin: 0 0 12px;
+}
+.cfg-status.is-error {
+  color: #ffb3bb;
+}
+.cfg-text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+}
+.cfg-text:focus {
+  border-color: var(--cfg-accent);
+  outline: none;
+}
+.cfg-upload {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.cfg-upload-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.cfg-upload-text .cfg-note {
+  margin: 0;
+}
+.cfg-upload-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cfg-upload.is-active .cfg-upload-name {
+  color: var(--cfg-accent);
+}
+.cfg-mini.is-armed {
+  border-color: #ff5a6a;
+  background: rgba(255, 90, 106, 0.2);
+  color: #fff;
+}
+.cfg-car-add {
+  border-style: dashed !important;
+}
+/* a file dragged over the page */
+.is-dropping::after {
+  content: 'Drop to upload';
+  position: fixed;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--cfg-accent, #35e0ff);
+  border-radius: 16px;
+  background: rgba(5, 8, 12, 0.45);
+  font: 14px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #fff;
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* Menu › Car › Part roles */
+.cfg-role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.cfg-role-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+.cfg-role-btn::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--role);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.cfg-role {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.cfg-role-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cfg-role-head:hover .cfg-role-name {
+  color: var(--cfg-accent);
+}
+.cfg-role-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+.cfg-role-name {
+  flex: 1;
+}
+.cfg-role .cfg-actions,
+.cfg-role .cfg-parts {
+  margin-top: 6px;
+}
+.cfg-role-chip {
+  padding-right: 8px;
+  color: inherit;
+  cursor: pointer;
+}
+.cfg-role-chip:hover {
+  border-color: var(--cfg-accent);
+}

@@ -1,4 +1,4 @@
-import { CARS, NO_CAR } from '../cars'
+import { CARS, NO_CAR, type CarProfile } from '../cars'
 import type { Page } from './panel'
 import { el } from './widgets'
 
@@ -8,6 +8,8 @@ export interface CollectionState {
   /** car being loaded, if any */
   loading(): string | null
   select(id: string): void
+  /** the user's own models */
+  uploads(): CarProfile[]
 }
 
 /** Menu › Collection — one card per car; picking one swaps the car in the bay */
@@ -35,13 +37,24 @@ export function collectionPage(state: CollectionState): Page {
       })
       grid.append(none)
 
-      for (const car of CARS) {
+      // bring your own: opens Menu › Collection › Upload
+      const add = el('button', 'cfg-car cfg-car-add')
+      add.type = 'button'
+      add.append(
+        el('span', 'cfg-car-make', 'Upload'),
+        el('span', 'cfg-car-model', 'Your own model'),
+        el('span', 'cfg-car-tag', 'A car or bike: glb, gltf, fbx, obj, dae, 3ds, usdz or zip'),
+      )
+      add.addEventListener('click', () => nav.open('upload'))
+      grid.append(add)
+
+      for (const car of [...state.uploads(), ...CARS]) {
         const active = state.current() === car.id
         const loading = state.loading() === car.id
         const card = el('button', `cfg-car${active ? ' is-active' : ''}${loading ? ' is-loading' : ''}`)
         card.type = 'button'
         card.append(
-          el('span', 'cfg-car-make', `${car.make} · ${car.year}`),
+          el('span', 'cfg-car-make', car.year ? `${car.make} · ${car.year}` : car.make),
           el('span', 'cfg-car-model', car.model),
           el('span', 'cfg-car-tag', car.tag),
         )

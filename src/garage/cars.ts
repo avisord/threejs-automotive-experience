@@ -5,6 +5,8 @@ import type { PartId } from './configurator'
 export interface PartMatch {
   material?: RegExp
   node?: RegExp
+  /** mesh keys (`roles.ts`: the mesh's order in the file) — how user-set roles pick meshes */
+  keys?: ReadonlySet<string>
 }
 
 /** a material the export marks opaque (or fully transparent) that should read as tinted glass */
@@ -24,7 +26,8 @@ export interface CarProfile {
   id: string
   make: string
   model: string
-  year: number
+  /** model year; uploads have none */
+  year?: number
   /** short descriptor under the name on the card */
   tag: string
   /** file in public/models — optimised with gltf-transform, see car.ts */
@@ -33,6 +36,12 @@ export interface CarProfile {
   yaw?: number
   /** rescale to this overall length in metres; omit to trust the file */
   length?: number
+  /** uploads: reads the model instead of fetching `file` from public/models */
+  open?: (onProgress?: (fraction: number) => void) => Promise<THREE.Object3D>
+  /** uploads: quarter turns (radians) applied to a wrapper — roll, pitch, then yaw */
+  turn?: { yaw: number; pitch: number; roll: number }
+  /** uploads: the length to scale to, given the measured one (undefined keeps it) */
+  fitLength?: (measured: number) => number | undefined
   /** meshes to drop: shadow planes, motion-blur wheel doubles, damage variants */
   hide?: PartMatch[]
   glass?: GlassFix[]
@@ -197,7 +206,8 @@ export const carTitle = (c: CarProfile) => `${c.make} ${c.model}`
 
 /** does this mesh fall under `m`? checks the material and the mesh's node chain up to the car root */
 export function matches(m: PartMatch, mesh: THREE.Mesh, root: THREE.Object3D): boolean {
-  const material = mesh.material as THREE.Material
+  const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material
+  if (m.keys?.has(mesh.userData.partKey)) return true
   if (m.material && m.material.test(material.name)) return true
   if (m.node) {
     for (let o: THREE.Object3D | null = mesh; o && o !== root; o = o.parent) {
