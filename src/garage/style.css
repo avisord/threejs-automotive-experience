@@ -551,6 +551,20 @@ body,
   color: rgba(255, 255, 255, 0.3);
 }
 
+.cfg-car-credit.is-link {
+  color: rgba(255, 255, 255, 0.35);
+  text-decoration: underline dotted rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+.cfg-car-credit.is-link:hover {
+  color: var(--cfg-accent);
+}
+
+.cfg-note a {
+  color: var(--cfg-accent);
+}
+
 .cfg-car-badge {
   position: absolute;
   top: 10px;

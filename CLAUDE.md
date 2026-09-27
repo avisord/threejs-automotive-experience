@@ -3,6 +3,8 @@
 Three Vite pages (multi-page build, see `vite.config.ts`), deployed on Vercel at
 https://tstshaders.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
 
+- **`credits.html` → `src/credits.ts`** — models (from `CARS[].credit`), Poly Haven textures,
+  libraries and their licences; linked from the home footer and Menu › Collection.
 - **`index.html`** — static home page (no JS) describing the garage, screenshots in
   `public/home/` (1280 px WebP + `og.jpg`, captured headless from the real app). `public/sitemap.xml`
   + `robots.txt` list `/`, `/garage.html`, `/balls/` for Google Search Console — add new pages there.
@@ -119,8 +121,17 @@ configurator, lamps, placement, tracer, invalidate, showGarage, setSun`.
    see-through, lamps detected (four spot lights: two head, two tail), texture and
    geometry counts back to baseline after switching away.
 
-Licences: Roxy (toddeppe), AMG ONE (VTX), 930 (Lionsharp Studios) are CC-BY-4.0 and
-credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence info.
+5. Give it a `credit` (Sketchfab title, URL, author, licence, `basedOn` if the page credits an
+   original): it shows on its card and on `/credits.html` (`src/credits.ts` renders `CARS`).
+   Only CC BY / CC0 / CC BY-NC(-SA) models — never ND (we adapt them) or Store licences (the
+   .glb is publicly downloadable from the site).
+
+Licences (matched 2026-09-27 via the Sketchfab API by triangle count — within the few % that
+gltf-transform's prune drops — and any author the file names): GT3 R "Roxy" (toddeppe, based on
+MattDoesBlender), 930 (Lionsharp Studios), SLS and 190E (Dave Love SketchFab), AMG ONE (kevin
+(ケビン) — the file came from a spam re-upload whose metadata named a coffee brand) are CC BY 4.0;
+GT3 RS (VTX) and RX-7 (Ddiaz Design) are CC BY-NC-SA 4.0 — non-commercial only. Several meshes
+look ripped from games (`amgprojone_`, `fast:…_lodA`, `.col` nodes).
 
 ## Gotchas learned the hard way
 

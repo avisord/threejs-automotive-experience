@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         home: resolve(import.meta.dirname, 'index.html'),
         ballpit: resolve(import.meta.dirname, 'balls/index.html'),
+        credits: resolve(import.meta.dirname, 'credits.html'),
         garage: resolve(import.meta.dirname, 'garage.html'),
       },
     },
