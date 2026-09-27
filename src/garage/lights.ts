@@ -15,7 +15,8 @@ export interface LampConfig {
 export type LampSettings = Record<LampId, LampConfig>
 
 export const DEFAULT_LAMPS: LampSettings = {
-  head: { on: true, color: '#eaf1ff', intensity: 1, beam: true },
+  // the beam cone is off until it's reworked; a car's own toggle still turns it on
+  head: { on: true, color: '#eaf1ff', intensity: 1, beam: false },
   tail: { on: true, color: '#ff2a18', intensity: 1, beam: false },
 }
 
@@ -180,9 +181,14 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
   const beamScale = () => 1 - daylight
 
   const storageKey = `garage.lamps.v1.${profile.id}`
+  /** the beam was switched by hand on this car: before, every save carried the old default (on) */
+  let beamChosen = false
   try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as Partial<LampSettings> | null
-    if (saved) for (const id of present) Object.assign(settings[id], saved[id])
+    const saved = JSON.parse(localStorage.getItem(storageKey) ?? 'null') as (Partial<LampSettings> & { beamChosen?: boolean }) | null
+    if (saved) {
+      beamChosen = saved.beamChosen === true
+      for (const id of present) Object.assign(settings[id], saved[id], beamChosen ? {} : { beam: DEFAULT_LAMPS[id].beam })
+    }
   } catch {
     // corrupt or blocked storage — defaults
   }
@@ -284,9 +290,10 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
     present,
     set(id, patch) {
       Object.assign(settings[id], patch)
+      if ('beam' in patch) beamChosen = true
       rebuild()
       try {
-        localStorage.setItem(storageKey, JSON.stringify(settings))
+        localStorage.setItem(storageKey, JSON.stringify({ ...settings, beamChosen }))
       } catch {
         // not persisted — fine
       }
