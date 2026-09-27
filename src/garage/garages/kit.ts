@@ -82,7 +82,8 @@ export interface Room {
   interior?: InteriorLights
   /**
    * A photographic location: depth of field on by default here (Settings › Graphics › Depth of
-   * field, "Auto"), with this aperture — the blur's scale, in pixels at half resolution.
+   * field, "Auto"), with this aperture — the blur's scale, in pixels at half resolution, reached
+   * right by the lens (the background gets ~a third of it, post.ts `lensCoc`).
    */
   depthOfField?: { bokehScale: number }
 }

@@ -13,6 +13,8 @@ uniform float saturation;
 uniform vec3 whiteBalance;
 uniform vec3 shadowTint;
 uniform vec3 highlightTint;
+uniform float lift;
+uniform vec3 fillTint;
 
 const vec3 LUMA = vec3( 0.2126, 0.7152, 0.0722 );
 
@@ -30,8 +32,18 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, out vec4 outputColor
   // contrast pivots on 18% grey in log space, so it works on HDR input
   c = 0.18 * pow( c / 0.18 + 1e-6, vec3( contrast ) );
 
+  // shadow lift: shade more than ~6 stops under mid grey opened up by lift stops, easing out by half a
+  // stop under it — a game's fill light, as a toe in log space (mid-tones and the contrast above keep
+  // their bite). Half of it is a gain, half an added fill in the look's shadow colour: a gain alone
+  // can't lift a channel that is ~0 (low-sun shade on saturated grass had no blue at all, and stayed
+  // black-green); the fill gives the shade the sky's blue. Luminance comes out as the toe says.
+  float stops = log2( max( dot( c, LUMA ), 1e-5 ) / 0.18 );
+  float y = max( dot( c, LUMA ), 1e-5 );
+  float lifted = y * exp2( lift * ( 1.0 - smoothstep( -6.0, -0.5, stops ) ) );
+  c = 0.5 * c * ( lifted / y ) + 0.5 * ( c + ( lifted - y ) * fillTint );
+
   // split toning: shadows lean one way, highlights the other
-  float stops = log2( max( dot( c, LUMA ), 1e-4 ) / 0.18 );
+  stops = log2( max( dot( c, LUMA ), 1e-4 ) / 0.18 );
   c *= mix( shadowTint, highlightTint, smoothstep( -4.0, 3.0, stops ) );
 
   c = mix( vec3( dot( c, LUMA ) ), c, saturation );
@@ -54,6 +66,8 @@ export interface GradeParams {
   split: number
   shadowTint: THREE.ColorRepresentation
   highlightTint: THREE.ColorRepresentation
+  /** stops the deep shade is opened up by (0 = off) */
+  lift?: number
 }
 
 const LUMA = new THREE.Vector3(0.2126, 0.7152, 0.0722)
@@ -90,6 +104,8 @@ export class GradeEffect extends Effect {
         ['whiteBalance', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
         ['shadowTint', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
         ['highlightTint', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
+        ['lift', new THREE.Uniform(0)],
+        ['fillTint', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
       ]),
     })
   }
@@ -111,5 +127,7 @@ export class GradeEffect extends Effect {
     ;(u.get('whiteBalance')!.value as THREE.Vector3).set(1 + t, 1, 1 - t)
     tintGain(p.shadowTint, p.split, u.get('shadowTint')!.value)
     tintGain(p.highlightTint, p.split, u.get('highlightTint')!.value)
+    u.get('lift')!.value = p.lift ?? 0
+    tintGain(p.shadowTint, 1, u.get('fillTint')!.value)
   }
 }

@@ -230,8 +230,9 @@ function createCoastGarage(): Room {
     ...room,
     ...world.hooks,
     interior,
-    // shot like an automotive photograph: the car sharp, the coast behind it a touch soft
-    depthOfField: { bokehScale: 0.7 },
+    // shot like an automotive photograph: the car sharp, the coast behind it a touch soft, leaves near
+    // the lens melted
+    depthOfField: { bokehScale: 3.5 },
     update(dt) {
       world.update(dt)
     },

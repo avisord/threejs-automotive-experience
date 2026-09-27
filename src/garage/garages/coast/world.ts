@@ -109,9 +109,11 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
     sunDirection: new THREE.Vector3(),
     sunColor: new THREE.Color(),
     airColor: new THREE.Color(),
-    // (~80 km visibility at the water: the middle ridges keep their green, the big mountain turns blue)
-    density: 4.5e-5,
-    falloff: 1 / 600,
+    // (~45 km visibility at the water, thinning over ~1 km: the woods on the hills a kilometre or two
+    // inland go soft and blue-grey behind the near ones — at ~80 km and a 600 m layer they kept the
+    // near woods' colour and contrast and the hills read as one flat layer; the big mountain turns blue)
+    density: 8e-5,
+    falloff: 1 / 1000,
     air: { density: 2.2e-5, falloff: 1 / 2000 },
     groundY: SEA,
     compress: COAST.compress,

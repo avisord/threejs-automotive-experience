@@ -137,12 +137,12 @@ function createCoastOverlook(): Room {
 
   // ─── the terrace: honed limestone slabs on a plinth, steps down to the lawn behind ─
   const stoneMaps = pbrMaps(SURFACES.concreteFloor)
-  // (the photographed concrete is dark, ~0.085: lifted to a pale sun-bleached stone — a touch less than
-  // white, so the sun on it rolls off instead of clipping)
+  // (the photographed concrete is dark, ~0.085: lifted to a pale sun-bleached stone, ~0.16 — at ~0.2 the
+  // midday sun took it to near white, a blank slab twice as bright as the lawn with its grain gone)
   const stone = terraceStone(
     // (out in the open it takes the sky at the landscape's strength: at full strength its blue light
     // drowned the sun — the terrace lit almost as bright with the sun off, flat and cold)
-    new THREE.MeshStandardMaterial({ ...stoneMaps.maps, color: new THREE.Color().setRGB(2.3, 2.2, 2.02), roughness: 0.72, envMapIntensity: OUTDOOR_SKY_LIGHT }),
+    new THREE.MeshStandardMaterial({ ...stoneMaps.maps, color: new THREE.Color().setRGB(1.85, 1.77, 1.63), roughness: 0.72, envMapIntensity: OUTDOOR_SKY_LIGHT }),
     { x0: -DECK.w / 2, x1: DECK.w / 2, z0: DECK.front, z1: DECK.back },
   )
   const steel = new THREE.MeshStandardMaterial({ color: 0x1a1b1d, roughness: 0.4, metalness: 0.8 })
@@ -215,7 +215,7 @@ function createCoastOverlook(): Room {
       world.dispose()
     },
     ...world.hooks,
-    depthOfField: { bokehScale: 0.7 },
+    depthOfField: { bokehScale: 3.5 },
   }
 }
 

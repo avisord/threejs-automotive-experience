@@ -52,6 +52,12 @@ export interface LampSystem {
   /** lamp groups this car actually has */
   readonly present: LampId[]
   set(id: LampId, patch: Partial<LampConfig>): void
+  /**
+   * How much daylight is around, 0 (night, a closed room) to 1 (an open-air room at noon). A lamp
+   * is a few hundred lux where the sun is ~100 000: in daylight its pool on the ground and its beam
+   * in the air are gone, only the lens still glows.
+   */
+  setDaylight(level: number): void
   dispose(): void
 }
 
@@ -165,6 +171,10 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
   const lensMaterials = new Map<THREE.Mesh, THREE.MeshStandardMaterial>()
   const lights: THREE.Light[] = []
   const beams: THREE.Mesh[] = []
+  let daylight = 0
+  // (not physically 1 %: a pool that faint is gone anyway, and dusk keeps a trace of it)
+  const lightScale = () => 1 - 0.985 * daylight
+  const beamScale = () => 1 - daylight
 
   const storageKey = `garage.lamps.v1.${profile.id}`
   try {
@@ -205,7 +215,8 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
     if (!on) return
 
     for (const position of group.positions) {
-      const spot = new THREE.SpotLight(color, tuning.candela * intensity, tuning.range, tuning.angle, 0.7, 2)
+      const spot = new THREE.SpotLight(color, tuning.candela * intensity * lightScale(), tuning.range, tuning.angle, 0.7, 2)
+      spot.userData.candela = tuning.candela * intensity
       spot.position.copy(position)
       spot.target.position.copy(position).add(tuning.aim)
       // the bodywork stops the light: no glow through the bonnet or bumper,
@@ -234,7 +245,9 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
         beam.position.copy(position)
         beam.renderOrder = 3
         beam.raycast = () => {}
-        ;(beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = intensity
+        beam.userData.strength = intensity
+        ;(beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = intensity * beamScale()
+        beam.visible = beamScale() > 0
         car.add(beam)
         beams.push(beam)
       }
@@ -274,6 +287,16 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
       } catch {
         // not persisted — fine
       }
+    },
+    setDaylight(level) {
+      if (level === daylight) return
+      daylight = level
+      for (const light of lights) light.intensity = light.userData.candela * lightScale()
+      for (const beam of beams) {
+        ;(beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = beam.userData.strength * beamScale()
+        beam.visible = beamScale() > 0
+      }
+      onChange()
     },
     dispose() {
       clearLights()

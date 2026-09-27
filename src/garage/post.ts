@@ -31,6 +31,29 @@ export type Reflections = 'off' | 'low' | 'medium' | 'high'
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra'
 export type VolumetricQuality = 'low' | 'medium' | 'high'
 /** depth of field: on where the garage asks for it (a photographic location), always, or never */
+/** the background's blur, as a fraction of the bokeh scale the foreground can reach (see `lensCoc`) */
+const FAR_BLUR = 0.35
+
+/**
+ * A lens's blur instead of pmndrs' step: its circle of confusion is one smoothstep over the focus
+ * range, so everything past it got the same blur — the bushes a few metres from the lens no softer
+ * than the hills. A thin lens's grows as |d − f| / d: the background levels off (at `FAR_BLUR` of the
+ * bokeh scale) while the foreground keeps growing toward the lens, full blur inside a quarter of
+ * the focus distance. The sharp zone round the car (`focusRange`) is kept.
+ */
+function lensCoc(material: THREE.ShaderMaterial): void {
+  const stock = 'float magnitude=smoothstep(0.0,focusRange,abs(signedDistance));'
+  if (!material.fragmentShader.includes(stock)) {
+    console.warn('[garage] depth of field: CoC shader changed, lens blur not applied')
+    return
+  }
+  material.fragmentShader = material.fragmentShader.replace(
+    stock,
+    `float magnitude=smoothstep(0.0,focusRange,abs(signedDistance))*min(1.0,${FAR_BLUR.toFixed(3)}*abs(signedDistance)/max(distance,1e-3));`,
+  )
+  material.needsUpdate = true
+}
+
 export type DofMode = 'auto' | 'on' | 'off'
 /** ray-march steps per pixel for each volumetric quality */
 const VOLUMETRIC_STEPS: Record<VolumetricQuality, number> = { low: 14, medium: 28, high: 48 }
@@ -194,20 +217,25 @@ interface Look {
   split: number
   shadowTint: THREE.ColorRepresentation
   highlightTint: THREE.ColorRepresentation
+  /** stops the deep shade is opened up by (see GradeEffect) */
+  lift: number
 }
 
 /** a look sets the grade sliders to a starting point; the sliders fine-tune from there */
 export const LOOKS: Record<GradeLook, Look> = {
-  natural: { contrast: 1, saturation: 1, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff },
-  // an open-world racing game's clear midday: bright and clean, shade a soft sky blue, colour a touch
-  // restrained (the sun and sky already saturate it), whites staying white
-  daylight: { contrast: 1.04, saturation: 0.94, temperature: -0.04, split: 0.14, shadowTint: 0x6f93c4, highlightTint: 0xfff3e2 },
-  // late-afternoon landscape photography: a touch warm, cool shadows, gold highlights, more bite
-  golden: { contrast: 1.14, saturation: 1.1, temperature: 0.12, split: 0.3, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
-  cyber: { contrast: 1.12, saturation: 1.1, temperature: -0.1, split: 0.3, shadowTint: 0x1fb6c9, highlightTint: 0xff7ad9 },
-  warm: { contrast: 1.08, saturation: 1.05, temperature: 0.45, split: 0.2, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
-  cold: { contrast: 1.1, saturation: 0.9, temperature: -0.5, split: 0.2, shadowTint: 0x2a4a8a, highlightTint: 0xd8f0ff },
-  noir: { contrast: 1.3, saturation: 0, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff },
+  natural: { contrast: 1, saturation: 1, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff, lift: 0 },
+  // an open-world racing game's clear midday: punchy mid-tones and colour, but the shade opened up and
+  // sky blue-teal rather than crushed, whites staying white
+  daylight: { contrast: 1.12, saturation: 1.06, temperature: -0.02, split: 0.2, shadowTint: 0x5f93b8, highlightTint: 0xfff1dc, lift: 0.8 },
+  // late-afternoon landscape photography: a touch warm, teal shadows, gold highlights, more bite — the
+  // long shadows a low sun throws kept readable (they went black-green). The sun is already gold: an
+  // orange highlight tint and more saturation on top took every bit of blue out of the sunlit grass
+  // and turned it acid yellow-green.
+  golden: { contrast: 1.14, saturation: 1.03, temperature: 0.1, split: 0.3, shadowTint: 0x3c7f8f, highlightTint: 0xffcf96, lift: 1.1 },
+  cyber: { contrast: 1.12, saturation: 1.1, temperature: -0.1, split: 0.3, shadowTint: 0x1fb6c9, highlightTint: 0xff7ad9, lift: 0 },
+  warm: { contrast: 1.08, saturation: 1.05, temperature: 0.45, split: 0.2, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b, lift: 0 },
+  cold: { contrast: 1.1, saturation: 0.9, temperature: -0.5, split: 0.2, shadowTint: 0x2a4a8a, highlightTint: 0xd8f0ff, lift: 0 },
+  noir: { contrast: 1.3, saturation: 0, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff, lift: 0 },
 }
 
 /** bloom threshold that suits each mode — only emitters vs anything bright */
@@ -354,6 +382,7 @@ export function createPostProcessing(
     if (dofWanted()) {
       dof = new DepthOfFieldEffect(camera, { focusDistance: 8, focusRange: s.dof.range, bokehScale: 2, resolutionScale: 0.5 })
       dof.target = focusTarget
+      lensCoc(dof.cocMaterial)
       dofPass = new EffectPass(camera, dof)
       composer.addPass(dofPass)
     }
@@ -436,7 +465,7 @@ export function createPostProcessing(
     meter.enabled = s.grade.enabled && s.grade.auto > 0
     if (grade) {
       const look = LOOKS[s.grade.look]
-      grade.set({ ...s.grade, shadowTint: look.shadowTint, highlightTint: look.highlightTint, key: exposureKey })
+      grade.set({ ...s.grade, shadowTint: look.shadowTint, highlightTint: look.highlightTint, lift: look.lift, key: exposureKey })
     }
     if (vignette) {
       vignette.darkness = s.vignette.darkness
