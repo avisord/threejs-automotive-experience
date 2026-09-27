@@ -68,6 +68,8 @@ export const PRESETS: Record<string, Preset> = {
     rims: { material: 'gunmetal' },
     calipers: { material: 'gloss', colorA: '#e0202a' },
     cage: { material: 'matte', colorA: '#111214' },
+    interior: { material: 'alcantara', colorA: '#16181c' },
+    trim: { material: 'matte', colorA: '#16181c' },
     glass: { tint: 0.85 },
   },
   Arctic: {
@@ -75,6 +77,8 @@ export const PRESETS: Record<string, Preset> = {
     wing: { material: 'carbon' },
     rims: { material: 'brushed' },
     calipers: { material: 'gloss', colorA: '#1e6bff' },
+    interior: { material: 'leather', colorA: '#e8e6e1' },
+    trim: { material: 'gloss', colorA: '#0d0f12' },
     glass: { tint: 0.4 },
   },
   Heritage: {
@@ -82,12 +86,16 @@ export const PRESETS: Record<string, Preset> = {
     wing: { material: 'gloss', colorA: '#8ec5e6' },
     rims: { material: 'gunmetal' },
     calipers: { material: 'gloss', colorA: '#f36f21' },
+    interior: { material: 'leather', colorA: '#6b3a1f' },
+    trim: { material: 'gloss', colorA: '#f36f21' },
   },
   Carbon: {
     body: { material: 'carbon' },
     wing: { material: 'forged-carbon' },
     rims: { material: 'gold' },
     calipers: { material: 'gloss', colorA: '#ffd400' },
+    interior: { material: 'alcantara', colorA: '#1b1d21' },
+    trim: { material: 'carbon' },
     glass: { tint: 0.6 },
   },
   Camo: {
@@ -95,6 +103,8 @@ export const PRESETS: Record<string, Preset> = {
     wing: { material: 'textured-plastic', colorA: '#1d231a' },
     rims: { material: 'matte', colorA: '#1b1d21' },
     calipers: { material: 'gloss', colorA: '#ff5a1f' },
+    interior: { material: 'textured-plastic', colorA: '#3a4232' },
+    trim: { material: 'textured-plastic', colorA: '#1d231a' },
     glass: { tint: 0.7 },
   },
   'Liquid Chrome': {
@@ -102,6 +112,8 @@ export const PRESETS: Record<string, Preset> = {
     wing: { material: 'gloss', colorA: '#16181c' },
     rims: { material: 'gloss', colorA: '#16181c' },
     calipers: { material: 'gloss', colorA: '#35e0ff' },
+    interior: { material: 'leather', colorA: '#16181c' },
+    trim: { material: 'chrome' },
     glass: { tint: 0.9 },
   },
   Pearl: {
@@ -110,6 +122,8 @@ export const PRESETS: Record<string, Preset> = {
     rims: { material: 'brushed' },
     calipers: { material: 'anodised', colorA: '#8e5cff' },
     glass: { tint: 0.3 },
+    interior: { material: 'leather', colorA: '#f2efe9' },
+    trim: { material: 'pearl' },
   },
 }
 

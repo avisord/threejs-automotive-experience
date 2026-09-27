@@ -14,6 +14,8 @@ export interface PartsState {
   /** hide the selection (or the hovered part) to reach what's under it */
   hide(): void
   unhideAll(): void
+  /** the car's parts by role (Menu › Part roles), for grouping in one go */
+  roleGroups(): { name: string; meshes: THREE.Mesh[] }[]
   /** shown while there's no car to edit: loading, or an empty bay */
   placeholder(): string
 }
@@ -209,6 +211,34 @@ export function partsPage(state: PartsState): Page {
         sel.append(actions)
       }
       body.append(sel)
+
+      // a start from the part roles: one group per role, each styled on its own from here
+      const byRole = state.roleGroups().filter((e) => e.meshes.some((m) => !editor.groups.some((g) => g.members.has(m))))
+      if (byRole.length > 0) {
+        const quick = section('From part roles')
+        quick.append(
+          el(
+            'p',
+            'cfg-note',
+            editor.groups.length === 0
+              ? `One group per role (${byRole.map((e) => e.name).join(', ')}), starting from the factory look. Split or merge them after.`
+              : 'Groups the parts that aren’t in a group yet, by role — existing groups stay as they are.',
+          ),
+        )
+        const actions = el('div', 'cfg-actions')
+        actions.append(
+          button(
+            'Group by role',
+            () => {
+              editor.groupBy(state.roleGroups())
+              nav.refresh()
+            },
+            'cfg-mini is-primary',
+          ),
+        )
+        quick.append(actions)
+        body.append(quick)
+      }
 
       if (editor.groups.length === 0) {
         body.append(el('p', 'cfg-note cfg-gap', 'No groups yet — select one or more parts and press “Group selection”.'))

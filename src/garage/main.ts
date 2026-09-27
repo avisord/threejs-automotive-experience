@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { DEFAULT_GARAGE, GARAGES, collectGlowMeshes, type GarageDef, type Room } from './garages'
 import { disposeCar, loadCar } from './car'
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { CARS, DEFAULT_CAR, NO_CAR, carTitle, type CarProfile } from './cars'
 import {
   collectFiles,
@@ -19,7 +20,7 @@ import {
   type UploadRecord,
 } from './uploads'
 import { uploadPage } from './ui/upload-page'
-import { createRoleTint, loadRoles, partKey, profileWithRoles, saveRoles, type HiddenPart, type RoleId, type RoleMap } from './roles'
+import { ROLES, createRoleTint, loadRoles, partKey, profileWithRoles, saveRoles, type HiddenPart, type RoleId, type RoleMap } from './roles'
 import { rolesPage } from './ui/roles-page'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
@@ -648,7 +649,9 @@ function clearBay(): void {
 /** what car-dependent pages show when there's no car to work on */
 const bayPlaceholder = () => (loadingId ? 'Loading car…' : 'No car in the bay — pick one in Collection.')
 
-async function showCar(id: string): Promise<void> {
+/** `quiet`: the same car again with a new setup or roles — no loading screen over it */
+async function showCar(id: string, { quiet = false } = {}): Promise<void> {
+  if (parsedUpload && parsedUpload.id !== id) parsedUpload = null // only the upload in the bay is kept parsed
   if (id === NO_CAR) {
     loadingId = null // also abandons a car still loading
     setPicking(false)
@@ -669,7 +672,7 @@ async function showCar(id: string): Promise<void> {
   }
   const profile = findProfile(id) ?? CARS[0]
   loadingId = profile.id
-  loader.classList.remove('done')
+  if (!quiet) loader.classList.remove('done')
   loader.querySelector('.loader-label')!.textContent = `loading ${carTitle(profile)}`
   loaderFill.style.transform = 'scaleX(0)'
   panelNav?.refresh()
@@ -949,12 +952,16 @@ function applyRoles(): void {
   if (!bay || !roleDraft) return
   saveRoles(bay.id, roleDraft)
   roleDraft = null
-  void showCar(bay.id)
+  void showCar(bay.id, { quiet: true })
 }
 
 // ─── uploads: the user's own models (Menu › Collection › Upload) ─────────────
-/** a model just parsed at import — the bay takes it instead of parsing the files again */
-let freshModel: { id: string; model: THREE.Object3D } | null = null
+/**
+ * The upload in the bay as parsed, never shown itself: each load takes a clone (sharing
+ * geometry, materials and textures), so turning or re-roling it doesn't parse the files
+ * again. Disposing a clone only frees GPU copies — the next clone uploads them anew.
+ */
+let parsedUpload: { id: string; model: THREE.Object3D } | null = null
 let uploadStatus: { text: string; error: boolean } | null = null
 
 /** built-in car or upload by id */
@@ -966,13 +973,11 @@ function findProfile(id: string): CarProfile | undefined {
 }
 
 async function openUpload(record: UploadRecord, onProgress?: (f: number) => void): Promise<THREE.Object3D> {
-  if (freshModel?.id === record.id) {
-    const { model } = freshModel
-    freshModel = null
-    return model
+  if (parsedUpload?.id !== record.id) {
+    const { parseModel } = await import('./model-import')
+    parsedUpload = { id: record.id, model: await parseModel(record.files, record.main, renderer, onProgress) }
   }
-  const { parseModel } = await import('./model-import')
-  return parseModel(record.files, record.main, renderer, onProgress)
+  return cloneSkinned(parsedUpload.model) // skinned exports need their bones cloned too
 }
 
 function setUploadStatus(text: string | null, error = false): void {
@@ -995,7 +1000,7 @@ async function importUpload(input: { file: File; path: string }[]): Promise<void
     const name = nameFromFile(main)
     const setup = guessSetup(model, name, main.slice(main.lastIndexOf('.') + 1).toLowerCase())
     const record: UploadRecord = { id: newUploadId(), name, created: Date.now(), main, files, setup, guess: { ...setup } }
-    freshModel = { id: record.id, model }
+    parsedUpload = { id: record.id, model }
     setUploadStatus(null)
     await saveUpload(record).catch(storageFailed)
     void navigator.storage?.persist?.() // ask the browser not to evict it under storage pressure
@@ -1013,7 +1018,7 @@ function setSetup(patch: Partial<UploadRecord['setup']>): void {
   if (!record) return
   record.setup = { ...record.setup, ...patch }
   void saveUpload(record).catch(storageFailed)
-  void showCar(record.id)
+  void showCar(record.id, { quiet: true })
 }
 
 // a model dropped anywhere on the page is uploaded
@@ -1108,7 +1113,7 @@ const pages: Record<string, Page> = {
       if (!bay) return
       saveRoles(bay.id, null)
       roleDraft = null
-      void showCar(bay.id)
+      void showCar(bay.id, { quiet: true })
     },
     picking: () => picking,
     setPicking,
@@ -1134,6 +1139,14 @@ const pages: Record<string, Page> = {
     },
     hide: hideParts,
     unhideAll,
+    roleGroups() {
+      if (!bay) return []
+      const roles = bay.roles.map
+      // lamps are styled on the Lights page — a group's material would take over their glowing lenses
+      return ROLES.filter((r) => r.id !== 'hidden' && r.id !== 'headlights' && r.id !== 'taillights')
+        .map((r) => ({ name: r.label, meshes: bay!.groups.pickable.filter((m) => roles[partKey(m) ?? ''] === r.id) }))
+        .filter((e) => e.meshes.length > 0)
+    },
     placeholder: bayPlaceholder,
   }),
   settings: {

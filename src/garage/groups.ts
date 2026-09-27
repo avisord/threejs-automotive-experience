@@ -57,6 +57,12 @@ export interface GroupEditor {
   /** new group from the current selection; members leave any group they were in */
   groupSelection(): MaterialGroup | null
   addSelectionTo(groupId: string): void
+  /**
+   * one group per entry (joined to a group of that name if there is one), wearing the
+   * factory look to start from; only meshes in no group yet move — earlier work stays.
+   * Returns how many meshes were grouped.
+   */
+  groupBy(entries: { name: string; meshes: THREE.Mesh[] }[]): number
   removeMember(groupId: string, mesh: THREE.Mesh): void
   deleteGroup(groupId: string): void
   rename(groupId: string, name: string): void
@@ -237,6 +243,18 @@ export function createGroupEditor(
       selection.clear()
       syncSelection()
       changed()
+    },
+    groupBy(entries) {
+      let moved = 0
+      for (const { name, meshes } of entries) {
+        const free = meshes.filter((m) => !groupOf(m))
+        if (free.length === 0) continue
+        const group = groups.find((g) => g.name === name) ?? makeGroup(name, { ...DEFAULT_GROUP_MATERIAL, material: 'original' })
+        join(group, free)
+        moved += free.length
+      }
+      if (moved > 0) changed()
+      return moved
     },
     removeMember(groupId, mesh) {
       const group = find(groupId)
