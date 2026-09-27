@@ -174,6 +174,7 @@ function installRoom(): void {
   scene.environmentIntensity = room.environmentIntensity
   const sun = savedSuns[garageDef.id]
   if (room.sun && sun) room.sun.set(sun)
+  applyDaylight()
   const interior = savedInteriors[garageDef.id]
   if (room.interior && interior) room.interior.set(interior)
   captureEnvironment()
@@ -240,11 +241,18 @@ function captureEnvironment(): void {
   pmrem.dispose()
 }
 
+/** open-air rooms: in daylight the car's lamps light nothing around them, only their lenses glow */
+function applyDaylight(): void {
+  const sun = room.sun?.get()
+  bay?.lamps.setDaylight(sun ? THREE.MathUtils.smoothstep(sun.elevation, -6, 6) : 0)
+}
+
 let recaptureTimer = 0
 /** move the sun of an open-air room; the environment catches up once the slider rests */
 function setSun(sun: SunPosition): void {
   if (!room.sun) return
   room.sun.set(sun)
+  applyDaylight()
   savedSuns[garageDef.id] = sun
   try {
     localStorage.setItem(SUN_KEY, JSON.stringify(savedSuns))
@@ -285,6 +293,8 @@ const post = createPostProcessing(renderer, scene, camera, () => [
   ...(bay ? collectGlowMeshes(bay.root) : []),
 ])
 post.setAtmosphere(room.atmosphere ?? null) // later rooms: swapRoom
+post.setExposureKey(garageDef.exposureKey)
+post.setFocus(controls.target, room.depthOfField ?? null) // the lens focuses on the orbit target: the car
 
 /**
  * Frames still to draw. In on-demand mode (the default) nothing is drawn
@@ -534,6 +544,7 @@ async function showCar(id: string): Promise<void> {
       traceSceneChanged()
     })
     bay = { id: profile.id, root, shadow, configurator, groups, lamps, size }
+    applyDaylight()
     placement.attach({ id: profile.id, root, shadow, size }) // its saved place (the shadow was baked at the origin)
     centreOnCar()
     room.shadowsChanged?.()
@@ -607,6 +618,8 @@ async function swapRoom(def: GarageDef): Promise<void> {
   installRoom()
   placement.refit() // a smaller room may not fit where the car stood
   post.setAtmosphere(room.atmosphere ?? null)
+  post.setExposureKey(def.exposureKey)
+  post.setFocus(controls.target, room.depthOfField ?? null)
   applyQuality() // floor mirror size and texture filtering for the new room
   post.refreshGlow()
   traceSceneChanged()

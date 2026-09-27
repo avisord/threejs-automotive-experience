@@ -38,6 +38,14 @@ export function aimFarShadow(light: THREE.DirectionalLight, sunDirection: THREE.
 const fragmentHook = '#include <lights_fragment_end>'
 
 /**
+ * Light the sunlit ground throws back up onto the landscape (linear irradiance, 0 = none): an
+ * open-air room sets it from its sun and ground (coast/world.ts) and clears it when it goes. Only
+ * landscape materials take it — the car, the terrace and the rooms see the sunlit ground in their
+ * environment map already.
+ */
+export const GROUND_BOUNCE = { value: new THREE.Color(0, 0, 0) }
+
+/**
  * three's light loop with the point, spot and area lights compiled out. Out in
  * the landscape they light nothing — the pavilion's area lights and the car's
  * lamp spots are metres away and aimed inside — yet every landscape pixel paid
@@ -61,9 +69,23 @@ export function receiveFarShadow(material: THREE.Material): void {
   const previous = material.onBeforeCompile
   material.onBeforeCompile = (shader, renderer) => {
     previous?.call(material, shader, renderer)
-    shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>', outdoorLightLoop).replace(
+    shader.uniforms.uGroundBounce = GROUND_BOUNCE
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uGroundBounce;')
+      .replace('#include <lights_fragment_begin>', outdoorLightLoop).replace(
       fragmentHook,
       `${fragmentHook}
+      {
+        // bounce off the sunlit ground: a Lambertian plane below lights a face turned down with its full
+        // radiosity, a wall with half, a face turned up not at all — the light under palm crowns, in
+        // the shade of a bush, up a cliff's overhang (AO darkens it after, where the ground is enclosed)
+        float down = 0.5 - 0.5 * inverseTransformDirection( normal, viewMatrix ).y;
+        #ifdef CROWN_NORMALS
+          // (a crown's normal is the crown's, up and out; its leaves face every way, a good part of them the ground)
+          down = max( down, 0.4 );
+        #endif
+        reflectedLight.indirectDiffuse += uGroundBounce * down * BRDF_Lambert( material.diffuseColor );
+      }
       #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 1
       {
         // how far inside the near (sharp) map this point is: 0 at its edge, 1 well inside

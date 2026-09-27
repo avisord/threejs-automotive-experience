@@ -6,18 +6,21 @@ uniform vec3 uSun;        // xy: the sun's screen uv, z: 1 when it's in front of
 uniform vec3 uSunColor;
 uniform float uIntensity;
 
-// how much of the sun's disc is unobstructed: depth samples on a small disc around it (sky = far plane).
-// Off-screen samples count as hidden, so the flare fades out as the sun leaves the frame.
+// how much of the sun's disc is unobstructed: depth samples on a disc around it (sky = far plane).
+// Off-screen samples count as hidden, so the flare fades out as the sun leaves the frame. The disc
+// is wide (~1° across) and densely sampled: over a few pixels, a sun behind moving palm fronds or a
+// mullion's edge flipped between seen and hidden from one frame to the next and the flare popped.
 float sunVisibility() {
-  vec2 r = texelSize * 7.0;
+  vec2 r = texelSize * 18.0;
   float seen = 0.0;
-  for ( int i = 0; i < 16; i ++ ) {
+  for ( int i = 0; i < 40; i ++ ) {
     float a = float( i ) * 2.39996323;
-    vec2 p = uSun.xy + vec2( cos( a ), sin( a ) ) * r * sqrt( ( float( i ) + 0.5 ) / 16.0 );
+    vec2 p = uSun.xy + vec2( cos( a ), sin( a ) ) * r * sqrt( ( float( i ) + 0.5 ) / 40.0 );
     bool inside = all( greaterThan( p, vec2( 0.0 ) ) ) && all( lessThan( p, vec2( 1.0 ) ) );
     seen += inside && readDepth( p ) >= 0.9999999 ? 1.0 : 0.0;
   }
-  return seen / 16.0;
+  // (eased: a sliver of sun through a gap gives a little flare, not a flash)
+  return smoothstep( 0.0, 1.0, seen / 40.0 );
 }
 
 // a soft-edged disc (a ghost of the aperture)

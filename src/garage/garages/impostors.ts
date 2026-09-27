@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { receiveFarShadow } from './far-shadow'
 import { foliage, leafGain, loaded } from './foliage'
 import { OUTDOOR_SKY_LIGHT } from './sky'
+import type { FloraId, ImpostorSpec } from './flora'
 import { grow, type PresetJson, type TreeCtor, type Variant } from './trees'
 
 /**
@@ -19,30 +20,8 @@ import { grow, type PresetJson, type TreeCtor, type Variant } from './trees'
  * always seen from about the same side — crossed quads never show their edge.
  */
 
-export type ImpostorKind = 'conifer' | 'broadleaf' | 'shrub'
+export type ImpostorKind = ImpostorSpec['kind']
 
-interface Species {
-  preset: string
-  seed: number
-  kind: ImpostorKind
-  /** light variant (fewer, bigger leaf cards): reads better small */
-  light: boolean
-  /** crown fullness (trees.grow) — the same as the near trees', so a tree keeps its mass at every distance */
-  fullness: number
-}
-
-/** the atlas cells, left to right */
-const SPECIES: Species[] = [
-  { preset: 'Pine Large', seed: 1101, kind: 'conifer', light: true, fullness: 1.6 },
-  { preset: 'Pine Medium', seed: 1202, kind: 'conifer', light: true, fullness: 1.6 },
-  { preset: 'Oak Large', seed: 1303, kind: 'broadleaf', light: true, fullness: 2.4 },
-  { preset: 'Oak Medium', seed: 1404, kind: 'broadleaf', light: true, fullness: 2.6 },
-  { preset: 'Ash Large', seed: 1505, kind: 'broadleaf', light: true, fullness: 2.4 },
-  // (the aspen's cards are autumn yellow; only their light and dark are baked — foliage.ts)
-  { preset: 'Aspen Large', seed: 1606, kind: 'broadleaf', light: true, fullness: 2.2 },
-  { preset: 'Bush 1', seed: 1707, kind: 'shrub', light: false, fullness: 1.4 },
-  { preset: 'Bush 3', seed: 1808, kind: 'shrub', light: false, fullness: 1.4 },
-]
 const CELL = { w: 384, h: 768 } // LOD 2 cards stand ~300 px tall at 80 m through the 36° lens
 
 export interface ImpostorSet {
@@ -54,6 +33,8 @@ export interface ImpostorSet {
   material: THREE.MeshStandardMaterial
   /** species indices of a kind */
   of(kind: ImpostorKind): number[]
+  /** the flora's leaf palette (trees.foliageTint) */
+  palette: FloraId
   dispose(): void
 }
 
@@ -213,8 +194,14 @@ function crossedQuads(cell: number, count: number, fw: number, fh: number, plane
   return g
 }
 
-export async function createImpostors(Tree: TreeCtor, presets: Record<string, PresetJson>): Promise<ImpostorSet> {
-  const variants = SPECIES.map((s) => grow(Tree, presets[s.preset], s.seed, s.light, s.kind === 'conifer', s.fullness))
+/** `species`: the atlas cells, left to right (flora.ts) */
+export async function createImpostors(
+  Tree: TreeCtor,
+  presets: Record<string, PresetJson>,
+  species: ImpostorSpec[],
+  palette: FloraId,
+): Promise<ImpostorSet> {
+  const variants = species.map((s) => grow(Tree, presets[s.preset], s.seed, s.light, s.kind === 'conifer', s.fullness))
   // each cell's frame: wide enough for the crown, and the cell's 1:2 aspect so nothing is stretched
   const frames = variants.map((v) => {
     const box = new THREE.Box3().setFromBufferAttribute(v.leaves.attributes.position as THREE.BufferAttribute)
@@ -267,15 +254,16 @@ export async function createImpostors(Tree: TreeCtor, presets: Record<string, Pr
   // the atlas holds the leaves at 0.55 of their normalised brightness (headroom): undo it here, so a far tree
   // is the same colour as a near one of the same tint
   material.color.setScalar(1 / 0.55)
-  const geometries = frames.map((f, i) => crossedQuads(i, SPECIES.length, f.fw, f.fh))
-  const cards = frames.map((f, i) => crossedQuads(i, SPECIES.length, f.fw, f.fh, 3))
-  const kinds = SPECIES.map((s) => s.kind)
+  const geometries = frames.map((f, i) => crossedQuads(i, species.length, f.fw, f.fh))
+  const cards = frames.map((f, i) => crossedQuads(i, species.length, f.fw, f.fh, 3))
+  const kinds = species.map((s) => s.kind)
   return {
     geometries,
     cards,
     kinds,
     material,
     of: (kind) => kinds.flatMap((k, i) => (k === kind ? [i] : [])),
+    palette,
     dispose() {
       for (const g of [...geometries, ...cards]) g.dispose()
       atlas.dispose()

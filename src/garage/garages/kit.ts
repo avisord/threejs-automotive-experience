@@ -19,6 +19,12 @@ export interface GarageDef {
   palette: string[]
   /** colour grade look applied when the garage is picked */
   look: GradeLook
+  /**
+   * The brightness the garage is lit and graded for: the mean log2 luminance of its default view
+   * (`garage.post.readMeter()`). Auto exposure brings every view in it toward this — looking up at a
+   * bright sky or down into shade — so the garage keeps its own mood (a dark neon bay stays dark).
+   */
+  exposureKey: number
   create(): Room
 }
 
@@ -74,6 +80,12 @@ export interface Room {
   shadowsChanged?(): void
   /** the room's own light fittings, in groups the user can switch, dim and warm (Menu › Garage) */
   interior?: InteriorLights
+  /**
+   * A photographic location: depth of field on by default here (Settings › Graphics › Depth of
+   * field, "Auto"), with this aperture — the blur's scale, in pixels at half resolution, reached
+   * right by the lens (the background gets ~a third of it, post.ts `lensCoc`).
+   */
+  depthOfField?: { bokehScale: number }
 }
 
 /**
@@ -339,7 +351,9 @@ const BlurredReflectorShader = {
         float fi = float( i ) + 0.5;
         float a = fi * 2.39996323; // golden angle spreads taps evenly over the disc
         vec2 offset = vec2( cos( a ), sin( a ) ) * sqrt( fi / float( TAPS ) ) * blur;
-        sum += textureLod( tDiffuse, uv + offset, lod ).rgb;
+        // (clamped: the sun's disc in the mirror overflows half floats — an inf here, spread by the
+        // blur and by depth of field, became a blown-out blob on the floor)
+        sum += min( textureLod( tDiffuse, uv + offset, lod ).rgb, vec3( 64.0 ) );
       }
       // Schlick, from the reflectance straight down to 1 at grazing (the floor's normal is +y)
       float cosV = clamp( normalize( cameraPosition - vWorld ).y, 0.0, 1.0 );

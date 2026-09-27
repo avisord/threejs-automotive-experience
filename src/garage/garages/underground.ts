@@ -168,5 +168,6 @@ export const underground: GarageDef = {
   tag: 'Low concrete car park, wet floor · magenta and cyan tubes',
   palette: ['#ff2bd6', '#19e6ff', '#5b5e66', '#d8b21f'],
   look: 'cyber',
+  exposureKey: -5.7,
   create: createUnderground,
 }

@@ -122,6 +122,7 @@ export function foliage<M extends THREE.MeshStandardMaterial>(material: M, opts:
       )
     }
     if (opts.crownNormals) {
+      shader.fragmentShader = '#define CROWN_NORMALS\n' + shader.fragmentShader
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
@@ -134,8 +135,17 @@ export function foliage<M extends THREE.MeshStandardMaterial>(material: M, opts:
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <lights_fragment_end>',
         `#include <lights_fragment_end>
-        reflectedLight.indirectSpecular *= 0.2;
-        reflectedLight.directSpecular *= 0.4;`,
+        {
+          // A card's normal is the crown's (or the card's), not its leaves': seen edge-on — looking toward
+          // a low sun over a bed of broad leaves, their normals all up — Fresnel went to ~1 and every
+          // leaf mirrored the bright sky and sun, cream-white with its colour gone. Real leaves' normals
+          // scatter every way, so their average reflection hardly rises at grazing: take the grazing
+          // boost back out.
+          float facing = clamp( dot( normal, normalize( vViewPosition ) ), 0.0, 1.0 );
+          float grazing = mix( 0.2, 1.0, smoothstep( 0.0, 0.5, facing ) );
+          reflectedLight.indirectSpecular *= 0.2 * grazing;
+          reflectedLight.directSpecular *= 0.4 * grazing;
+        }`,
       )
     }
     if (opts.translucency) {

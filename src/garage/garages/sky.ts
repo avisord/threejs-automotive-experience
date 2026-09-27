@@ -43,8 +43,8 @@ export function sunLight(elevation: number): { color: THREE.Color; intensity: nu
  */
 export const OUTDOOR_SKY_LIGHT = 0.3
 
-/** a fair-weather sky: cumulus banked low over the horizon, open overhead */
-const CLOUDS = { coverage: 0.47, scale: 0.55, density: 0.9 }
+/** a fair-weather sky: cumulus banked low over the horizon, open overhead (a room may pass its own) */
+export const CLOUDS = { coverage: 0.47, scale: 0.55, density: 0.9 }
 
 /**
  * Replaces the stock Sky's cloud layer, which fades out toward the horizon
@@ -93,7 +93,7 @@ const SKY_GAIN = 0.55
  * sunset — it lights the car through the environment map like a photographed
  * sky would, but the sun can be put anywhere.
  */
-export function createSky(): { mesh: Sky; setSun(direction: THREE.Vector3): void; showSunDisc(on: boolean): void } {
+export function createSky(clouds: typeof CLOUDS = CLOUDS): { mesh: Sky; setSun(direction: THREE.Vector3): void; showSunDisc(on: boolean): void } {
   const sky = new Sky()
   sky.name = 'sky'
   sky.scale.setScalar(2500) // drawn at the far plane regardless (the shader pins z)
@@ -103,9 +103,9 @@ export function createSky(): { mesh: Sky; setSun(direction: THREE.Vector3): void
   u.rayleigh.value = 1.1
   u.mieCoefficient.value = 0.004
   u.mieDirectionalG.value = 0.82
-  u.cloudCoverage.value = CLOUDS.coverage
-  u.cloudScale.value = CLOUDS.scale
-  u.cloudDensity.value = CLOUDS.density
+  u.cloudCoverage.value = clouds.coverage
+  u.cloudScale.value = clouds.scale
+  u.cloudDensity.value = clouds.density
   u.time.value = 0 // clouds hold still: every frame of a video sees the same sky
   // scale the output to the scene: the stock shader has no exposure of its own
   material.uniforms.skyGain = { value: SKY_GAIN }

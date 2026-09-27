@@ -85,5 +85,6 @@ export const lightWall: GarageDef = {
   tag: 'One wall of pure white light · soft grey plaster room',
   palette: ['#ffffff', '#eceef0', '#d6d8db', '#b9bcc1'],
   look: 'natural',
+  exposureKey: -1.0,
   create: createLightWall,
 }

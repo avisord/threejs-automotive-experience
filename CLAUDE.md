@@ -54,8 +54,10 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | `garages/fields.ts` | Farmland layout + per-pixel field shading, shared by the terrain, the far terrain and the hedgerows (see gotchas). |
 | `placement.ts` | Menu › Car › Position: a three `TransformControls` translate gizmo on the car root (whole car: body, wheels, lamps, overlays). Kept inside `room.bounds` in x/z (footprint in); y is free — up, or down into the floor, saved per car in `garage.car-position.v1`. The contact shadow is a separate mesh: slid along under the car and faded as it's lifted (baked once at the origin). A drag end re-bakes the lamp spots' shadow maps, calls `room.shadowsChanged` and `traceSceneChanged`; putting the gizmo away (or loading a car) re-centres the orbit on the car. The gizmo is on layer 1 (`GIZMO_LAYER`): the main camera sees it, mirrors/env captures/picking rays don't; `userData.overlay` keeps it out of the path tracer; hidden while directing. Video moves are offset by the car's position (`videoStage.draw`). |
 | `contact-shadow.ts` | Baked soft ground shadow per car (depth from below + blur). |
-| `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji, fuji-meadow) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
+| `garages/` | `GarageDef`s (hex-bay, studio, underground, hangar, fuji, fuji-meadow, coast, coast-overlook) built from `kit.ts` helpers (`softbox`, `createFloor` = blurred Reflector mirror under a semi-opaque surface, textures, `assembleRoom`). Register in `garages/index.ts`. |
 | `post.ts` | pmndrs composer: RenderPass → path-trace blend → N8AO → EffectPass(bloom [selective "lights only" or all], `GradeEffect`, tone mapping, vignette) → optional SMAA pass. Owns `GraphicsSettings` (sections: ao, bloom, grade, vignette, aa, quality, display, pathTracing) persisted in `garage.graphics.v1`; `onChange` lets `main.ts` apply the non-composer sections. |
+| `garages/coast/` | Coast House (`garages/coast.ts` = the showroom) and Coast Overlook (`coast-overlook.ts`: the same world, no building — a stone clifftop terrace with a glass balustrade, `planter: false`): glass front facing −z over a tropical cove on a clear midday (`COAST_SUN`, grade look `daylight`; golden hour is a sun preset away). `site.ts` owns the layout — a shoreline mask turned into a **signed distance field** (`shore()`, two EDT rasters, also a half-float texture for the shaders) that drives terrain height, beach/cliff, seabed depth, surf and plant bands; `heightAt`, the coast road, the far compression (`mapFar`, Earth's curve included). `terrain.ts` (triplanar cliff rock, sand with a surf uprush in step with the sea — `SURF` clock), `ocean.ts` (MeshPhysical with per-pixel wave spectrum, depth colour, breakers/foam; no mirror pass), `rocks.ts`, `ranges.ts` (massifs → far terrain), `palms.ts` (valley palms in leaning groups of 3–7), `plants.ts`, `vegetation.ts` (bands + the valley forest system, grown with the **tropical flora** — `garages/flora.ts`: rain tree, fig, and kapok/albizia emergents as the layout's tall kind; Fuji keeps the temperate one), `clouds.ts` (cumulus impostors), `world.ts` (sun, shadows, air). |
+| (depth of field) | Settings › Graphics › Depth of field: `dof.mode` Auto/On/Off, focus on the orbit target; Auto = on where a `Room` sets `depthOfField` (Coast House). Own `EffectPass` before the main one, so haze and grade work on the blurred image. |
 | `grade-effect.ts` | Custom HDR grade before tone mapping (exposure, contrast, split tone…). |
 | `lens-flare-effect.ts` | Sun lens flare (glare, starburst, streak, ghosts), visibility from depth samples round the sun, scaled ×6 to read over the HDR sky. Settings › Graphics › Lens flare; only where a room has `atmosphere` (a sun). |
 | `atmosphere-effect.ts` | Open-air rooms' air, first in the effect pass: aerial perspective (exponential height fog from depth, forward scattering toward the sun) and volumetric sun shafts (ray-marches the sun's `sampler2DShadow` map; a dust box makes beams read under a roof). Params come from `room.atmosphere`; Settings › Graphics › Atmosphere. |
@@ -317,6 +319,42 @@ credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence inf
   GPU at 1600×900. The terrain clamps its albedo ≥ 0 (a negative one sparked in the lake's
   half-float mirror); a faint coloured dot on the lake near the far shore predates this (Fuji
   writes a negative texel into the lake mirror — not traced further).
+- Coast House: the land below the glass is capped **under the floor edge's sightline** (8.4° from a
+  2 m eye), not along it — capping along a sightline squeezed the whole slope into one sliver and hid
+  the cove. The cove is a crescent straight ahead (`COVE`: shore ~430 m out, ~150 m of level sand, 34 m below),
+  at 4.5–7° — visible over the sill from car height; in front of the sand nothing rises above the
+  sill's line (`roomBelowCove`), and the planter is planted only at its ends. Far coast: the coastline wobble is calmed past ~8 km (it folded into thin spits
+  with bright water behind that read as white plateaus), and low land keeps 0.4 % of its distance clear
+  of the sea for depth precision. Textures held only in shader uniforms (terrain, rocks, clouds) are
+  freed by the room's own `dispose` — `disposeTree` only frees material properties. Switching to Fuji
+  or Coast and back leaves 2–3 textures behind (pre-existing, shared forest path; not traced yet).
+- Cars **receive** shadows (`car.ts`): without it an open-air room's sun lit the paint straight through
+  the garage's walls and roof. Nothing may sit level with a floor mirror (y = 0): a slab top there
+  z-fights in the reflection as fine stripes that crawl when the camera moves — keep it ≥ 1 cm under.
+  The floor mirror clamps its samples (the sun's disc overflows half floats; depth of field spread the
+  inf into a blob). Lens flare visibility samples a ~1° disc: a 7 px one flickered behind palm fronds.
+- Coast realism (grounding without geometry): `coast/contact.ts` bakes a soft occlusion raster (±320 m,
+  0.4 m texels) under every plant, palm, rock and the room's `footprints`; the coast terrain dims its sky
+  light and colour by it. The terrain's grass area carries macro/meso/micro variation in the shader (drifts,
+  dry patches, bare soil, lodged grass, tussocks, pebbles) — it must look like ground with the grass patches
+  hidden; patches stop at 90 m. Dome shrubs (`plants.ts`) are ~26 cards over an opaque lumpy **core**
+  (drawn first): 44 cards alone stacked ~10 alpha-tested layers and cost ~3 ms. Blossom is a mask in atlas
+  cell 4 (blue > green) coloured by the `bloom` vertex attribute, so flowers stay small among leaves. The
+  Coast Overlook's stone is `terraceStone()` (slab joints box-filtered by pixel footprint — thinner than a
+  pixel they broke into dashes). Contact shadows add a tight 7 cm bake for the tyres' crease.
+- Auto exposure (`exposure-meter.ts` + `GradeEffect`): a pass before the effect pass draws the HDR frame's
+  centre-weighted (w·log2 L, w) into a 256×144 half-float target; its top mip is the mean, read by the grade in
+  the same frame (no readback, exports stay deterministic). Each `GarageDef.exposureKey` is its default view's
+  metered mean (`garage.post.readMeter()` with auto on), so auto exposure only adapts views *within* a garage
+  (a dark neon bay stays dark); `grade.auto` is the strength (default 0.6), ±2 EV at most. Measure a new
+  garage's key before adding it.
+- Ground bounce (`far-shadow.ts` `GROUND_BOUNCE`): landscape materials add ρ·E_sun (×2 for multiple bounces) on
+  down-facing normals (foliage with crown normals at least 0.4); set by coast/world.ts from its sun, cleared by
+  `world.dispose()`. Not a scene light: the car and room surfaces already see the sunlit ground in their env map
+  (a hemisphere light double-counted it there and did nothing for up-facing crown normals).
+- Open-air room surfaces (a terrace, not the car) need `envMapIntensity = OUTDOOR_SKY_LIGHT`: at 1 they take
+  the sky at ~3× the landscape's strength — the Coast Overlook's stone was nearly as bright with the sun
+  off, blue and flat.
 - `setHSL` works in **linear** by default — pass `THREE.SRGBColorSpace` for picked colours,
   or foliage comes out pale.
 - `kit.disposeTree` disposes lights too (a shadow-casting light's map is a render target,

@@ -4,6 +4,7 @@ import {
   matchingPreset,
   type AoQuality,
   type AoView,
+  type DofMode,
   type GradeLook,
   type Msaa,
   type PostProcessing,
@@ -30,6 +31,7 @@ const TONE_MAPPER: Record<ToneMapper, string> = { agx: 'AgX', aces: 'ACES', neut
 
 const LOOK_LABEL: Record<GradeLook, string> = {
   natural: 'Natural',
+  daylight: 'Daylight',
   golden: 'Golden hour',
   cyber: 'Cyber',
   warm: 'Warm',
@@ -251,6 +253,8 @@ export function graphicsPage(post: PostProcessing): Page {
             structural()
           }),
           slider('Exposure', s.grade.exposure, { min: -2, max: 2, step: 0.05 }, signed(2, ' EV'), (v) => post.set('grade', { exposure: v })),
+          // (0: the exposure slider alone; 1: every view metered to the same brightness, the slider an offset)
+          slider('Auto exposure', s.grade.auto, { min: 0, max: 1, step: 0.05 }, (v) => (v > 0 ? `${Math.round(v * 100)}%` : 'Off'), (v) => post.set('grade', { auto: v })),
           slider('Contrast', s.grade.contrast, { min: 0.6, max: 1.6, step: 0.01 }, fixed(2), (v) => post.set('grade', { contrast: v })),
           slider('Saturation', s.grade.saturation, { min: 0, max: 1.8, step: 0.01 }, fixed(2), (v) => post.set('grade', { saturation: v })),
           slider('Temperature', s.grade.temperature, { min: -1, max: 1, step: 0.01 }, signed(2), (v) => post.set('grade', { temperature: v })),
@@ -327,6 +331,23 @@ export function graphicsPage(post: PostProcessing): Page {
       }
       flare.append(el('p', 'cfg-note', 'Glare, starburst and ghosts when the sun is in view; anything in front of it puts them out.'))
       body.append(flare)
+
+      // ─── depth of field ─────────────────────────────────────────────────
+      const lens = section('Depth of field')
+      lens.append(
+        segmented(['auto', 'on', 'off'] as DofMode[], { auto: 'Auto', on: 'On', off: 'Off' }, s.dof.mode, (mode) => {
+          post.set('dof', { mode })
+          structural()
+        }),
+      )
+      if (post.dofActive) {
+        lens.append(
+          slider('Blur', s.dof.strength, { min: 0, max: 3, step: 0.05 }, fixed(2), (v) => post.set('dof', { strength: v })),
+          slider('Sharp zone', s.dof.range, { min: 1, max: 20, step: 0.5 }, (v) => `${v.toFixed(1)} m`, (v) => post.set('dof', { range: v })),
+        )
+      }
+      lens.append(el('p', 'cfg-note', 'Focus on the car, the view behind it a little soft, as a photographer would shoot it. Auto: on in garages shot that way (Coast House).'))
+      body.append(lens)
 
       body.append(
         actionButton('Reset graphics', () => {

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import {
   BlendFunction,
   BloomEffect,
+  DepthOfFieldEffect,
   EffectComposer,
   EffectPass,
   Pass,
@@ -15,19 +16,45 @@ import {
   type Effect,
 } from 'postprocessing'
 import { N8AOPostPass } from 'n8ao'
-import { GradeEffect } from './grade-effect'
+import { AUTO_KEY, GradeEffect } from './grade-effect'
+import { ExposureMeter } from './exposure-meter'
 import { AtmosphereEffect, type AtmosphereParams } from './atmosphere-effect'
 import { LensFlareEffect } from './lens-flare-effect'
 
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 export type ToneMapper = 'agx' | 'aces' | 'neutral'
-export type GradeLook = 'natural' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
+export type GradeLook = 'natural' | 'daylight' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
 export type Msaa = 0 | 2 | 4 | 8
 export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
 /** floor mirror resolution relative to the canvas; 0 turns the mirror off */
 export type Reflections = 'off' | 'low' | 'medium' | 'high'
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra'
 export type VolumetricQuality = 'low' | 'medium' | 'high'
+/** depth of field: on where the garage asks for it (a photographic location), always, or never */
+/** the background's blur, as a fraction of the bokeh scale the foreground can reach (see `lensCoc`) */
+const FAR_BLUR = 0.35
+
+/**
+ * A lens's blur instead of pmndrs' step: its circle of confusion is one smoothstep over the focus
+ * range, so everything past it got the same blur — the bushes a few metres from the lens no softer
+ * than the hills. A thin lens's grows as |d − f| / d: the background levels off (at `FAR_BLUR` of the
+ * bokeh scale) while the foreground keeps growing toward the lens, full blur inside a quarter of
+ * the focus distance. The sharp zone round the car (`focusRange`) is kept.
+ */
+function lensCoc(material: THREE.ShaderMaterial): void {
+  const stock = 'float magnitude=smoothstep(0.0,focusRange,abs(signedDistance));'
+  if (!material.fragmentShader.includes(stock)) {
+    console.warn('[garage] depth of field: CoC shader changed, lens blur not applied')
+    return
+  }
+  material.fragmentShader = material.fragmentShader.replace(
+    stock,
+    `float magnitude=smoothstep(0.0,focusRange,abs(signedDistance))*min(1.0,${FAR_BLUR.toFixed(3)}*abs(signedDistance)/max(distance,1e-3));`,
+  )
+  material.needsUpdate = true
+}
+
+export type DofMode = 'auto' | 'on' | 'off'
 /** ray-march steps per pixel for each volumetric quality */
 const VOLUMETRIC_STEPS: Record<VolumetricQuality, number> = { low: 14, medium: 28, high: 48 }
 
@@ -39,6 +66,8 @@ export interface GraphicsSettings {
     toneMapper: ToneMapper
     look: GradeLook
     exposure: number
+    /** auto exposure, 0 off … 1 full: how far the metered scene is brought to a standard brightness */
+    auto: number
     contrast: number
     saturation: number
     temperature: number
@@ -65,6 +94,12 @@ export interface GraphicsSettings {
   volumetric: { enabled: boolean; strength: number; quality: VolumetricQuality }
   /** glare, starburst and ghosts when the sun is in view — see lens-flare-effect.ts */
   lensFlare: { enabled: boolean; intensity: number }
+  /**
+   * A photographer's depth of field, focused on the car (the orbit target): the car sharp, the
+   * coast behind it a little soft. `strength` scales the blur (aperture), `range` is how deep the
+   * sharp zone is, metres.
+   */
+  dof: { mode: DofMode; strength: number; range: number }
   /** progressive path tracing once the camera rests — see pathtrace.ts */
   pathTracing: {
     enabled: boolean
@@ -182,17 +217,25 @@ interface Look {
   split: number
   shadowTint: THREE.ColorRepresentation
   highlightTint: THREE.ColorRepresentation
+  /** stops the deep shade is opened up by (see GradeEffect) */
+  lift: number
 }
 
 /** a look sets the grade sliders to a starting point; the sliders fine-tune from there */
 export const LOOKS: Record<GradeLook, Look> = {
-  natural: { contrast: 1, saturation: 1, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff },
-  // late-afternoon landscape photography: a touch warm, cool shadows, gold highlights, more bite
-  golden: { contrast: 1.14, saturation: 1.1, temperature: 0.12, split: 0.3, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
-  cyber: { contrast: 1.12, saturation: 1.1, temperature: -0.1, split: 0.3, shadowTint: 0x1fb6c9, highlightTint: 0xff7ad9 },
-  warm: { contrast: 1.08, saturation: 1.05, temperature: 0.45, split: 0.2, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b },
-  cold: { contrast: 1.1, saturation: 0.9, temperature: -0.5, split: 0.2, shadowTint: 0x2a4a8a, highlightTint: 0xd8f0ff },
-  noir: { contrast: 1.3, saturation: 0, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff },
+  natural: { contrast: 1, saturation: 1, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff, lift: 0 },
+  // an open-world racing game's clear midday: punchy mid-tones and colour, but the shade opened up and
+  // sky blue-teal rather than crushed, whites staying white
+  daylight: { contrast: 1.12, saturation: 1.06, temperature: -0.02, split: 0.2, shadowTint: 0x5f93b8, highlightTint: 0xfff1dc, lift: 0.8 },
+  // late-afternoon landscape photography: a touch warm, teal shadows, gold highlights, more bite — the
+  // long shadows a low sun throws kept readable (they went black-green). The sun is already gold: an
+  // orange highlight tint and more saturation on top took every bit of blue out of the sunlit grass
+  // and turned it acid yellow-green.
+  golden: { contrast: 1.14, saturation: 1.03, temperature: 0.1, split: 0.3, shadowTint: 0x3c7f8f, highlightTint: 0xffcf96, lift: 1.1 },
+  cyber: { contrast: 1.12, saturation: 1.1, temperature: -0.1, split: 0.3, shadowTint: 0x1fb6c9, highlightTint: 0xff7ad9, lift: 0 },
+  warm: { contrast: 1.08, saturation: 1.05, temperature: 0.45, split: 0.2, shadowTint: 0x3c6e8f, highlightTint: 0xffb46b, lift: 0 },
+  cold: { contrast: 1.1, saturation: 0.9, temperature: -0.5, split: 0.2, shadowTint: 0x2a4a8a, highlightTint: 0xd8f0ff, lift: 0 },
+  noir: { contrast: 1.3, saturation: 0, temperature: 0, split: 0, shadowTint: 0xffffff, highlightTint: 0xffffff, lift: 0 },
 }
 
 /** bloom threshold that suits each mode — only emitters vs anything bright */
@@ -202,7 +245,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   ao: { enabled: true, intensity: 5, radius: 0.9, quality: 'High' },
   bloom: { enabled: true, lightsOnly: true, intensity: 1.4, threshold: BLOOM_THRESHOLD.lightsOnly, radius: 0.75 },
   // Neutral keeps the livery's saturated pink; AgX washes it out, ACES crushes the walls
-  grade: { enabled: true, toneMapper: 'neutral', look: 'cyber', exposure: 0, ...pick(LOOKS.cyber) },
+  grade: { enabled: true, toneMapper: 'neutral', look: 'cyber', exposure: 0, auto: 0.6, ...pick(LOOKS.cyber) },
   vignette: { enabled: true, darkness: 0.55, offset: 0.3 },
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
@@ -211,6 +254,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   atmosphere: { enabled: true, strength: 1 },
   volumetric: { enabled: true, strength: 1, quality: 'medium' },
   lensFlare: { enabled: true, intensity: 1 },
+  dof: { mode: 'auto', strength: 1, range: 6 },
   pathTracing: { enabled: false, bounces: 4, samples: 256, resolution: 0.75, denoise: true },
 }
 
@@ -250,6 +294,17 @@ export interface PostProcessing {
   showPathTraced(texture: THREE.Texture | null, weight: number): void
   /** the current garage's air (open-air garages), or null for none */
   setAtmosphere(params: AtmosphereParams | null): void
+  /**
+   * What the lens focuses on (kept live: the orbit target), and whether the garage asks for depth
+   * of field — with its own aperture (the blur's scale) — or not (null). See `dof.mode`.
+   */
+  setFocus(target: THREE.Vector3, garage: { bokehScale: number } | null): void
+  /** depth of field is currently in the picture */
+  readonly dofActive: boolean
+  /** the brightness the current garage is exposed for (its `exposureKey`) */
+  setExposureKey(key: number): void
+  /** auto exposure's last metered mean log2 luminance (reads back from the GPU: for the console) */
+  readMeter(): number
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
@@ -287,6 +342,10 @@ export function createPostProcessing(
   ao.configuration.halfRes = true
   composer.addPass(ao)
 
+  // metering for auto exposure: after the scene (and its depth of field), before the effect pass
+  const meter = new ExposureMeter()
+  composer.addPass(meter)
+
   const listeners: ((sections: GraphicsSection[]) => void)[] = []
   let aoQuality: AoQuality | null = null
   let aoView: AoView = 'final'
@@ -298,19 +357,35 @@ export function createPostProcessing(
   let vignette: VignetteEffect | null = null
   let atmosphere: AtmosphereEffect | null = null
   let lensFlare: LensFlareEffect | null = null
+  let dof: DepthOfFieldEffect | null = null
+  let dofPass: EffectPass | null = null
+  let focusTarget = new THREE.Vector3()
+  let garageDof: { bokehScale: number } | null = null
+  const dofWanted = () => settings.dof.mode === 'on' || (settings.dof.mode === 'auto' && garageDof !== null)
   let atmosphereParams: AtmosphereParams | null = null
+  let exposureKey = AUTO_KEY
   let structureKey = ''
 
   function rebuildEffects(): void {
-    for (const pass of [effectPass, smaaPass]) {
+    for (const pass of [dofPass, effectPass, smaaPass]) {
       if (!pass) continue
       composer.removePass(pass)
       pass.dispose() // also disposes the effects it holds
     }
-    smaaPass = null
+    smaaPass = dofPass = null
     const s = settings
     const effects: Effect[] = []
-    bloom = grade = vignette = atmosphere = lensFlare = null
+    bloom = grade = vignette = atmosphere = lensFlare = dof = null
+    // Depth of field in its own pass, first: it blurs the scene's light as the lens would, and the
+    // air, bloom and grade then work on the blurred image (merged into the effect pass, its blur read
+    // the frame before the haze — far land lost its haze where it went soft)
+    if (dofWanted()) {
+      dof = new DepthOfFieldEffect(camera, { focusDistance: 8, focusRange: s.dof.range, bokehScale: 2, resolutionScale: 0.5 })
+      dof.target = focusTarget
+      lensCoc(dof.cocMaterial)
+      dofPass = new EffectPass(camera, dof)
+      composer.addPass(dofPass)
+    }
     // the air goes first: haze and shafts are part of the scene's light, graded and tone mapped with it
     if ((s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams) {
       atmosphere = new AtmosphereEffect(camera)
@@ -341,7 +416,10 @@ export function createPostProcessing(
     if (s.vignette.enabled) effects.push((vignette = new VignetteEffect()))
 
     effectPass = new EffectPass(camera, ...effects)
+    composer.removePass(meter)
+    composer.addPass(meter) // (re-added each rebuild so it stays right before the effect pass)
     composer.addPass(effectPass)
+    grade?.setMeter(meter.target.texture, meter.topLevel)
 
     // SMAA gets its own pass so it finds edges in the tone-mapped image, not raw HDR
     if (s.aa.smaa !== 'off') {
@@ -361,6 +439,7 @@ export function createPostProcessing(
       s.aa.smaa,
       (s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams !== null,
       s.lensFlare.enabled && atmosphereParams !== null,
+      dofWanted(),
     ].join()
     if (key !== structureKey) {
       structureKey = key
@@ -383,9 +462,10 @@ export function createPostProcessing(
       bloom.luminanceMaterial.threshold = s.bloom.threshold
       bloom.mipmapBlurPass.radius = s.bloom.radius
     }
+    meter.enabled = s.grade.enabled && s.grade.auto > 0
     if (grade) {
       const look = LOOKS[s.grade.look]
-      grade.set({ ...s.grade, shadowTint: look.shadowTint, highlightTint: look.highlightTint })
+      grade.set({ ...s.grade, shadowTint: look.shadowTint, highlightTint: look.highlightTint, lift: look.lift, key: exposureKey })
     }
     if (vignette) {
       vignette.darkness = s.vignette.darkness
@@ -400,6 +480,12 @@ export function createPostProcessing(
     if (lensFlare) {
       lensFlare.setSun(atmosphereParams?.sunDirection ?? null, atmosphereParams?.sunColor ?? null)
       lensFlare.intensity = s.lensFlare.intensity
+    }
+    if (dof) {
+      // (bokeh scale is in pixels at the effect's resolution: a garage's aperture × the user's strength)
+      dof.bokehScale = (garageDof?.bokehScale ?? 2) * s.dof.strength
+      dof.cocMaterial.focusRange = s.dof.range
+      dof.target = focusTarget
     }
   }
 
@@ -436,6 +522,19 @@ export function createPostProcessing(
     setAtmosphere(params) {
       atmosphereParams = params
       apply()
+    },
+    readMeter: () => meter.read(renderer),
+    setExposureKey(key) {
+      exposureKey = key
+      apply()
+    },
+    setFocus(target, garage) {
+      focusTarget = target
+      garageDof = garage
+      apply()
+    },
+    get dofActive() {
+      return dof !== null
     },
     showPathTraced(texture, weight) {
       blend.show(texture, weight)

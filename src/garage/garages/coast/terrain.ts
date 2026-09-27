@@ -1,0 +1,390 @@
+import * as THREE from 'three'
+import { pbrMaps, type PbrMaps } from '../kit'
+import { fbm, noRaycast, polarGrid, smoothstep } from '../landform'
+import { outdoorMaterial } from '../terrain'
+import { COAST, SEA, SURF, SURF_GLSL, beachness, cliffness, lawnWeight, onRoad, heightAt, shore, shoreTexture, woodedness, type LawnBox } from './site'
+
+/** the coast's photographed surfaces (Poly Haven, CC0): `tile` = metres one copy covers */
+export const COAST_SURFACES = {
+  /** layered sedimentary rock face — Poly Haven "Cliff Side" */
+  cliff: { dir: 'coast-cliff', tile: 6 },
+  /** fine wet-and-dry beach sand — Poly Haven "Coast Sand 05" (used for its detail; the colour is ours) */
+  sand: { dir: 'coast-sand', tile: 3 },
+  /** short grass over soil — Poly Haven "Sparse Grass" */
+  grass: { dir: 'sparse-grass', tile: 2 },
+  /** a palm trunk's bark — Poly Haven "Palm Tree Bark" */
+  palmBark: { dir: 'palm-bark', tile: 1 },
+  /** dark stained timber — Poly Haven "Dark Wood" */
+  darkWood: { dir: 'dark-wood', tile: 2 },
+  /** rough natural stone — Poly Haven "Rock Wall 02" */
+  stoneWall: { dir: 'stone-wall', tile: 3 },
+} as const
+
+/** mean linear luminances of the photographed maps — their detail is taken relative to it */
+const MEAN = { grass: 0.0357, sand: 0.03, cliff: 0.12 }
+
+const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace)
+
+/** the terrain's grid: fine close in (the slope, the cove), coarser toward 4 km */
+export const COAST_GRID = { rings: 380, segments: 1024, spacing: (t: number) => t * t }
+
+/**
+ * The shading every coast ground surface shares, per pixel in world metres:
+ *  - rock where the ground is steep, or along a rocky shore: the cliff photo
+ *    projected from the side (triplanar on x and z, so its strata lie level)
+ *  - sand on the beaches: pale and dry up the beach, darker and glossy where
+ *    the waves reach; the uprush's thin sheet of water and its lace of foam
+ *    run up and drain back in step with the surf (site.SURF_GLSL)
+ *  - elsewhere the vertex colours (grass, scrub, soil) with the grass photo's
+ *    light and dark as detail, and broad patches so it isn't one flat green
+ */
+function coastGround<M extends THREE.MeshStandardMaterial>(
+  material: M,
+  maps: { grass: PbrMaps; sand: PbrMaps; cliff: PbrMaps },
+  contact: { texture: THREE.Texture; rect: THREE.Vector4 },
+): M {
+  const shoreField = shoreTexture()
+  const uniforms = {
+    uShore: { value: shoreField.texture },
+    uShoreRect: { value: shoreField.rect },
+    uSurfTime: SURF.time,
+    uSea: { value: SEA },
+    uGrassMap: { value: maps.grass.maps.map },
+    uGrassNormal: { value: maps.grass.maps.normalMap },
+    uSandMap: { value: maps.sand.maps.map },
+    uSandNormal: { value: maps.sand.maps.normalMap },
+    uCliffMap: { value: maps.cliff.maps.map },
+    uCliffNormal: { value: maps.cliff.maps.normalMap },
+    uCliffRough: { value: maps.cliff.maps.roughnessMap },
+    uContact: { value: contact.texture },
+    uContactRect: { value: contact.rect },
+  }
+  const base = material.onBeforeCompile
+  material.onBeforeCompile = (shader, renderer) => {
+    base.call(material, shader, renderer)
+    Object.assign(shader.uniforms, uniforms)
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 coast;\nvarying vec4 vCoast;\nvarying vec3 vGround;\nvarying vec3 vGroundNormal;')
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvCoast = coast;\nvGround = ( modelMatrix * vec4( position, 1.0 ) ).xyz;\nvGroundNormal = normalize( mat3( modelMatrix ) * objectNormal );',
+      )
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec4 vCoast; // x: rockiness of the shore, y: woodedness, z: road, w: the lawn round the paving
+        varying vec3 vGround;
+        varying vec3 vGroundNormal;
+        uniform sampler2D uShore;
+        uniform vec4 uShoreRect;
+        uniform float uSea;
+        uniform sampler2D uGrassMap;
+        uniform sampler2D uGrassNormal;
+        uniform sampler2D uSandMap;
+        uniform sampler2D uSandNormal;
+        uniform sampler2D uCliffMap;
+        uniform sampler2D uCliffNormal;
+        uniform sampler2D uCliffRough;
+        ${SURF_GLSL}
+        const vec3 LUMA = vec3( 0.2126, 0.7152, 0.0722 );
+        float gDetail( vec2 p, float scale ) {
+          vec2 q = p / scale;
+          float px = max( length( fwidth( q ) ), 1e-5 );
+          return mix( surfNoise( q ), 0.5, smoothstep( 0.25, 0.6, px ) );
+        }
+        // how much of each surface, and the wet film of the uprush — shared by colour, normal and roughness
+        float gRock; float gSand; float gWet; float gFilm; float gFoam;
+        float gLodge = 0.0; float gSpeck = 0.0; float gAO = 0.0; // lodged grass, pebbles, contact occlusion
+        uniform sampler2D uContact;
+        uniform vec4 uContactRect;
+        vec3 gTri; // triplanar weights for the rock (x-facing, z-facing, up)
+        float gBed = 0.5; float gBedFade = 1.0; // where in its stratum a rock pixel is (0 foot … 1 top), and how resolved
+        // Strata: the coast is sedimentary, the rock lies in level beds 1–2.5 m thick (warped gently along
+        // the land). Each bed its own shade; the top of each juts out a little and catches the light, its
+        // foot sits back in the shade of the one above, a dark joint between them. Gone to their average
+        // where a bed is under a few pixels. Without it a face was one smooth sheet of photo — cardboard.
+        float strata( vec3 p, out float along, out float resolved ) {
+          float warp = ( surfNoise( p.xz / 45.0 ) - 0.5 ) * 5.0 + ( surfNoise( p.xz / 11.0 + 7.0 ) - 0.5 ) * 1.2;
+          float y = ( p.y + warp ) / 1.7;
+          float bed = floor( y );
+          along = fract( y );
+          resolved = 1.0 - smoothstep( 0.15, 0.4, fwidth( y ) );
+          return bed;
+        }
+        `,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `{
+          vec3 p = vGround;
+          vec3 n = normalize( vGroundNormal );
+          vec2 sh = texture2D( uShore, ( p.xz - uShoreRect.xy ) * uShoreRect.zw ).rg;
+          float s = sh.r + ( gDetail( p.xz + 13.0, 6.0 ) - 0.5 ) * 3.0;
+          float beach = sh.g;
+          float dist = length( p - cameraPosition );
+          // rock: steep ground, and the rocky shore's first metres above the water
+          // (inland, only the steepest ground is bare rock — steep hillsides are scrub; at the shore the faces are rock)
+          float atShore = 1.0 - smoothstep( 25.0, 70.0, s );
+          float steep = 1.0 - smoothstep( mix( 0.42, 0.55, atShore ), mix( 0.6, 0.8, atShore ), n.y );
+          float shoreRock = vCoast.x * ( 1.0 - smoothstep( 4.0, 22.0, s ) ) * ( 1.0 - beach );
+          gRock = clamp( max( steep, shoreRock ) + ( gDetail( p.xz, 9.0 ) - 0.5 ) * 0.5 * steep, 0.0, 1.0 );
+          gRock *= 1.0 - vCoast.z; // (not on the road)
+          // sand: the beach, fading into the scrub behind it
+          gSand = beach * ( 1.0 - smoothstep( 135.0, 175.0, s ) ) * ( 1.0 - gRock );
+          // the water's reach: wet sand below the highest uprush, the moving film and its foam
+          float reach = uprush( p.xz );
+          float above = p.y - uSea;
+          gWet = ( 1.0 - smoothstep( 6.5, 9.0, s ) ) * step( -0.5, s );
+          gFilm = ( 1.0 - smoothstep( reach - 0.8, reach, s ) ) * step( -0.5, s ) * gSand;
+          float lace = smoothstep( 0.45, 0.75, surfNoise( p.xz * 1.3 ) * 0.6 + surfNoise( p.xz * 4.1 ) * 0.4 );
+          gFoam = gFilm * ( smoothstep( reach - 1.3, reach - 0.2, s ) * 0.9 + lace * 0.35 );
+          // triplanar weights for the rock
+          vec3 a = pow( abs( n ), vec3( 4.0 ) );
+          gTri = a / ( a.x + a.y + a.z );
+          // ─── colour ───
+          vec3 c = diffuseColor.rgb;
+          #if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
+            c *= vColor.rgb;
+          #endif
+          // ─── the vegetated ground, at three scales (shader detail, not grass instances: the ground
+          // has to read as a living surface on its own; the grass patches only add to it close in) ───
+          float near = 1.0 - smoothstep( 600.0, 1500.0, dist );
+          float lum = dot( c, LUMA );
+          float open = 1.0 - vCoast.y; // (the woods' floor keeps its own dark colour)
+          // macro, tens of metres: muted drifts — olive, sun-dried yellow-green, deep green in the hollows
+          float m1 = gDetail( p.xz - 71.0, 60.0 );
+          float m2 = gDetail( p.xz + 31.0, 23.0 );
+          float m3 = gDetail( p.xz * mat2( 0.8, -0.6, 0.6, 0.8 ) + 9.0, 38.0 );
+          vec3 tint = vec3( 1.0 );
+          tint = mix( tint, vec3( 1.1, 1.02, 0.72 ), smoothstep( 0.4, 0.68, m1 ) * 0.7 ); // olive
+          tint = mix( tint, vec3( 1.28, 1.14, 0.66 ), smoothstep( 0.55, 0.78, m1 * 0.55 + m2 * 0.45 ) * 0.75 ); // dry, yellow-green
+          tint = mix( tint, vec3( 0.7, 0.82, 0.72 ), smoothstep( 0.56, 0.78, m3 ) * 0.6 ); // deep green
+          // the lawn round the paving: even, watered turf — no dry drifts, bare soil, laid-over streaks or
+          // stones (they showed between the lawn's grass patches as pale blotches, and the lawn ended in them)
+          float lawn = vCoast.w;
+          float rough = 1.0 - lawn;
+          c = mix( c, c * tint, open * near * mix( 1.0, 0.25, lawn ) );
+          // meso, a few metres: dry straw patches, bare soil, grass flattened by the wind
+          float d1 = gDetail( p.xz + 5.0, 7.0 );
+          float d2 = gDetail( p.xz * 1.7 - 13.0, 3.1 );
+          float dryPatch = smoothstep( 0.6, 0.78, d1 * 0.65 + d2 * 0.35 );
+          c = mix( c, lum * vec3( 1.9, 1.62, 1.02 ), dryPatch * 0.6 * open * near * rough );
+          float bare = smoothstep( 0.7, 0.84, gDetail( p.xz - 41.0, 4.3 ) * 0.7 + d2 * 0.3 ) * ( 1.0 - smoothstep( 0.93, 0.99, n.y ) * 0.6 );
+          c = mix( c, vec3( 0.2, 0.15, 0.1 ) * ( 0.75 + 0.5 * d2 ), bare * 0.7 * open * near * rough );
+          // lodged grass: long streaks laid over along the sea wind, paler (their blades catch the sky)
+          vec2 wq = vec2( dot( p.xz, vec2( 0.82, 0.57 ) ), dot( p.xz, vec2( -0.57, 0.82 ) ) );
+          gLodge = smoothstep( 0.62, 0.8, gDetail( wq * vec2( 0.25, 1.0 ), 2.2 ) ) * smoothstep( 0.45, 0.6, d1 ) * open * ( 1.0 - bare ) * rough;
+          c *= 1.0 + 0.18 * gLodge * near;
+          // micro: the grass photo's light and dark (two scales, so its 2 m tile doesn't show), and fine colour noise
+          vec3 gTex = texture2D( uGrassMap, p.xz / 2.0 ).rgb;
+          vec3 gTex2 = texture2D( uGrassMap, p.xz / 8.6 + 0.37 ).rgb;
+          float detail = mix( dot( gTex, LUMA ), dot( gTex2, LUMA ), 0.35 ) / ${MEAN.grass};
+          c *= mix( 1.0, clamp( detail, 0.0, 2.5 ), 1.0 - smoothstep( 60.0, 400.0, dist ) );
+          // tussocks and thinner turf between them: light and dark at a pace and a stride
+          float tussock = gDetail( p.xz * 1.3 + 5.0, 0.9 ) * 0.45 + gDetail( p.xz + 3.0, 1.4 ) * 0.3 + gDetail( p.xz - 9.0, 3.4 ) * 0.25;
+          c *= mix( 1.0, 0.76 + 0.48 * tussock, near );
+          c.rg *= 1.0 + ( gDetail( p.xz + 17.0, 1.6 ) - 0.5 ) * vec2( 0.1, 0.05 );
+          // pebbles in the turf: a stone in the odd 0.7 m cell, pale grey, gone where it would be under a pixel
+          {
+            vec2 q = p.xz / 0.7;
+            vec2 cell = floor( q );
+            float h = surfHash( cell );
+            vec2 o = vec2( surfHash( cell + 7.1 ), surfHash( cell + 3.3 ) ) - 0.5;
+            float r = 0.09 + 0.14 * surfHash( cell + 1.7 );
+            float px = length( fwidth( q ) );
+            float stone = step( 0.9, h ) * ( 1.0 - smoothstep( r - px - 0.02, r + px, length( fract( q ) - 0.5 - o * 0.5 ) ) );
+            gSpeck = stone * ( 1.0 - smoothstep( 0.15, 0.5, px ) ) * open * ( 0.5 + bare ) * rough;
+            c = mix( c, vec3( 0.34, 0.32, 0.29 ) * ( 0.7 + 0.6 * h ), gSpeck * 0.85 );
+          }
+          // contact: dark, damp, leaf-littered ground round everything standing on the land
+          gAO = texture2D( uContact, ( p.xz - uContactRect.xy ) * uContactRect.zw ).r;
+          c *= 1.0 - 0.45 * gAO;
+          c = mix( c, c * vec3( 0.85, 0.9, 0.78 ), gAO * open ); // (leaf litter: browner)
+          // sand: warm and pale, its photo for grain; darker where wet
+          float sandDetail = dot( texture2D( uSandMap, p.xz / 3.0 ).rgb, LUMA ) / ${MEAN.sand};
+          vec3 sand = vec3( 0.8, 0.68, 0.49 ) * mix( 1.0, clamp( sandDetail, 0.4, 1.8 ), 0.5 );
+          sand *= 0.92 + 0.16 * gDetail( p.xz, 11.0 );
+          sand = mix( sand, sand * vec3( 0.45, 0.43, 0.42 ), gWet );
+          // rock: the cliff photo from the side (strata level), from above on ledges; warm grey-beige
+          vec3 rx = texture2D( uCliffMap, p.zy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).rgb;
+          vec3 rz = texture2D( uCliffMap, p.xy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).rgb;
+          vec3 ry = texture2D( uCliffMap, p.xz / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).rgb;
+          vec3 rock = rx * gTri.x + rz * gTri.z + ry * gTri.y;
+          float rl = dot( rock, LUMA );
+          // (the photo is a rust-orange sandstone: kept a little of its warmth, mostly grey)
+          rock = mix( vec3( rl ), rock, 0.35 ) * vec3( 1.05, 0.98, 0.9 ) * 2.3;
+          // the strata: each bed its own shade (the odd one ochre, the odd one dark), lit tops, shaded feet
+          {
+            float bed = strata( p, gBed, gBedFade );
+            float tone = surfHash( vec2( bed, 3.7 ) + floor( p.xz / 90.0 ) * 0.013 );
+            vec3 bedColour = vec3( 0.78 + 0.4 * tone );
+            bedColour *= mix( vec3( 1.0 ), vec3( 1.12, 0.96, 0.78 ), step( 0.72, surfHash( vec2( bed, 9.1 ) ) ) * 0.8 );
+            bedColour *= 1.0 - 0.3 * step( 0.85, surfHash( vec2( bed, 5.3 ) ) );
+            float relief = mix( 0.62, 1.0, smoothstep( 0.0, 0.35, gBed ) ) * ( 1.0 + 0.14 * smoothstep( 0.8, 0.97, gBed ) );
+            float joint = 1.0 - 0.55 * ( 1.0 - smoothstep( 0.0, 0.06, gBed ) );
+            rock *= mix( vec3( 0.9 ), bedColour * relief * joint, gBedFade * ( 1.0 - smoothstep( 0.8, 0.95, n.y ) ) );
+          }
+          // lichen and dark streaks washed down the face from each ledge, wet dark rock at the waterline
+          rock *= 0.75 + 0.5 * gDetail( vec2( p.x + p.z, p.y * 0.25 ), 4.0 );
+          rock *= 1.0 - 0.3 * smoothstep( 0.55, 0.8, gDetail( vec2( ( p.x - p.z ) * 1.3, p.y * 0.06 ), 2.2 ) ) * ( 1.0 - n.y );
+          rock = mix( rock, rock * 0.35, ( 1.0 - smoothstep( 0.5, 3.0, above ) ) );
+          c = mix( c, sand, gSand );
+          c = mix( c, rock, gRock );
+          // the uprush: a thin sheet of water over the sand, foam at its front
+          c = mix( c, c * vec3( 0.55, 0.62, 0.62 ), gFilm * 0.7 );
+          c = mix( c, vec3( 0.8, 0.82, 0.82 ), gFoam );
+          diffuseColor.rgb = max( c, 0.0 );
+        }`,
+      )
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        // (the contact map occludes the sky's light, not the sun's: the sun has its shadow maps)
+        reflectedLight.indirectDiffuse *= 1.0 - 0.7 * gAO * ( 1.0 - gSand * 0.5 );
+        // a rock face sees half the sky (a ledge's foot less), not all of it
+        reflectedLight.indirectDiffuse *= mix( 1.0, ( 0.55 + 0.45 * max( normalize( vGroundNormal ).y, 0.0 ) ) * mix( 1.0, mix( 0.6, 1.0, smoothstep( 0.0, 0.4, gBed ) ), gBedFade ), gRock );
+        reflectedLight.indirectSpecular *= 1.0 - 0.7 * gAO;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        '// (vertex colours applied with the rest of the ground, map_fragment)',
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `float roughnessFactor = roughness;
+        {
+          vec3 p = vGround;
+          float rr = texture2D( uCliffRough, p.zy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).g * gTri.x + texture2D( uCliffRough, p.xy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).g * gTri.z + texture2D( uCliffRough, p.xz / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).g * gTri.y;
+          // the turf: laid-over blades have a faint sheen, pebbles are smoother than grass
+          roughnessFactor = mix( roughnessFactor, 0.78, gLodge );
+          roughnessFactor = mix( roughnessFactor, 0.6, gSpeck );
+          roughnessFactor = mix( roughnessFactor, rr, gRock );
+          roughnessFactor = mix( roughnessFactor, mix( 0.95, 0.4, gWet ), gSand );
+          roughnessFactor = mix( roughnessFactor, 0.08, gFilm * ( 1.0 - gFoam ) );
+          roughnessFactor = mix( roughnessFactor, 0.35, gRock * ( 1.0 - smoothstep( 0.3, 2.5, p.y - uSea ) ) );
+        }`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `{
+          // detail normals in world space, turned into the view's
+          vec3 p = vGround;
+          vec3 n = normalize( vGroundNormal );
+          float dist = length( p - cameraPosition );
+          float fade = 1.0 - smoothstep( 40.0, 500.0, dist );
+          vec3 gN = texture2D( uGrassNormal, p.xz / 2.0 ).xyz * 2.0 - 1.0;
+          vec3 sN = texture2D( uSandNormal, p.xz / 3.0 ).xyz * 2.0 - 1.0;
+          vec3 flat_ = normalize( mix( gN, sN, gSand ) * vec3( 0.7, 0.7, 1.0 ) );
+          vec3 up = normalize( n + vec3( flat_.x, 0.0, -flat_.y ) * fade * ( 1.0 - gFilm ) );
+          // the rock: whiteout-blended triplanar normals
+          vec3 nx = texture2D( uCliffNormal, p.zy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).xyz * 2.0 - 1.0;
+          vec3 nz = texture2D( uCliffNormal, p.xy / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).xyz * 2.0 - 1.0;
+          vec3 ny = texture2D( uCliffNormal, p.xz / ${COAST_SURFACES.cliff.tile.toFixed(1)} ).xyz * 2.0 - 1.0;
+          float rf = 1.0 - smoothstep( 150.0, 900.0, dist );
+          vec3 wx = vec3( 0.0, nx.y, nx.x ) * sign( n.x );
+          vec3 wz = vec3( nz.x, nz.y, 0.0 ) * sign( n.z );
+          vec3 wy = vec3( ny.x, 0.0, ny.y );
+          vec3 rockN = normalize( n + ( wx * gTri.x + wz * gTri.z + wy * gTri.y ) * 1.2 * rf );
+          // the beds' profile: a top turned up to the sky, a foot turned down under the overhang
+          float tilt = ( smoothstep( 0.72, 0.97, gBed ) * 0.9 - ( 1.0 - smoothstep( 0.0, 0.3, gBed ) ) * 0.7 ) * gBedFade * ( 1.0 - abs( n.y ) );
+          rockN = normalize( rockN + vec3( 0.0, tilt, 0.0 ) );
+          vec3 wn = normalize( mix( up, rockN, gRock ) );
+          normal = normalize( ( viewMatrix * vec4( wn, 0.0 ) ).xyz );
+        }`,
+      )
+  }
+  const key = material.customProgramCacheKey.bind(material)
+  material.customProgramCacheKey = () => `coast-ground|${key()}`
+  return material
+}
+
+/**
+ * The real-scale land: the garage's terrace, the planted slope below the
+ * glass, the cove and the rocky shore, the hillsides with the coast road,
+ * out to 4 km — and the seabed close in, under the sea (the waterline is
+ * where the two meet).
+ */
+export function createCoastTerrain(
+  cliff: PbrMaps,
+  cover: (x: number, z: number) => number,
+  contact: { texture: THREE.Texture; rect: THREE.Vector4 },
+  paving: LawnBox[],
+): { mesh: THREE.Mesh; ready: Promise<void>; textures: THREE.Texture[] } {
+  const grassC = srgb(0x5d7c32)
+  const lush = srgb(0x44692a)
+  const dry = srgb(0x8e8c50)
+  const soil = srgb(0x7c5c40)
+  const scrub = srgb(0x3e4a2a)
+  const woods = srgb(0x2e4424)
+  const verge = srgb(0x8a8270)
+  const seabed = srgb(0x8a7a5a)
+  const t0 = performance.now()
+  const rocky = new Float32Array(1 + COAST_GRID.rings * COAST_GRID.segments)
+  const wooded = new Float32Array(rocky.length)
+  const road = new Float32Array(rocky.length)
+  const lawn = new Float32Array(rocky.length)
+  let k = 0
+  const geometry = polarGrid(COAST.realRadius, COAST_GRID.rings, COAST_GRID.segments, COAST_GRID.spacing, (x, z, _t, _a, c) => {
+    const h = heightAt(x, z)
+    const s = shore(x, z)
+    const r = Math.hypot(x, z)
+    if (s < -2) {
+      c.copy(seabed)
+    } else {
+      // grass, sun-dried on the open slopes, lush in the hollows; bare soil in patches
+      c.copy(grassC).lerp(dry, smoothstep(fbm(x / 70, z / 70), 0.45, 0.72) * 0.8)
+      c.lerp(lush, smoothstep(fbm(x / 40 + 9, z / 40), 0.55, 0.75) * 0.6)
+      c.lerp(soil, smoothstep(fbm(x / 22 + 40, z / 22), 0.62, 0.76) * 0.7 * smoothstep(r, 25, 50))
+      // the lawn round the paving: mown and even, the grass patches' own green (vegetation.ts)
+      const lw = r < 90 ? lawnWeight(x, z, paving) : 0
+      c.lerp(srgb(0x4f7a2c), lw)
+      lawn[k] = lw
+      // scrub and woods on the hillsides
+      const w = woodedness(x, z)
+      c.lerp(scrub, smoothstep(w, 0.1, 0.5) * 0.6)
+      const shade = cover(x, z)
+      if (shade > 0) c.lerp(woods, shade * 0.6).multiplyScalar(1 - 0.25 * shade)
+      // a dusty verge along the road
+      const rd = onRoad(x, z)
+      c.lerp(verge, smoothstep(rd, 0.05, 0.5) * 0.8)
+      wooded[k] = w
+      road[k] = smoothstep(rd, 0.3, 0.9)
+    }
+    rocky[k] = s < 60 ? cliffness(x, z) : 0
+    k++
+    return h
+  })
+  // steep ground is rock and scrub, not lawn: the colours darken off slopes (the shader draws the rock)
+  const normal = geometry.attributes.normal
+  const color = geometry.attributes.color
+  const c = new THREE.Color()
+  for (let i = 0; i < normal.count; i++) {
+    const steep = 1 - smoothstep(normal.getY(i), 0.7, 0.9)
+    if (steep <= 0) continue
+    c.fromBufferAttribute(color, i).lerp(scrub, steep * 0.7)
+    color.setXYZ(i, c.r, c.g, c.b)
+  }
+  const coast = new Float32Array(rocky.length * 4)
+  for (let i = 0; i < rocky.length; i++) {
+    coast[i * 4] = rocky[i]
+    coast[i * 4 + 1] = wooded[i]
+    coast[i * 4 + 2] = road[i]
+    coast[i * 4 + 3] = lawn[i]
+  }
+  geometry.setAttribute('coast', new THREE.BufferAttribute(coast, 4))
+  const maps = { grass: pbrMaps(COAST_SURFACES.grass), sand: pbrMaps(COAST_SURFACES.sand), cliff }
+  maps.grass.maps.roughnessMap.dispose()
+  maps.sand.maps.roughnessMap.dispose()
+  const material = coastGround(outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })), maps, contact)
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.name = 'coast-terrain'
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  console.info(`[garage] coast terrain: ${normal.count} vertices in ${Math.round(performance.now() - t0)} ms`)
+  // (its maps live in shader uniforms, where disposeTree doesn't look: the room frees them)
+  const textures = [maps.grass.maps.map, maps.grass.maps.normalMap, maps.sand.maps.map, maps.sand.maps.normalMap]
+  return { mesh: noRaycast(mesh), ready: Promise.all([maps.grass.ready, maps.sand.ready]).then(() => {}), textures }
+}
+
+export { beachness }

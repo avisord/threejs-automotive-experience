@@ -106,5 +106,6 @@ export const studio: GarageDef = {
   tag: 'Seamless cyclorama, big softboxes · clean and neutral',
   palette: ['#fffaf2', '#c9ccd1', '#9a9ea5', '#dfe8ff'],
   look: 'natural',
+  exposureKey: -1.6,
   create: createStudio,
 }
