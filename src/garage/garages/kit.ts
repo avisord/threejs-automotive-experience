@@ -264,12 +264,16 @@ export function concreteTexture(repeat: [number, number], contrast = 1): THREE.C
   const g = canvas.getContext('2d')!
   g.fillStyle = '#d8d8d8'
   g.fillRect(0, 0, size, size)
-  // soft blotches, drawn wrapped so the tile repeats seamlessly
+  // Soft blotches, drawn wrapped so the tile repeats seamlessly. They sit 16 below the base on
+  // average at full contrast (raw concrete's darker mottling); `contrast` scales that offset too
+  // — scaling only their spread left every blotch 16 darker even at 0.1, and a "barely-there"
+  // plaster wall (Light Wall) came out stained. At contrast ≥ 1 it's as before.
+  const mean = 216 - 16 * Math.min(1, contrast)
   for (let i = 0; i < 260; i++) {
     const x = Math.random() * size
     const y = Math.random() * size
     const r = 8 + Math.random() * 60
-    const v = Math.round(200 + (Math.random() - 0.5) * 90 * contrast)
+    const v = Math.round(mean + (Math.random() - 0.5) * 90 * contrast)
     for (const dx of [-size, 0, size]) {
       for (const dy of [-size, 0, size]) {
         const grad = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r)
