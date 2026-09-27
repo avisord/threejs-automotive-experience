@@ -1,8 +1,12 @@
 # tstshaders — three.js playgrounds
 
-Two independent Vite pages (multi-page build, see `vite.config.ts`):
+Three Vite pages (multi-page build, see `vite.config.ts`), deployed on Vercel at
+https://tstshaders.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
 
-- **`index.html` → `src/main.ts`** — "ball pit": physics balls with procedural surfaces
+- **`index.html`** — static home page (no JS) describing the garage, screenshots in
+  `public/home/` (1280 px WebP + `og.jpg`, captured headless from the real app). `public/sitemap.xml`
+  + `robots.txt` list `/`, `/garage.html`, `/balls/` for Google Search Console — add new pages there.
+- **`balls/index.html` → `src/main.ts`** — "ball pit": physics balls with procedural surfaces
   (`balls.ts`, `materials.ts`, `physics.ts`, `drag.ts`), scene presets in `src/scenes/`,
   composable environment modules in `src/modules/`. Older, mostly finished.
 - **`garage.html` → `src/garage/main.ts`** — the active project: a futuristic car
