@@ -170,6 +170,14 @@ export function rockMaterial(cliff: PbrMaps): THREE.MeshStandardMaterial {
           float l = dot( rock, vec3( 0.2126, 0.7152, 0.0722 ) );
           rock = mix( vec3( l ), rock, 0.35 ) * vec3( 1.05, 0.98, 0.9 ) * 2.3;
           rock *= 0.72 + 0.56 * rNoise( vec2( p.x + p.z, p.y * 0.3 ) / 3.0 );
+          // the same beds as the land's faces (terrain.ts strata): a ledge is a stratum showing, its shade
+          // set by its height, so the rock and the face round it read as one
+          {
+            float warp = ( rNoise( p.xz / 45.0 ) - 0.5 ) * 5.0 + ( rNoise( p.xz / 11.0 + 7.0 ) - 0.5 ) * 1.2;
+            float bed = floor( ( p.y + warp ) / 1.7 );
+            float tone = rHash( vec2( bed, 3.7 ) + floor( p.xz / 90.0 ) * 0.013 );
+            rock *= mix( 0.9, 0.7 + 0.4 * tone, 0.8 );
+          }
           // the tops: soil and moss, and salt-crusted grey on the sea-facing sides
           float top = smoothstep( 0.65, 0.9, n.y ) * smoothstep( 0.4, 0.7, rNoise( p.xz / 1.7 ) );
           rock = mix( rock, vec3( 0.09, 0.11, 0.05 ), top * step( uSea + 3.0, p.y ) * 0.8 );
@@ -283,19 +291,51 @@ function placeRocks(): Placed[] {
     }
   }
 
-  // outcrops on the steeper hillsides
-  for (let i = 0; i < 9000; i++) {
+  // outcrops on the steeper hillsides: a stratum breaking out along the slope — a row of blocks along
+  // the contour, turned with it, sunk into the hill, with a scatter of fallen ones (talus) below it.
+  // One by one at random they were a few pebbles on a painted face.
+  const inGarage = (x: number, z: number) => Math.abs(x) < 16 && z > -12 && z < 18
+  for (let i = 0; i < 14000; i++) {
     const r = 60 + 1800 * rand() ** 1.4
-    const a = (rand() - 0.5) * Math.PI * 1.6
+    const a = (rand() - 0.5) * Math.PI * 2
     const x = Math.sin(a) * r
     const z = -Math.cos(a) * r
     const s = shore(x, z)
-    if (s < 60 || onRoad(x, z) > 0 || (Math.abs(x) < 16 && z > -12 && z < 18)) continue
-    const h0 = heightAt(x, z)
-    const slope = Math.hypot(heightAt(x + 3, z) - h0, heightAt(x, z + 3) - h0) / 3
-    if (slope < 0.45 || rand() > 0.5) continue
-    const w = logNormal(3, 0.5)
-    add(x, z, w, w * (0.4 + rand() * 0.4), 0.45, rand() * Math.PI * 2)
+    if (s < 25 || onRoad(x, z) > 0 || inGarage(x, z)) continue
+    const gx = (heightAt(x + 3, z) - heightAt(x - 3, z)) / 6
+    const gz = (heightAt(x, z + 3) - heightAt(x, z - 3)) / 6
+    const slope = Math.hypot(gx, gz)
+    if (slope < 0.5 || rand() > 0.35 * smoothstep(slope, 0.5, 1.1)) continue
+    // along the contour, and downhill
+    const cx = -gz / slope
+    const cz = gx / slope
+    const dx = -gx / slope
+    const dz = -gz / slope
+    const contour = Math.atan2(cx, cz)
+    const n = 3 + Math.floor(rand() * 5)
+    const w0 = logNormal(5, 0.4) * (r < 400 ? 1 : 1.4)
+    let t = -((n - 1) / 2) * w0 * 0.7
+    for (let k = 0; k < n; k++) {
+      const w = w0 * (0.6 + rand() * 0.7)
+      const px = x + cx * t + dx * (rand() - 0.5) * w0 * 0.3
+      const pz = z + cz * t + dz * (rand() - 0.5) * w0 * 0.3
+      t += w * 0.7 // (overlapping: one broken ledge, not a string of beads)
+      if (onRoad(px, pz) > 0 || inGarage(px, pz) || shore(px, pz) < 20) continue
+      // (low, flat layered blocks — the slab and ledge shapes — half buried: the stratum's edge showing
+      // through the turf; standing proud and rounded they read as boulders dropped on the grass)
+      add(px, pz, w, w * (0.32 + rand() * 0.25), 0.5, contour + (rand() - 0.5) * 0.3, [1, 5, 5, 4][Math.floor(rand() * 4)])
+    }
+    // talus: smaller blocks fallen a few metres down the slope
+    const fallen = Math.floor(rand() * 4)
+    for (let k = 0; k < fallen; k++) {
+      const down = w0 * (1.2 + rand() * 2.5)
+      const side = (rand() - 0.5) * w0 * n * 0.8
+      const px = x + dx * down + cx * side
+      const pz = z + dz * down + cz * side
+      if (onRoad(px, pz) > 0 || inGarage(px, pz) || shore(px, pz) < 15) continue
+      const w = w0 * (0.25 + rand() * 0.3)
+      add(px, pz, w, w * (0.6 + rand() * 0.3), 0.3, rand() * Math.PI * 2)
+    }
   }
   return out
 }

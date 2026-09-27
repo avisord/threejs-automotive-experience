@@ -26,10 +26,14 @@ Reference views: the user's 5 screenshots (2026-09-27), Coast Overlook, AMG ONE.
 - [x] Palms: valley palms in groups of 3–7 leaning out from each other, mixed ages, undergrowth
       at their feet (< 600 m); longer fronds and more lean on slender/coconut palms
 
-## Phase 3 — terrain and cliffs
-- [ ] Cliffs from rock meshes: strata, ledges, overhangs, talus, broken top lip
-- [ ] Hills: outcrops, gullies, erosion, paths (break the blob shapes)
-- [ ] Ground scale cues: stones, bare soil, litter
+## Phase 3 — terrain and cliffs ✅ done
+- [x] Rock faces: strata in the terrain shader (level beds ~1.7 m, own shade per bed, lit tops,
+      shaded feet, dark joints, bed-profile normals, streaks, half-sky occlusion); the rocks
+      share the beds' tones. (The grid is ~6–8 m at 300–600 m, so faces stay shader relief.)
+- [x] Outcrops: rows of low, half-buried slabs along the contour on steep hillsides (a stratum
+      breaking out), talus below them
+- [x] Hills: erosion spurs/hollows (ridged, ±8 m) past 220 m, off the garage's ground
+- Not done: paths; ground scale cues were already in the lawn shader (pebbles, bare soil)
 
 ## Phase 4 — clouds
 - [ ] Grey flat bases, sun-lit tops, wispy edges, layers (cumulus + cirrus)

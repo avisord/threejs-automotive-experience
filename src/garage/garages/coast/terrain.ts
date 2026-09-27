@@ -99,6 +99,19 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
         uniform sampler2D uContact;
         uniform vec4 uContactRect;
         vec3 gTri; // triplanar weights for the rock (x-facing, z-facing, up)
+        float gBed = 0.5; float gBedFade = 1.0; // where in its stratum a rock pixel is (0 foot … 1 top), and how resolved
+        // Strata: the coast is sedimentary, the rock lies in level beds 1–2.5 m thick (warped gently along
+        // the land). Each bed its own shade; the top of each juts out a little and catches the light, its
+        // foot sits back in the shade of the one above, a dark joint between them. Gone to their average
+        // where a bed is under a few pixels. Without it a face was one smooth sheet of photo — cardboard.
+        float strata( vec3 p, out float along, out float resolved ) {
+          float warp = ( surfNoise( p.xz / 45.0 ) - 0.5 ) * 5.0 + ( surfNoise( p.xz / 11.0 + 7.0 ) - 0.5 ) * 1.2;
+          float y = ( p.y + warp ) / 1.7;
+          float bed = floor( y );
+          along = fract( y );
+          resolved = 1.0 - smoothstep( 0.15, 0.4, fwidth( y ) );
+          return bed;
+        }
         `,
       )
       .replace(
@@ -197,8 +210,20 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           float rl = dot( rock, LUMA );
           // (the photo is a rust-orange sandstone: kept a little of its warmth, mostly grey)
           rock = mix( vec3( rl ), rock, 0.35 ) * vec3( 1.05, 0.98, 0.9 ) * 2.3;
-          // lichen and dark streaks down the face, wet dark rock at the waterline
+          // the strata: each bed its own shade (the odd one ochre, the odd one dark), lit tops, shaded feet
+          {
+            float bed = strata( p, gBed, gBedFade );
+            float tone = surfHash( vec2( bed, 3.7 ) + floor( p.xz / 90.0 ) * 0.013 );
+            vec3 bedColour = vec3( 0.78 + 0.4 * tone );
+            bedColour *= mix( vec3( 1.0 ), vec3( 1.12, 0.96, 0.78 ), step( 0.72, surfHash( vec2( bed, 9.1 ) ) ) * 0.8 );
+            bedColour *= 1.0 - 0.3 * step( 0.85, surfHash( vec2( bed, 5.3 ) ) );
+            float relief = mix( 0.62, 1.0, smoothstep( 0.0, 0.35, gBed ) ) * ( 1.0 + 0.14 * smoothstep( 0.8, 0.97, gBed ) );
+            float joint = 1.0 - 0.55 * ( 1.0 - smoothstep( 0.0, 0.06, gBed ) );
+            rock *= mix( vec3( 0.9 ), bedColour * relief * joint, gBedFade * ( 1.0 - smoothstep( 0.8, 0.95, n.y ) ) );
+          }
+          // lichen and dark streaks washed down the face from each ledge, wet dark rock at the waterline
           rock *= 0.75 + 0.5 * gDetail( vec2( p.x + p.z, p.y * 0.25 ), 4.0 );
+          rock *= 1.0 - 0.3 * smoothstep( 0.55, 0.8, gDetail( vec2( ( p.x - p.z ) * 1.3, p.y * 0.06 ), 2.2 ) ) * ( 1.0 - n.y );
           rock = mix( rock, rock * 0.35, ( 1.0 - smoothstep( 0.5, 3.0, above ) ) );
           c = mix( c, sand, gSand );
           c = mix( c, rock, gRock );
@@ -213,6 +238,8 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
         `#include <aomap_fragment>
         // (the contact map occludes the sky's light, not the sun's: the sun has its shadow maps)
         reflectedLight.indirectDiffuse *= 1.0 - 0.7 * gAO * ( 1.0 - gSand * 0.5 );
+        // a rock face sees half the sky (a ledge's foot less), not all of it
+        reflectedLight.indirectDiffuse *= mix( 1.0, ( 0.55 + 0.45 * max( normalize( vGroundNormal ).y, 0.0 ) ) * mix( 1.0, mix( 0.6, 1.0, smoothstep( 0.0, 0.4, gBed ) ), gBedFade ), gRock );
         reflectedLight.indirectSpecular *= 1.0 - 0.7 * gAO;`,
       )
       .replace(
@@ -255,6 +282,9 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           vec3 wz = vec3( nz.x, nz.y, 0.0 ) * sign( n.z );
           vec3 wy = vec3( ny.x, 0.0, ny.y );
           vec3 rockN = normalize( n + ( wx * gTri.x + wz * gTri.z + wy * gTri.y ) * 1.2 * rf );
+          // the beds' profile: a top turned up to the sky, a foot turned down under the overhang
+          float tilt = ( smoothstep( 0.72, 0.97, gBed ) * 0.9 - ( 1.0 - smoothstep( 0.0, 0.3, gBed ) ) * 0.7 ) * gBedFade * ( 1.0 - abs( n.y ) );
+          rockN = normalize( rockN + vec3( 0.0, tilt, 0.0 ) );
           vec3 wn = normalize( mix( up, rockN, gRock ) );
           normal = normalize( ( viewMatrix * vec4( wn, 0.0 ) ).xyz );
         }`,

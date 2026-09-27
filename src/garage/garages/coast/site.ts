@@ -536,6 +536,10 @@ function naturalHeight(x: number, z: number, s: number): number {
   const hills = 70 * fbm(x / 520 + 11, z / 520 - 3, 4) + 160 * smoothstep(fbm(x / 1400 - 2, z / 1400 + 5, 3), 0.35, 0.8)
   h += inland * hills * smoothstep(r, 150, 700)
   h += 12 * smoothstep(s, 20, 300) * (fbm(x / 140, z / 140, 3) - 0.5)
+  // erosion: spurs and hollows down the hillsides (sharp crests, rounded hollows) — the soft noise alone
+  // left every hill a smooth dome. Kept off the ground round the garage
+  const spurs = ridged(x / 130 + 3, z / 130 + 8, 3)
+  h += inland * smoothstep(r, 220, 450) * 16 * (spurs - 0.55) * smoothstep(hills, 10, 60)
   // drainage: small ravines cut down to the shore
   const gully = ridged(x / 240 + 5, z / 240 - 1, 3)
   h -= 9 * smoothstep(gully, 0.82, 0.97) * smoothstep(s, 15, 80) * (1 - smoothstep(s, 400, 900))
