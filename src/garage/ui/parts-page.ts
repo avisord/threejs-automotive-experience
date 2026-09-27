@@ -8,6 +8,12 @@ export interface PartsState {
   editor(): GroupEditor | undefined
   picking(): boolean
   setPicking(on: boolean): void
+  /** ghost the parts in front of the selected / inspected one */
+  xray(): boolean
+  setXray(on: boolean): void
+  /** hide the selection (or the hovered part) to reach what's under it */
+  hide(): void
+  unhideAll(): void
   /** shown while there's no car to edit: loading, or an empty bay */
   placeholder(): string
 }
@@ -129,11 +135,50 @@ export function partsPage(state: PartsState): Page {
           'p',
           'cfg-note',
           state.picking()
-            ? 'Click a part to select it · Shift/Ctrl+click adds or removes · Alt+click picks what’s behind (e.g. under glass) · Esc clears.'
+            ? 'Click a part to select it · click the same spot again to go one layer in · Alt+click lists every layer under the pointer · Shift/Ctrl+click adds or removes · Esc clears.'
             : 'Turn on, then click parts of the car to select them. Dragging still orbits.',
         ),
       )
       body.append(pick)
+
+      const see = section(
+        'X-ray',
+        toggle(state.xray(), 'ghost the parts in front', (on) => {
+          state.setXray(on)
+          nav.refresh()
+        }),
+      )
+      see.append(
+        el(
+          'p',
+          'cfg-note',
+          state.xray()
+            ? 'Parts in front of the selected one turn see-through.'
+            : 'Off — parts in front stay solid.',
+        ),
+      )
+      const hidden = editor.xray.hidden.size
+      const peel = el('div', 'cfg-actions')
+      if (editor.selection.size > 0) {
+        peel.append(
+          button(`Hide ${editor.selection.size} selected (H)`, () => {
+            state.hide()
+            nav.refresh()
+          }),
+        )
+      } else {
+        see.append(el('p', 'cfg-note', 'H hides the part under the pointer, to peel the car layer by layer.'))
+      }
+      if (hidden > 0) {
+        peel.append(
+          button(`Show ${hidden} hidden (⇧H)`, () => {
+            state.unhideAll()
+            nav.refresh()
+          }),
+        )
+      }
+      see.append(peel)
+      body.append(see)
 
       const sel = section(`Selection · ${editor.selection.size}`)
       if (editor.selection.size === 0) {

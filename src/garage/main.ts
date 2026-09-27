@@ -14,7 +14,8 @@ import { garagePage } from './ui/garage-page'
 import { graphicsPage } from './ui/graphics-page'
 import { displayPage } from './ui/display-page'
 import { partsPage } from './ui/parts-page'
-import { createGroupEditor, type GroupEditor } from './groups'
+import { createGroupEditor, meshLabel, type GroupEditor } from './groups'
+import { findOccluders, type MeshCast } from './xray'
 import { createLampSystem, type LampSystem } from './lights'
 import { lightsPage } from './ui/lights-page'
 import type { PathTracer } from './pathtrace'
@@ -133,12 +134,19 @@ function groundAt(x: number, z: number, fromY: number): number | null {
   return null
 }
 
+/** fetch three-mesh-bvh once (walking needs it for the ground, picking for fast raycasts) */
+let bvhLoading: Promise<void> | null = null
+function loadBVH(): Promise<void> {
+  bvhLoading ??= import('three-mesh-bvh').then((m) => void (meshBVH = m))
+  return bvhLoading
+}
+
 /** the orbit camera's place while walking or flying — the orbit comes back to it */
 let orbitHome: THREE.Vector3 | null = null
 async function setCameraMode(mode: CameraMode): Promise<void> {
   if (mode === freeCam.mode) return
   if (mode !== 'orbit' && !meshBVH) {
-    meshBVH = await import('three-mesh-bvh')
+    await loadBVH()
     if (mode === freeCam.mode) return
   }
   if (freeCam.mode === 'orbit') orbitHome = camera.position.clone()
@@ -466,7 +474,7 @@ const HINTS: Record<CameraMode, string> = {
   walk: 'click to look · wasd walk · shift runs · esc frees the mouse',
   fly: 'click to look · wasd · space up · shift/ctrl down · scroll: speed',
 }
-const PICK_HINT = 'click a part to select · shift+click to add · alt+click picks behind · esc clears'
+const PICK_HINT = 'click to select · click again: next layer in · alt+click lists every layer · h hides · shift+h shows all · esc clears'
 const hint = document.createElement('div')
 hint.className = 'hint'
 hint.textContent = HINTS.orbit
@@ -644,6 +652,7 @@ async function showCar(id: string): Promise<void> {
     const configurator = createConfigurator(root, profile, traceSceneChanged)
     applyAnisotropy(root)
     const groups = createGroupEditor(root, profile, configurator.carSpace, (materials) => {
+      scheduleGhosts()
       invalidate()
       post.refreshGlow()
       if (materials) traceSceneChanged()
@@ -865,6 +874,8 @@ const videoStage: Stage = (() => {
 // ─── side panel: Menu › Garage · Collection · Car · Parts · Settings ───────
 /** Menu › Parts: clicks on the car select parts (declared before the panel renders) */
 let picking = false
+/** Menu › Parts: ghost whatever stands in front of the part being worked on */
+let xrayOn = true
 const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
@@ -891,6 +902,13 @@ const pages: Record<string, Page> = {
     editor: () => bay?.groups,
     picking: () => picking,
     setPicking,
+    xray: () => xrayOn,
+    setXray(on) {
+      xrayOn = on
+      scheduleGhosts(0)
+    },
+    hide: hideParts,
+    unhideAll,
     placeholder: bayPlaceholder,
   }),
   settings: {
@@ -916,29 +934,177 @@ try {
 function setPicking(on: boolean): void {
   picking = on
   if (on && document.pointerLockElement) document.exitPointerLock() // the pointer is needed to pick
+  if (on) void loadBVH() // a pick over a million-triangle car takes tens of ms without it
   renderer.domElement.style.cursor = on ? 'crosshair' : ''
   syncCameraHud()
-  if (!on) bay?.groups.highlight('hover', [])
+  if (!on) {
+    bay?.groups.highlight('hover', [])
+    closeLayerMenu()
+    pickTip.classList.remove('is-shown')
+    pickCycle = null
+  }
   invalidate()
 }
 
+/** one mesh into `hits`: through a BVH (built the first time a ray comes near) once it's loaded */
+const castMesh: MeshCast = (mesh, ray, hits) => {
+  if (!meshBVH) return mesh.raycast(ray, hits)
+  // indirect: leaves the geometry's index as it is (overlays and ghosts share it)
+  mesh.geometry.boundsTree ??= new meshBVH.MeshBVH(mesh.geometry, { indirect: true })
+  meshBVH.acceleratedRaycast.call(mesh, ray, hits)
+}
+
 const raycaster = new THREE.Raycaster()
+;(raycaster as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true // one hit per mesh is all a pick needs
 const ndc = new THREE.Vector2()
-/** meshes under a canvas point, nearest first, one entry per mesh */
+const pickHits: THREE.Intersection[] = []
+/** every layer under a canvas point, nearest first, one entry per mesh — ghosts included, hidden parts not */
 function meshesAt(clientX: number, clientY: number): THREE.Mesh[] {
   if (!bay) return []
   const rect = renderer.domElement.getBoundingClientRect()
   ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
   // camera.matrixWorld is still the pose last drawn, so rays match the picture
   raycaster.setFromCamera(ndc, camera)
-  const seen = new Set<THREE.Object3D>()
+  pickHits.length = 0
+  const hidden = bay.groups.xray.hidden
+  for (const mesh of bay.groups.pickable) if (!hidden.has(mesh)) castMesh(mesh, raycaster, pickHits)
+  pickHits.sort((a, b) => a.distance - b.distance)
   const out: THREE.Mesh[] = []
-  for (const hit of raycaster.intersectObjects(bay.groups.pickable, false)) {
-    if (seen.has(hit.object)) continue
-    seen.add(hit.object)
-    out.push(hit.object as THREE.Mesh)
-  }
+  for (const hit of pickHits) if (!out.includes(hit.object as THREE.Mesh)) out.push(hit.object as THREE.Mesh)
   return out
+}
+
+/** where a plain click lands: the first layer that isn't ghosted — what you see is what you pick */
+function surfaceIndex(stack: THREE.Mesh[]): number {
+  const ghosts = bay?.groups.xray.ghosts
+  const i = stack.findIndex((m) => !ghosts?.has(m))
+  return i < 0 ? 0 : i
+}
+
+/**
+ * Clicking again on the same spot goes one layer in (paint → glass → seat → floor…),
+ * wrapping round at the last. Moving the pointer or the camera starts over.
+ */
+let pickCycle: { x: number; y: number; stack: THREE.Mesh[]; index: number; added: boolean } | null = null
+const sameStack = (a: THREE.Mesh[], b: THREE.Mesh[]) => a.length === b.length && a.every((m, i) => m === b[i])
+function cycleAt(x: number, y: number, stack: THREE.Mesh[]): number | null {
+  if (!pickCycle || Math.hypot(x - pickCycle.x, y - pickCycle.y) > 4 || !sameStack(pickCycle.stack, stack)) return null
+  return (pickCycle.index + 1) % stack.length
+}
+
+// a small label by the pointer: the part a click would take, and how deep it is
+const pickTip = document.createElement('div')
+pickTip.className = 'pick-tip'
+app.appendChild(pickTip)
+function showPickTip(x: number, y: number, stack: THREE.Mesh[], index: number, picked: boolean): void {
+  pickTip.replaceChildren()
+  const name = document.createElement('b')
+  name.textContent = meshLabel(stack[index])
+  const depth = document.createElement('span')
+  const n = stack.length
+  // once picked, say what the next click on this spot would take
+  if (n > 1) depth.textContent = `layer ${index + 1}/${n}${picked ? ` · again: ${meshLabel(stack[(index + 1) % n])}` : ''}`
+  pickTip.append(name, depth)
+  pickTip.style.transform = `translate(${x + 14}px, ${y + 16}px)`
+  pickTip.classList.add('is-shown')
+}
+
+// Alt+click: every layer under the pointer as a list — hover one to see it, click to select
+const layerMenu = document.createElement('div')
+layerMenu.className = 'pick-menu'
+app.appendChild(layerMenu)
+function closeLayerMenu(): void {
+  if (!layerMenu.classList.contains('is-shown')) return
+  layerMenu.classList.remove('is-shown')
+  layerMenu.replaceChildren()
+  bay?.groups.highlight('hover', [])
+}
+function openLayerMenu(x: number, y: number, stack: THREE.Mesh[]): void {
+  const editor = bay?.groups
+  if (!editor) return
+  layerMenu.replaceChildren()
+  const title = document.createElement('div')
+  title.className = 'pick-menu-title'
+  title.textContent = `${stack.length} layer${stack.length === 1 ? '' : 's'} here · shift adds`
+  layerMenu.append(title)
+  stack.forEach((mesh, i) => {
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.className = `pick-menu-item${editor.selection.has(mesh) ? ' is-selected' : ''}`
+    const n = document.createElement('span')
+    n.className = 'pick-menu-n'
+    n.textContent = String(i + 1)
+    const label = document.createElement('span')
+    label.textContent = meshLabel(mesh)
+    item.title = mesh.name
+    item.append(n, label)
+    item.addEventListener('pointerenter', () => editor.highlight('hover', [mesh]))
+    item.addEventListener('click', (e) => {
+      editor.select([mesh], e.shiftKey || e.ctrlKey || e.metaKey ? 'toggle' : 'replace')
+      pickCycle = { x, y, stack, index: i, added: true }
+      closeLayerMenu()
+      panelNav.refresh()
+    })
+    layerMenu.append(item)
+  })
+  layerMenu.addEventListener('pointerleave', () => editor.highlight('hover', []), { once: true })
+  // keep it on screen
+  layerMenu.classList.add('is-shown')
+  const w = layerMenu.offsetWidth
+  const h = layerMenu.offsetHeight
+  layerMenu.style.left = `${Math.min(x + 8, window.innerWidth - w - 8)}px`
+  layerMenu.style.top = `${Math.max(8, Math.min(y + 8, window.innerHeight - h - 8))}px`
+  pickTip.classList.remove('is-shown')
+}
+window.addEventListener('pointerdown', (e) => {
+  if (!layerMenu.contains(e.target as Node)) closeLayerMenu()
+})
+
+/** H: take the selection (or the hovered part) out of the view to reach what's under it */
+function hideParts(): void {
+  const editor = bay?.groups
+  if (!editor) return
+  const doomed = editor.selection.size > 0 ? [...editor.selection] : editor.targets()
+  if (doomed.length === 0) return
+  editor.xray.hide(doomed)
+  editor.highlight('hover', [])
+  editor.select([...editor.selection].filter((m) => !editor.xray.hidden.has(m)))
+  pickCycle = null
+  panelNav.refresh()
+}
+function unhideAll(): void {
+  const editor = bay?.groups
+  if (!editor || editor.xray.hidden.size === 0) return
+  editor.xray.unhideAll()
+  pickCycle = null
+  scheduleGhosts(0)
+  panelNav.refresh()
+}
+
+// ghosts follow the selection, the inspected group and the camera — worked out once things rest
+let ghostTimer = 0
+function scheduleGhosts(delay = 60): void {
+  clearTimeout(ghostTimer)
+  ghostTimer = window.setTimeout(updateGhosts, delay)
+}
+function updateGhosts(): void {
+  const editor = bay?.groups
+  if (!editor) return
+  if (!xrayOn || !editor.overlaysVisible) {
+    if (editor.xray.ghosts.size > 0) editor.xray.setGhosts([])
+    return invalidate()
+  }
+  const targets = editor.targets()
+  const skip = new Set([...targets, ...editor.xray.hidden])
+  const candidates = editor.pickable.filter((m) => !skip.has(m))
+  bay!.root.updateMatrixWorld()
+  const eye = camera.getWorldPosition(new THREE.Vector3())
+  editor.xray.setGhosts(findOccluders(targets, candidates, eye, castMesh))
+  invalidate()
+}
+function cameraMovedForPicking(): void {
+  pickCycle = null
+  if (bay?.groups.overlaysVisible && xrayOn) scheduleGhosts(160)
 }
 
 // a click (not a drag — dragging orbits) picks; hover tints what would be picked
@@ -949,30 +1115,69 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   downAt = null
   if (!picking || !bay || !start || e.button !== 0) return
   if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 5) return
-  const hits = meshesAt(e.clientX, e.clientY)
-  const mesh = e.altKey ? hits[1] ?? hits[0] : hits[0]
+  clearTimeout(hoverTimer) // a hover still pending would overwrite the tip
+  const editor = bay.groups
+  const stack = meshesAt(e.clientX, e.clientY)
+  if (e.altKey && stack.length > 0) return openLayerMenu(e.clientX, e.clientY, stack)
   const additive = e.shiftKey || e.ctrlKey || e.metaKey
-  if (mesh) bay.groups.select([mesh], additive ? 'toggle' : 'replace')
-  else if (!additive) bay.groups.select([])
+  if (stack.length === 0) {
+    pickCycle = null
+    if (!additive) editor.select([])
+    return panelNav.refresh()
+  }
+  const next = cycleAt(e.clientX, e.clientY, stack)
+  const index = next ?? surfaceIndex(stack)
+  const mesh = stack[index]
+  let added = true
+  if (additive) {
+    // going deeper with shift swaps the layer this spot added last for the next one
+    if (next !== null && pickCycle!.added) editor.select([pickCycle!.stack[pickCycle!.index]], 'toggle')
+    added = !editor.selection.has(mesh)
+    editor.select([mesh], 'toggle')
+  } else {
+    editor.select([mesh])
+  }
+  pickCycle = { x: e.clientX, y: e.clientY, stack, index, added }
+  showPickTip(e.clientX, e.clientY, stack, index, true)
   panelNav.refresh()
 })
-// hover picks only once the pointer rests — a raycast over a million-triangle
-// car takes tens of ms, too much to repeat on every pointermove
+// hover picks only once the pointer rests (a raycast is still work on a big car)
 let hoverTimer = 0
 renderer.domElement.addEventListener('pointermove', (e) => {
   clearTimeout(hoverTimer)
-  if (!picking || downAt) return // no hover work while dragging
+  if (!picking || downAt || layerMenu.classList.contains('is-shown')) return // no hover work while dragging
   hoverTimer = window.setTimeout(() => {
-    const hits = meshesAt(e.clientX, e.clientY)
-    const mesh = e.altKey ? hits[1] ?? hits[0] : hits[0]
-    bay?.groups.highlight('hover', mesh ? [mesh] : [])
+    const stack = meshesAt(e.clientX, e.clientY)
+    if (stack.length === 0) {
+      pickTip.classList.remove('is-shown')
+      return bay?.groups.highlight('hover', [])
+    }
+    const next = cycleAt(e.clientX, e.clientY, stack)
+    const index = next ?? surfaceIndex(stack)
+    // a part reached by going in gets its cover ghosted; the surface under the pointer doesn't need it
+    bay?.groups.highlight('hover', [stack[index]], { xray: next !== null })
+    showPickTip(e.clientX, e.clientY, stack, index, false)
   }, 60)
 })
-renderer.domElement.addEventListener('pointerleave', () => bay?.groups.highlight('hover', []))
+renderer.domElement.addEventListener('pointerleave', () => {
+  clearTimeout(hoverTimer)
+  pickTip.classList.remove('is-shown')
+  bay?.groups.highlight('hover', [])
+})
 window.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !bay || bay.groups.selection.size === 0) return
-  bay.groups.select([])
-  panelNav.refresh()
+  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+  if (typing || !bay) return
+  if (e.key === 'Escape') {
+    if (layerMenu.classList.contains('is-shown')) return closeLayerMenu()
+    if (bay.groups.selection.size === 0) return
+    bay.groups.select([])
+    pickCycle = null
+    return panelNav.refresh()
+  }
+  if (e.code === 'KeyH' && bay.groups.overlaysVisible && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.shiftKey) unhideAll()
+    else hideParts()
+  }
 })
 
 const known = (id: string | null) => (id && (id === NO_CAR || CARS.some((c) => c.id === id)) ? id : null)
@@ -1162,6 +1367,7 @@ function frame(timestamp: number): void {
   if (orbiting ? updateControls(dt) : freeCam.update(dt)) {
     invalidate() // includes damping settling after a drag
     noteActivity()
+    cameraMovedForPicking()
   }
   const tracing = tracerWanted(timestamp)
   if (tracing && tracer!.status === 'tracing') invalidate(1) // keep sampling until it's done

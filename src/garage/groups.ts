@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { createPaintMaterial, type PaintMaterial } from './paint'
 import type { MaterialChoice } from './materials'
 import { createHighlighter, type HighlightKind } from './highlight'
+import { createXray, type Xray } from './xray'
 import type { CarProfile } from './cars'
 
 export type GroupMaterial = MaterialChoice
@@ -60,8 +61,15 @@ export interface GroupEditor {
   deleteGroup(groupId: string): void
   rename(groupId: string, name: string): void
   setMaterial(groupId: string, patch: Partial<GroupMaterial>): void
-  /** tint hovered / inspected meshes (selection is tinted automatically) */
-  highlight(kind: Exclude<HighlightKind, 'selected'>, meshes: Iterable<THREE.Mesh>): void
+  /**
+   * tint hovered / inspected meshes (selection is tinted automatically); `xray: false` keeps a
+   * hover out of `targets()` — the part under the pointer on the car's surface needs no ghosting
+   */
+  highlight(kind: Exclude<HighlightKind, 'selected'>, meshes: Iterable<THREE.Mesh>, opts?: { xray?: boolean }): void
+  /** what X-ray clears the view to: the selection, the inspected group and a deliberate hover */
+  targets(): THREE.Mesh[]
+  /** ghosting and hiding for reaching parts under other parts */
+  readonly xray: Xray
   setOverlaysVisible(visible: boolean): void
   /** whether the Parts page is showing its overlays */
   readonly overlaysVisible: boolean
@@ -87,6 +95,9 @@ export function createGroupEditor(
   })
 
   const highlighter = createHighlighter()
+  const xray = createXray()
+  const highlighted: Record<'hover' | 'focus', THREE.Mesh[]> = { hover: [], focus: [] }
+  let hoverXray = true
   let overlaysVisible = true
   const groups: MaterialGroup[] = []
   const selection = new Set<THREE.Mesh>()
@@ -251,13 +262,27 @@ export function createGroupEditor(
       for (const paint of paints.get(groupId)?.values() ?? []) paint.apply({ ...group.material, opacity: null })
       changed()
     },
-    highlight(kind, meshes) {
-      highlighter.set(kind, meshes)
+    highlight(kind, meshes, opts) {
+      highlighted[kind] = [...meshes]
+      if (kind === 'hover') hoverXray = opts?.xray ?? true
+      highlighter.set(kind, highlighted[kind])
       onChange(false)
     },
+    targets() {
+      const out = new Set([...selection, ...highlighted.focus])
+      if (hoverXray) for (const m of highlighted.hover) out.add(m)
+      for (const m of xray.hidden) out.delete(m)
+      return [...out]
+    },
+    xray,
     setOverlaysVisible(visible) {
       overlaysVisible = visible
       highlighter.setVisible(visible)
+      // ghosts and hidden parts are editing aids: the car is whole again off the Parts page
+      if (!visible) {
+        xray.setGhosts([])
+        xray.unhideAll()
+      }
       onChange(false)
     },
     get overlaysVisible() {
@@ -265,6 +290,7 @@ export function createGroupEditor(
     },
     dispose() {
       highlighter.dispose()
+      xray.dispose()
       for (const g of [...groups]) {
         for (const paint of paints.get(g.id)?.values() ?? []) paint.material.dispose()
       }
