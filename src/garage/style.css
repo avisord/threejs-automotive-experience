@@ -79,6 +79,39 @@ body,
   user-select: none;
 }
 
+/* camera mode switch: Orbit · Walk · Fly */
+.cam-modes {
+  position: fixed;
+  bottom: 12px;
+  left: 16px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(8, 10, 14, 0.55);
+  border: 1px solid rgba(53, 224, 255, 0.14);
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.cam-modes button {
+  padding: 6px 10px;
+  font: 11px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cam-modes button:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+.cam-modes button.is-on {
+  color: #35e0ff;
+  background: rgba(53, 224, 255, 0.12);
+}
+
 /* ─── configurator panel ─────────────────────────────────────────────────── */
 .cfg {
   --cfg-accent: #35e0ff;
@@ -411,8 +444,9 @@ body,
     bottom: 10px;
   }
 
-  .hint {
-    display: none;
+  .hint,
+  .cam-modes {
+    display: none; /* walking and flying need a keyboard */
   }
 }
 
@@ -734,7 +768,8 @@ body,
 .is-directing .cfg,
 .is-directing .hint,
 .is-directing .fps,
-.is-directing .venue {
+.is-directing .venue,
+.is-directing .cam-modes {
   display: none;
 }
 

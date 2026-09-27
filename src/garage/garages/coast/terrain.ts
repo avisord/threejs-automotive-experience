@@ -381,6 +381,7 @@ export function createCoastTerrain(
   mesh.name = 'coast-terrain'
   mesh.castShadow = true
   mesh.receiveShadow = true
+  mesh.userData.ground = true // what the walking camera stands on, raycasts or not
   console.info(`[garage] coast terrain: ${normal.count} vertices in ${Math.round(performance.now() - t0)} ms`)
   // (its maps live in shader uniforms, where disposeTree doesn't look: the room frees them)
   const textures = [maps.grass.maps.map, maps.grass.maps.normalMap, maps.sand.maps.map, maps.sand.maps.normalMap]
