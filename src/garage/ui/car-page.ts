@@ -86,6 +86,11 @@ export function carPage(
       }
 
       if (placement?.position) body.append(positionSection(placement, nav))
+      // an upload has no parts set up yet: paint it through Menu › Parts' groups
+      if (configurator.parts.length === 0) {
+        body.append(el('p', 'cfg-note cfg-gap', 'This model has no paintable parts set up — group and paint its meshes in Menu › Parts.'))
+        return
+      }
 
       const presets = section('Presets')
       const chips = el('div', 'cfg-chips')

@@ -24,7 +24,8 @@ export interface CarProfile {
   id: string
   make: string
   model: string
-  year: number
+  /** model year; uploads have none */
+  year?: number
   /** short descriptor under the name on the card */
   tag: string
   /** file in public/models — optimised with gltf-transform, see car.ts */
@@ -33,6 +34,12 @@ export interface CarProfile {
   yaw?: number
   /** rescale to this overall length in metres; omit to trust the file */
   length?: number
+  /** uploads: reads the model instead of fetching `file` from public/models */
+  open?: (onProgress?: (fraction: number) => void) => Promise<THREE.Object3D>
+  /** uploads: quarter turns (radians) applied to a wrapper — roll, pitch, then yaw */
+  turn?: { yaw: number; pitch: number; roll: number }
+  /** uploads: the length to scale to, given the measured one (undefined keeps it) */
+  fitLength?: (measured: number) => number | undefined
   /** meshes to drop: shadow planes, motion-blur wheel doubles, damage variants */
   hide?: PartMatch[]
   glass?: GlassFix[]

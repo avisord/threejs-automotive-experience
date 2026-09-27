@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { matches, type CarProfile, type GlassFix } from './cars'
+import { applyTurn } from './uploads'
 
 // Every model in public/models is optimised from its Sketchfab export (meshopt + 2k webp) with:
 //   gltf-transform optimize in.glb out.glb --compress meshopt --texture-compress webp --texture-size 2048 \
@@ -22,10 +23,17 @@ const SEE_THROUGH = /glass|window|windscreen|vetro|lens|clear|alpha|trans|refrac
  * Returns a clean root the caller can move without touching the car's own offset.
  */
 export async function loadCar(profile: CarProfile, onProgress?: (fraction: number) => void): Promise<THREE.Group> {
-  const gltf = await loader.loadAsync(`/models/${profile.file}`, (e) => {
-    if (e.lengthComputable) onProgress?.(e.loaded / e.total)
-  })
-  const car = gltf.scene
+  let car: THREE.Object3D
+  if (profile.open) {
+    // an upload: turned on a wrapper, whatever transform the file's own root carries
+    car = new THREE.Group()
+    car.add(await profile.open(onProgress))
+  } else {
+    const gltf = await loader.loadAsync(`/models/${profile.file}`, (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total)
+    })
+    car = gltf.scene
+  }
   car.name = profile.id
 
   const doomed: THREE.Mesh[] = []
@@ -57,12 +65,16 @@ export async function loadCar(profile: CarProfile, onProgress?: (fraction: numbe
   })
 
   if (profile.yaw) car.rotation.y = profile.yaw
+  if (profile.turn) applyTurn(car, profile.turn)
   // Measured from the vertices (precise), not each mesh's bounding box turned into the world: a
   // wheel turned on its axle (the GT3 R's LR/RF, 50°) has a box ~1.4× the tyre, whose corner
   // reached the floor 15 cm below the tread — the car stood on it, floating (the 930 by 10 cm).
-  if (profile.length) {
+  if (profile.length || profile.fitLength) {
+    car.updateMatrixWorld(true)
     const size = new THREE.Box3().setFromObject(car, true).getSize(new THREE.Vector3())
-    car.scale.multiplyScalar(profile.length / Math.max(size.x, size.z))
+    const measured = Math.max(size.x, size.z)
+    const length = profile.length ?? profile.fitLength!(measured)
+    if (length) car.scale.multiplyScalar(length / measured)
   }
   car.updateMatrixWorld(true)
   const box = new THREE.Box3().setFromObject(car, true)

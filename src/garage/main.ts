@@ -3,7 +3,22 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { DEFAULT_GARAGE, GARAGES, collectGlowMeshes, type GarageDef, type Room } from './garages'
 import { disposeCar, loadCar } from './car'
-import { CARS, DEFAULT_CAR, NO_CAR, carTitle } from './cars'
+import { CARS, DEFAULT_CAR, NO_CAR, carTitle, type CarProfile } from './cars'
+import {
+  collectFiles,
+  deleteUpload,
+  droppedFiles,
+  getUpload,
+  guessSetup,
+  loadUploads,
+  nameFromFile,
+  newUploadId,
+  saveUpload,
+  uploadProfile,
+  uploads,
+  type UploadRecord,
+} from './uploads'
+import { uploadPage } from './ui/upload-page'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
 import { LOOKS, REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
@@ -592,6 +607,22 @@ function centreOnCar(): void {
   invalidate()
 }
 
+/**
+ * Keep the framing from one vehicle to the next: the orbit's distance scales with the
+ * length (a bike after a car comes in close). Cars of a size barely move it.
+ */
+let framedLength = 4.5
+function frameLength(length: number): void {
+  const ratio = length / framedLength
+  framedLength = length
+  if (Math.abs(ratio - 1) < 0.15) return
+  const home = freeCam.mode === 'orbit' ? camera.position : orbitHome
+  if (!home) return
+  offset.subVectors(home, controls.target).multiplyScalar(ratio)
+  offset.setLength(THREE.MathUtils.clamp(offset.length(), controls.minDistance, controls.maxDistance))
+  home.copy(controls.target).add(offset)
+}
+
 /** swap the car in the bay; a newer request supersedes one still loading */
 /** take the car out of the bay and free it */
 function clearBay(): void {
@@ -630,7 +661,7 @@ async function showCar(id: string): Promise<void> {
     console.info('[garage] bay emptied')
     return
   }
-  const profile = CARS.find((c) => c.id === id) ?? CARS[0]
+  const profile = findProfile(id) ?? CARS[0]
   loadingId = profile.id
   loader.classList.remove('done')
   loader.querySelector('.loader-label')!.textContent = `loading ${carTitle(profile)}`
@@ -666,6 +697,7 @@ async function showCar(id: string): Promise<void> {
     bay = { id: profile.id, root, shadow, configurator, groups, lamps, size, box }
     applyDaylight()
     placement.attach({ id: profile.id, root, shadow, size }) // its saved place (the shadow was baked at the origin)
+    frameLength(Math.max(size.x, size.z))
     centreOnCar()
     room.shadowsChanged?.()
     traceSceneChanged()
@@ -871,6 +903,86 @@ const videoStage: Stage = (() => {
   }
 })()
 
+// ─── uploads: the user's own models (Menu › Collection › Upload) ─────────────
+/** a model just parsed at import — the bay takes it instead of parsing the files again */
+let freshModel: { id: string; model: THREE.Object3D } | null = null
+let uploadStatus: { text: string; error: boolean } | null = null
+
+/** built-in car or upload by id */
+function findProfile(id: string): CarProfile | undefined {
+  const car = CARS.find((c) => c.id === id)
+  if (car) return car
+  const record = getUpload(id)
+  return record && uploadProfile(record, (onProgress) => openUpload(record, onProgress))
+}
+
+async function openUpload(record: UploadRecord, onProgress?: (f: number) => void): Promise<THREE.Object3D> {
+  if (freshModel?.id === record.id) {
+    const { model } = freshModel
+    freshModel = null
+    return model
+  }
+  const { parseModel } = await import('./model-import')
+  return parseModel(record.files, record.main, renderer, onProgress)
+}
+
+function setUploadStatus(text: string | null, error = false): void {
+  uploadStatus = text ? { text, error } : null
+  panelNav?.refresh()
+}
+const storageFailed = (err: unknown) =>
+  setUploadStatus(`Couldn’t keep it in this browser (${(err as Error)?.name ?? err}) — it’s here until you reload.`, true)
+
+async function importUpload(input: { file: File; path: string }[]): Promise<void> {
+  try {
+    setUploadStatus('Reading files…')
+    const { files, main } = await collectFiles(input)
+    setUploadStatus(`Loading ${main.split('/').pop()}…`)
+    const { parseModel } = await import('./model-import')
+    const model = await parseModel(files, main, renderer)
+    let meshes = 0
+    model.traverse((o) => (o as THREE.Mesh).isMesh && meshes++)
+    if (meshes === 0) throw new Error('the file has no meshes')
+    const name = nameFromFile(main)
+    const setup = guessSetup(model, name, main.slice(main.lastIndexOf('.') + 1).toLowerCase())
+    const record: UploadRecord = { id: newUploadId(), name, created: Date.now(), main, files, setup, guess: { ...setup } }
+    freshModel = { id: record.id, model }
+    setUploadStatus(null)
+    await saveUpload(record).catch(storageFailed)
+    void navigator.storage?.persist?.() // ask the browser not to evict it under storage pressure
+    await showCar(record.id)
+    console.info(`[garage] uploaded ${main}: ${meshes} meshes, guessed`, setup)
+  } catch (err) {
+    console.error('[garage] upload failed', err)
+    setUploadStatus(`Couldn’t load that: ${(err as Error)?.message ?? err}`, true)
+  }
+}
+
+/** a change to how the upload in the bay is turned or sized — saved, then the model re-read */
+function setSetup(patch: Partial<UploadRecord['setup']>): void {
+  const record = bay && getUpload(bay.id)
+  if (!record) return
+  record.setup = { ...record.setup, ...patch }
+  void saveUpload(record).catch(storageFailed)
+  void showCar(record.id)
+}
+
+// a model dropped anywhere on the page is uploaded
+app.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+  app.classList.add('is-dropping')
+})
+app.addEventListener('dragleave', (e) => {
+  if (e.relatedTarget === null) app.classList.remove('is-dropping')
+})
+app.addEventListener('drop', (e) => {
+  app.classList.remove('is-dropping')
+  if (!e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+  void droppedFiles(e.dataTransfer).then((files) => void (files.length && importUpload(files)))
+})
+
 // ─── side panel: Menu › Garage · Collection · Car · Parts · Settings ───────
 /** Menu › Parts: clicks on the car select parts (declared before the panel renders) */
 let picking = false
@@ -895,6 +1007,28 @@ const pages: Record<string, Page> = {
     current: () => bay?.id ?? (loadingId ? null : NO_CAR),
     loading: () => loadingId,
     select: (id) => void showCar(id),
+    uploads: () => uploads().map((r) => findProfile(r.id)!),
+  }),
+  upload: uploadPage({
+    current: () => (bay ? getUpload(bay.id) ?? null : null),
+    size: () => (bay ? new THREE.Vector3(bay.size.x, bay.size.y, bay.size.z) : null),
+    status: () => uploadStatus,
+    list: uploads,
+    importFiles: (files) => void importUpload(files),
+    setSetup,
+    rename(name) {
+      const record = bay && getUpload(bay.id)
+      if (!record || !name.trim()) return
+      record.name = name.trim()
+      void saveUpload(record).catch(storageFailed)
+      panelNav.refresh()
+    },
+    show: (id) => void showCar(id),
+    remove(id) {
+      if (bay?.id === id || loadingId === id) void showCar(NO_CAR)
+      uploadStatus = null
+      void deleteUpload(id).then(() => panelNav.refresh())
+    },
   }),
   car: carPage(() => bay?.configurator, bayPlaceholder, placement),
   lights: lightsPage(() => bay?.lamps, bayPlaceholder),
@@ -1180,8 +1314,9 @@ window.addEventListener('keydown', (e) => {
   }
 })
 
-const known = (id: string | null) => (id && (id === NO_CAR || CARS.some((c) => c.id === id)) ? id : null)
-void showCar(known(requested) ?? known(savedCar) ?? DEFAULT_CAR)
+const known = (id: string | null) => (id && (id === NO_CAR || findProfile(id)) ? id : null)
+// uploads first: the last car shown may be one of them
+void loadUploads().then(() => showCar(known(requested) ?? known(savedCar) ?? DEFAULT_CAR))
 
 // console handle for poking at the scene: garage.camera.position.set(…), garage.scene, …
 const garage: {

@@ -951,3 +951,96 @@ body,
   color: rgba(255, 255, 255, 0.4);
   text-align: right;
 }
+
+/* Menu › Collection › Upload */
+.cfg-drop {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  margin-bottom: 14px;
+  padding: 18px 12px;
+  border: 1px dashed rgba(53, 224, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(53, 224, 255, 0.04);
+  text-align: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.cfg-drop.is-over {
+  border-color: var(--cfg-accent);
+  background: rgba(53, 224, 255, 0.14);
+}
+.cfg-drop strong {
+  font-weight: 600;
+  font-size: 13px;
+}
+.cfg-drop .cfg-note {
+  margin: 0;
+}
+.cfg-status {
+  margin: 0 0 12px;
+}
+.cfg-status.is-error {
+  color: #ffb3bb;
+}
+.cfg-text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+}
+.cfg-text:focus {
+  border-color: var(--cfg-accent);
+  outline: none;
+}
+.cfg-upload {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.cfg-upload-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.cfg-upload-text .cfg-note {
+  margin: 0;
+}
+.cfg-upload-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cfg-upload.is-active .cfg-upload-name {
+  color: var(--cfg-accent);
+}
+.cfg-mini.is-armed {
+  border-color: #ff5a6a;
+  background: rgba(255, 90, 106, 0.2);
+  color: #fff;
+}
+.cfg-car-add {
+  border-style: dashed !important;
+}
+/* a file dragged over the page */
+.is-dropping::after {
+  content: 'Drop to upload';
+  position: fixed;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--cfg-accent, #35e0ff);
+  border-radius: 16px;
+  background: rgba(5, 8, 12, 0.45);
+  font: 14px/1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #fff;
+  pointer-events: none;
+  z-index: 50;
+}
