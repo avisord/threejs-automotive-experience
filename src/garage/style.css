@@ -408,6 +408,48 @@ body,
   gap: 6px;
 }
 
+.cfg-wheels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.cfg-wheel {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.cfg-wheel-disc {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  /* red at the right, green up-left, blue down-left — as the shader's hue axes */
+  background:
+    radial-gradient(circle, rgba(40, 42, 48, 1) 0%, rgba(40, 42, 48, 0.55) 45%, rgba(40, 42, 48, 0) 100%),
+    conic-gradient(from 90deg, #f33, #f3f, #33f, #3ff, #3f3, #ff3, #f33);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.cfg-wheel-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.cfg-wheel input {
+  width: 100%;
+  accent-color: var(--cfg-accent);
+}
+
 .cfg-slider input {
   width: 100%;
   accent-color: var(--cfg-accent);

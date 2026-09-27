@@ -2,6 +2,7 @@ import {
   BLOOM_THRESHOLD,
   LOOKS,
   matchingPreset,
+  type AoMethod,
   type AoQuality,
   type AoView,
   type DofMode,
@@ -11,11 +12,16 @@ import {
   type QualityPreset,
   type Reflections,
   type Smaa,
+  type SsrQuality,
+  type SsrScope,
   type ToneMapper,
   type VolumetricQuality,
+  type Wheel,
 } from '../post'
+import { WHITE_POINT_MODES } from '../tone-map-effect'
+import { NEUTRAL_WHEEL } from '../colour-balance-effect'
 import type { Page } from './panel'
-import { actionButton, el, section, segmented, slider, toggle } from './widgets'
+import { actionButton, colourWheel, el, section, segmented, slider, toggle } from './widgets'
 
 const AO_QUALITY: Record<AoQuality, string> = {
   Performance: 'Perf',
@@ -27,7 +33,31 @@ const AO_QUALITY: Record<AoQuality, string> = {
 
 const AO_VIEW: Record<AoView, string> = { final: 'Final', ao: 'AO only', split: 'Split' }
 
-const TONE_MAPPER: Record<ToneMapper, string> = { agx: 'AgX', aces: 'ACES', neutral: 'Neutral' }
+const AO_METHOD: Record<AoMethod, string> = { n8ao: 'N8AO', ssao: 'SSAO' }
+
+const TONE_MAPPER: Record<ToneMapper, string> = {
+  agx: 'AgX',
+  aces: 'ACES',
+  neutral: 'Neutral',
+  filmic: 'Filmic',
+  reinhard: 'Reinhard',
+  cineon: 'Cineon',
+  linear: 'Linear',
+}
+
+const TONE_NOTE: Record<ToneMapper, string> = {
+  agx: 'AgX: soft, filmic highlights that bleach toward white; saturated colours lose some punch.',
+  aces: 'ACES: the film-industry curve — contrasty, warm highlights, deep shadows.',
+  neutral: 'Neutral (Khronos PBR): keeps colours as authored, only the brightest parts roll off.',
+  filmic: 'Filmic (Hable): a gentle toe and a long shoulder, as in many games; the white point sets where it clips.',
+  reinhard: 'Reinhard: the classic smooth compression, flat and bright; the white point is the HDR level shown as pure white.',
+  cineon: 'Cineon: a film-scan look with lifted blacks and strong contrast.',
+  linear: 'Linear: no curve, anything over white clips — for checking raw values.',
+}
+
+const SSR_SCOPE: Record<SsrScope, string> = { off: 'Off', car: 'Car', room: 'Car + room', all: 'Everything' }
+
+const SSR_QUALITY: Record<SsrQuality, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 const LOOK_LABEL: Record<GradeLook, string> = {
   natural: 'Natural',
@@ -73,7 +103,7 @@ export function graphicsPage(post: PostProcessing): Page {
 
   return {
     title: 'Graphics',
-    hint: 'Quality, anti-aliasing, AO, bloom, grade, vignette',
+    hint: 'Quality, anti-aliasing, AO, reflections, bloom, tone mapping, grade, lens & film',
     render(body, nav) {
       // toggles and mode switches rebuild the effect chain, so re-render to show/hide controls
       const structural = () => nav.refresh()
@@ -134,6 +164,36 @@ export function graphicsPage(post: PostProcessing): Page {
       )
       body.append(detail)
 
+      // ─── screen-space reflections ───────────────────────────────────────
+      const ssr = section('Screen-space reflections')
+      ssr.append(
+        el('div', 'cfg-label cfg-sub', 'Reflecting surfaces'),
+        segmented(Object.keys(SSR_SCOPE) as SsrScope[], SSR_SCOPE, s.ssr.scope, (scope) => {
+          post.set('ssr', { scope })
+          structural()
+        }),
+      )
+      if (s.ssr.scope !== 'off') {
+        ssr.append(
+          el('div', 'cfg-label cfg-sub', 'Quality'),
+          segmented(Object.keys(SSR_QUALITY) as SsrQuality[], SSR_QUALITY, s.ssr.quality, (quality) => {
+            post.set('ssr', { quality })
+            structural()
+          }),
+          slider('Strength', s.ssr.strength, { min: 0, max: 1.5, step: 0.05 }, fixed(2), (v) => post.set('ssr', { strength: v })),
+          slider('Roughness cut-off', s.ssr.roughness, { min: 0.1, max: 1, step: 0.05 }, fixed(2), (v) => post.set('ssr', { roughness: v })),
+          slider('Ray length', s.ssr.distance, { min: 2, max: 100, step: 1 }, fixed(0, ' m'), (v) => post.set('ssr', { distance: v })),
+        )
+      }
+      ssr.append(
+        el(
+          'p',
+          'cfg-note',
+          'Glossy surfaces reflect what’s on screen — the car’s own wheels and mirrors in its paint, the room in its panels. What’s off screen keeps the environment reflection. “Everything” draws the whole scene once more: heavy in the open-air garages.',
+        ),
+      )
+      body.append(ssr)
+
       // ─── path tracing ───────────────────────────────────────────────────
       const pt = s.pathTracing
       const trace = section(
@@ -189,18 +249,49 @@ export function graphicsPage(post: PostProcessing): Page {
       )
       if (s.ao.enabled) {
         ao.append(
-          slider('Intensity', s.ao.intensity, { min: 0.5, max: 8, step: 0.1 }, fixed(1), (v) => post.set('ao', { intensity: v })),
-          slider('Radius', s.ao.radius, { min: 0.1, max: 2, step: 0.05 }, fixed(2, ' m'), (v) => post.set('ao', { radius: v })),
+          el('div', 'cfg-label cfg-sub', 'Method'),
+          segmented(Object.keys(AO_METHOD) as AoMethod[], AO_METHOD, s.ao.method, (method) => {
+            post.set('ao', { method })
+            structural()
+          }),
+        )
+        if (s.ao.method === 'n8ao') {
+          ao.append(
+            slider('Intensity', s.ao.intensity, { min: 0.5, max: 8, step: 0.1 }, fixed(1), (v) => post.set('ao', { intensity: v })),
+            slider('Radius', s.ao.radius, { min: 0.1, max: 2, step: 0.05 }, fixed(2, ' m'), (v) => post.set('ao', { radius: v })),
+            slider('Falloff', s.ao.falloff, { min: 0.1, max: 3, step: 0.05 }, fixed(2), (v) => post.set('ao', { falloff: v })),
+          )
+        } else {
+          ao.append(
+            slider('Intensity', s.ao.ssaoIntensity, { min: 0, max: 4, step: 0.05 }, fixed(2), (v) => post.set('ao', { ssaoIntensity: v })),
+            slider('Radius', s.ao.ssaoRadius, { min: 0.05, max: 2, step: 0.05 }, fixed(2, ' m'), (v) => post.set('ao', { ssaoRadius: v })),
+            slider('Bias', s.ao.ssaoBias, { min: 0, max: 0.3, step: 0.01 }, fixed(2), (v) => post.set('ao', { ssaoBias: v })),
+          )
+        }
+        ao.append(
           el('div', 'cfg-label cfg-sub', 'Quality'),
           segmented(Object.keys(AO_QUALITY) as AoQuality[], AO_QUALITY, s.ao.quality, (quality) => {
             post.set('ao', { quality })
             structural()
           }),
+        )
+        // (SSAO has no split view)
+        const views = (Object.keys(AO_VIEW) as AoView[]).filter((v) => s.ao.method === 'n8ao' || v !== 'split')
+        ao.append(
           el('div', 'cfg-label cfg-sub', 'Preview'),
-          segmented(Object.keys(AO_VIEW) as AoView[], AO_VIEW, post.aoView, (view) => {
+          segmented(views, AO_VIEW, post.aoView === 'split' && s.ao.method === 'ssao' ? 'ao' : post.aoView, (view) => {
             post.aoView = view
             structural()
           }),
+        )
+        ao.append(
+          el(
+            'p',
+            'cfg-note',
+            s.ao.method === 'n8ao'
+              ? 'N8AO: soft, physically scaled contact shade (radius in metres), rendered at half resolution.'
+              : 'SSAO: the classic screen-space kind — an even contact shade within the radius (metres); bias keeps flat surfaces clean.',
+          ),
         )
       }
       body.append(ao)
@@ -228,19 +319,28 @@ export function graphicsPage(post: PostProcessing): Page {
       }
       body.append(bloom)
 
+      // ─── tone mapping ───────────────────────────────────────────────────
+      // (always on — it's what turns HDR into displayable colour)
+      const tone = section('Tone mapping')
+      tone.append(
+        segmented(Object.keys(TONE_MAPPER) as ToneMapper[], TONE_MAPPER, s.toneMapping.mode, (mode) => {
+          post.set('toneMapping', { mode })
+          structural()
+        }),
+      )
+      if (WHITE_POINT_MODES.includes(s.toneMapping.mode)) {
+        tone.append(
+          slider('White point', s.toneMapping.whitePoint, { min: 1, max: 16, step: 0.1 }, fixed(1), (v) => post.set('toneMapping', { whitePoint: v })),
+        )
+      }
+      tone.append(el('p', 'cfg-note', TONE_NOTE[s.toneMapping.mode]))
+      body.append(tone)
+
       // ─── colour grade ───────────────────────────────────────────────────
       const grade = section(
         'Colour grade',
         toggle(s.grade.enabled, 'colour grade', (on) => {
           post.set('grade', { enabled: on })
-          structural()
-        }),
-      )
-      // tone mapping always runs — it's what turns HDR into displayable colour
-      grade.append(
-        el('div', 'cfg-label cfg-sub', 'Tone mapping'),
-        segmented(Object.keys(TONE_MAPPER) as ToneMapper[], TONE_MAPPER, s.grade.toneMapper, (toneMapper) => {
-          post.set('grade', { toneMapper })
           structural()
         }),
       )
@@ -278,6 +378,77 @@ export function graphicsPage(post: PostProcessing): Page {
         )
       }
       body.append(vignette)
+
+      // ─── colour balance ─────────────────────────────────────────────────
+      const balance = section(
+        'Colour balance',
+        toggle(s.balance.enabled, 'colour balance', (on) => {
+          post.set('balance', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.balance.enabled) {
+        const wheels = el('div', 'cfg-wheels')
+        const wheel = (label: string, key: 'lift' | 'gamma' | 'gain') =>
+          colourWheel(label, s.balance[key], (w: Wheel) => post.set('balance', { [key]: w }))
+        wheels.append(wheel('Shadows', 'lift'), wheel('Mid-tones', 'gamma'), wheel('Highlights', 'gain'))
+        balance.append(
+          wheels,
+          el('p', 'cfg-note', 'Push shadows, mid-tones and highlights toward a hue; the slider under each makes them brighter or darker. Double-click a wheel to centre it.'),
+          actionButton('Reset wheels', () => {
+            post.set('balance', { lift: { ...NEUTRAL_WHEEL }, gamma: { ...NEUTRAL_WHEEL }, gain: { ...NEUTRAL_WHEEL } })
+            structural()
+          }),
+        )
+      }
+      body.append(balance)
+
+      // ─── sharpening ─────────────────────────────────────────────────────
+      const sharpen = section(
+        'Sharpening',
+        toggle(s.sharpen.enabled, 'sharpening', (on) => {
+          post.set('sharpen', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.sharpen.enabled) {
+        sharpen.append(slider('Amount', s.sharpen.amount, { min: 0, max: 1, step: 0.01 }, fixed(2), (v) => post.set('sharpen', { amount: v })))
+      }
+      sharpen.append(el('p', 'cfg-note', 'Contrast-adaptive: crisper edges and texture without halos; brings back detail lost to anti-aliasing.'))
+      body.append(sharpen)
+
+      // ─── chromatic aberration ───────────────────────────────────────────
+      const fringe = section(
+        'Chromatic aberration',
+        toggle(s.aberration.enabled, 'chromatic aberration', (on) => {
+          post.set('aberration', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.aberration.enabled) {
+        fringe.append(
+          slider('Strength', s.aberration.strength, { min: 0, max: 2, step: 0.01 }, fixed(2), (v) => post.set('aberration', { strength: v })),
+        )
+      }
+      fringe.append(el('p', 'cfg-note', 'A real lens’s colour fringes: red and blue drift apart toward the frame’s edges.'))
+      body.append(fringe)
+
+      // ─── film grain ─────────────────────────────────────────────────────
+      const grain = section(
+        'Film grain',
+        toggle(s.grain.enabled, 'film grain', (on) => {
+          post.set('grain', { enabled: on })
+          structural()
+        }),
+      )
+      if (s.grain.enabled) {
+        grain.append(
+          slider('Amount', s.grain.amount, { min: 0, max: 1, step: 0.01 }, fixed(2), (v) => post.set('grain', { amount: v })),
+          slider('Size', s.grain.size, { min: 1, max: 4, step: 0.1 }, fixed(1, ' px'), (v) => post.set('grain', { size: v })),
+        )
+      }
+      grain.append(el('p', 'cfg-note', 'Strongest in the mid-tones, as on film; a new pattern each frame (still while the view rests).'))
+      body.append(grain)
 
       // ─── atmosphere ─────────────────────────────────────────────────────
       const air = section(

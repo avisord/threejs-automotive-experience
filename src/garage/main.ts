@@ -282,6 +282,7 @@ function installRoom(): void {
     if (room !== installed) return
     captureEnvironment()
     traceSceneChanged()
+    post.refreshGlow() // (its late meshes — trees, props — may reflect)
     invalidate(4)
   })
 }
@@ -386,10 +387,14 @@ function lightingChanged(): void {
 
 // ─── post: AO, bloom, grade, vignette, AA ───────────────────────────────────
 // glowing meshes for lights-only bloom: the room's LEDs plus any car part set to glow
-const post = createPostProcessing(renderer, scene, camera, () => [
-  ...collectGlowMeshes(room.group),
-  ...(bay ? collectGlowMeshes(bay.root) : []),
-])
+const post = createPostProcessing(
+  renderer,
+  scene,
+  camera,
+  () => [...collectGlowMeshes(room.group), ...(bay ? collectGlowMeshes(bay.root) : [])],
+  // what takes screen-space reflections: the car, the car and the room, or everything drawn
+  (scope) => (scope === 'all' ? [scene] : [...(bay ? [bay.root] : []), ...(scope === 'room' ? [room.group] : [])]),
+)
 post.setAtmosphere(room.atmosphere ?? null) // later rooms: swapRoom
 post.setExposureKey(garageDef.exposureKey)
 post.setFocus(controls.target, room.depthOfField ?? null) // the lens focuses on the orbit target: the car

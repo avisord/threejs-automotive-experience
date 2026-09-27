@@ -10,8 +10,6 @@ import {
   SelectiveBloomEffect,
   SMAAEffect,
   SMAAPreset,
-  ToneMappingEffect,
-  ToneMappingMode,
   VignetteEffect,
   type Effect,
 } from 'postprocessing'
@@ -20,9 +18,19 @@ import { AUTO_KEY, GradeEffect } from './grade-effect'
 import { ExposureMeter } from './exposure-meter'
 import { AtmosphereEffect, type AtmosphereParams } from './atmosphere-effect'
 import { LensFlareEffect } from './lens-flare-effect'
+import { ToneMapEffect, type ToneMapper } from './tone-map-effect'
+import { ColourBalanceEffect, NEUTRAL_WHEEL, type Wheel } from './colour-balance-effect'
+import { FilmEffect } from './film-effect'
+import { SsaoPass } from './ssao'
+import { SsrPass, type SsrQuality, type SsrScope } from './ssr'
+
+export type { ToneMapper } from './tone-map-effect'
+export type { Wheel } from './colour-balance-effect'
+export type { SsrQuality, SsrScope } from './ssr'
 
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
-export type ToneMapper = 'agx' | 'aces' | 'neutral'
+/** N8AO or a classic SSAO (ssao.ts) — both half res, normals from depth */
+export type AoMethod = 'n8ao' | 'ssao'
 export type GradeLook = 'natural' | 'daylight' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
 export type Msaa = 0 | 2 | 4 | 8
 export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
@@ -59,11 +67,37 @@ export type DofMode = 'auto' | 'on' | 'off'
 const VOLUMETRIC_STEPS: Record<VolumetricQuality, number> = { low: 14, medium: 28, high: 48 }
 
 export interface GraphicsSettings {
-  ao: { enabled: boolean; intensity: number; radius: number; quality: AoQuality }
+  ao: {
+    enabled: boolean
+    method: AoMethod
+    /** N8AO */
+    intensity: number
+    /** N8AO, metres */
+    radius: number
+    /** N8AO: how softly occlusion fades with the depth gap to the occluder */
+    falloff: number
+    quality: AoQuality
+    ssaoIntensity: number
+    /** SSAO, metres */
+    ssaoRadius: number
+    /** SSAO: how far above a surface's tangent plane an occluder must rise to count (cosine) */
+    ssaoBias: number
+  }
+  /** screen-space reflections on the surfaces in `scope` — see ssr.ts */
+  ssr: {
+    scope: SsrScope
+    quality: SsrQuality
+    strength: number
+    /** surfaces rougher than this don't take traced reflections */
+    roughness: number
+    /** metres a ray travels at most */
+    distance: number
+  }
   bloom: { enabled: boolean; lightsOnly: boolean; intensity: number; threshold: number; radius: number }
+  /** HDR → display; always on */
+  toneMapping: { mode: ToneMapper; whitePoint: number }
   grade: {
     enabled: boolean
-    toneMapper: ToneMapper
     look: GradeLook
     exposure: number
     /** auto exposure, 0 off … 1 full: how far the metered scene is brought to a standard brightness */
@@ -73,7 +107,15 @@ export interface GraphicsSettings {
     temperature: number
     split: number
   }
+  /** lift / gamma / gain wheels on the tone-mapped image */
+  balance: { enabled: boolean; lift: Wheel; gamma: Wheel; gain: Wheel }
   vignette: { enabled: boolean; darkness: number; offset: number }
+  /** contrast-adaptive sharpening, 0 … 1 */
+  sharpen: { enabled: boolean; amount: number }
+  /** lateral chromatic aberration toward the frame's edges */
+  aberration: { enabled: boolean; strength: number }
+  /** film grain; size in pixels */
+  grain: { enabled: boolean; amount: number; size: number }
   aa: { msaa: Msaa; smaa: Smaa }
   /** applied outside the composer (renderer, room, textures) — see main.ts */
   quality: { renderScale: number; reflections: Reflections; anisotropy: number }
@@ -163,7 +205,10 @@ class PathTraceBlendPass extends Pass {
 
 export const REFLECTION_SCALE: Record<Reflections, number> = { off: 0, low: 0.25, medium: 0.5, high: 1 }
 
-type PresetValues = Pick<GraphicsSettings, 'aa' | 'quality'> & { ao: Pick<GraphicsSettings['ao'], 'enabled' | 'quality'> }
+type PresetValues = Pick<GraphicsSettings, 'aa' | 'quality'> & {
+  ao: Pick<GraphicsSettings['ao'], 'enabled' | 'quality'>
+  ssr: Pick<GraphicsSettings['ssr'], 'quality'>
+}
 
 /** what each quality preset sets; everything else (looks, intensities) is left alone */
 export const QUALITY_PRESETS: Record<QualityPreset, PresetValues> = {
@@ -171,21 +216,25 @@ export const QUALITY_PRESETS: Record<QualityPreset, PresetValues> = {
     aa: { msaa: 0, smaa: 'medium' },
     quality: { renderScale: 0.75, reflections: 'off', anisotropy: 2 },
     ao: { enabled: false, quality: 'Performance' },
+    ssr: { quality: 'low' },
   },
   medium: {
     aa: { msaa: 2, smaa: 'off' },
     quality: { renderScale: 1, reflections: 'low', anisotropy: 4 },
     ao: { enabled: true, quality: 'Medium' },
+    ssr: { quality: 'low' },
   },
   high: {
     aa: { msaa: 4, smaa: 'off' },
     quality: { renderScale: 1, reflections: 'medium', anisotropy: 8 },
     ao: { enabled: true, quality: 'High' },
+    ssr: { quality: 'medium' },
   },
   ultra: {
     aa: { msaa: 4, smaa: 'high' },
     quality: { renderScale: 1.5, reflections: 'high', anisotropy: 16 },
     ao: { enabled: true, quality: 'Ultra' },
+    ssr: { quality: 'high' },
   },
 }
 
@@ -194,7 +243,7 @@ export function matchingPreset(s: GraphicsSettings): QualityPreset | null {
   const same = (a: object, b: object) => Object.entries(b).every(([k, v]) => (a as Record<string, unknown>)[k] === v)
   const hit = (Object.keys(QUALITY_PRESETS) as QualityPreset[]).find((name) => {
     const p = QUALITY_PRESETS[name]
-    return same(s.aa, p.aa) && same(s.quality, p.quality) && same(s.ao, p.ao)
+    return same(s.aa, p.aa) && same(s.quality, p.quality) && same(s.ao, p.ao) && same(s.ssr, p.ssr)
   })
   return hit ?? null
 }
@@ -209,6 +258,12 @@ const SMAA_PRESET: Record<Exclude<Smaa, 'off'>, SMAAPreset> = {
 /** AO debug view — for tuning, deliberately not saved */
 export type AoView = 'final' | 'ao' | 'split'
 const AO_DISPLAY = { final: 'Combined', ao: 'AO', split: 'Split AO' } as const
+
+/** metres from the bay a room's mesh may reach and still count as the room for SSR */
+const ROOM_REACH = 60
+
+/** SSAO taps per pixel for each AO quality (the same presets drive both methods) */
+const SSAO_SAMPLES: Record<AoQuality, number> = { Performance: 8, Low: 12, Medium: 16, High: 24, Ultra: 32 }
 
 interface Look {
   contrast: number
@@ -242,11 +297,27 @@ export const LOOKS: Record<GradeLook, Look> = {
 export const BLOOM_THRESHOLD = { lightsOnly: 0.35, all: 1.6 }
 
 export const DEFAULT_GRAPHICS: GraphicsSettings = {
-  ao: { enabled: true, intensity: 5, radius: 0.9, quality: 'High' },
+  ao: {
+    enabled: true,
+    method: 'n8ao',
+    intensity: 5,
+    radius: 0.9,
+    falloff: 1,
+    quality: 'High',
+    ssaoIntensity: 2,
+    ssaoRadius: 0.6,
+    ssaoBias: 0.05,
+  },
+  ssr: { scope: 'car', ...QUALITY_PRESETS.high.ssr, strength: 1, roughness: 0.5, distance: 30 },
   bloom: { enabled: true, lightsOnly: true, intensity: 1.4, threshold: BLOOM_THRESHOLD.lightsOnly, radius: 0.75 },
   // Neutral keeps the livery's saturated pink; AgX washes it out, ACES crushes the walls
-  grade: { enabled: true, toneMapper: 'neutral', look: 'cyber', exposure: 0, auto: 0.6, ...pick(LOOKS.cyber) },
+  toneMapping: { mode: 'neutral', whitePoint: 4 },
+  grade: { enabled: true, look: 'cyber', exposure: 0, auto: 0.6, ...pick(LOOKS.cyber) },
+  balance: { enabled: false, lift: { ...NEUTRAL_WHEEL }, gamma: { ...NEUTRAL_WHEEL }, gain: { ...NEUTRAL_WHEEL } },
   vignette: { enabled: true, darkness: 0.55, offset: 0.3 },
+  sharpen: { enabled: false, amount: 0.4 },
+  aberration: { enabled: false, strength: 0.5 },
+  grain: { enabled: false, amount: 0.25, size: 1.5 },
   aa: { ...QUALITY_PRESETS.high.aa },
   quality: { ...QUALITY_PRESETS.high.quality },
   // ~37 mm on full frame: a photographer's lens for a car, not a wide game camera
@@ -263,12 +334,6 @@ function pick(look: Look) {
   return { contrast, saturation, temperature, split }
 }
 
-const TONE_MAPPING: Record<ToneMapper, ToneMappingMode> = {
-  agx: ToneMappingMode.AGX,
-  aces: ToneMappingMode.ACES_FILMIC,
-  neutral: ToneMappingMode.NEUTRAL,
-}
-
 const STORAGE_KEY = 'garage.graphics.v1'
 
 function loadSaved(): GraphicsSettings {
@@ -276,6 +341,10 @@ function loadSaved(): GraphicsSettings {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<GraphicsSettings> | null
     if (saved) for (const k of Object.keys(settings) as GraphicsSection[]) Object.assign(settings[k], saved[k])
+    // the tone mapper used to be part of the grade
+    const old = (saved?.grade as { toneMapper?: ToneMapper } | undefined)?.toneMapper
+    if (old && !saved?.toneMapping) settings.toneMapping.mode = old
+    delete (settings.grade as { toneMapper?: ToneMapper }).toneMapper
   } catch {
     // storage blocked or corrupt — defaults
   }
@@ -288,7 +357,10 @@ export interface PostProcessing {
   /** set AA, resolution, reflections, textures and AO quality in one go */
   applyPreset(name: QualityPreset): void
   reset(): void
-  /** re-read which meshes glow (lights-only bloom): a part set to glow, or a new garage */
+  /**
+   * Re-read which meshes glow (lights-only bloom) and which reflect (SSR): a part set to glow, a
+   * material changed, a new car or garage.
+   */
   refreshGlow(): void
   /** overlay the path-traced image (null = raster only) */
   showPathTraced(texture: THREE.Texture | null, weight: number): void
@@ -308,13 +380,16 @@ export interface PostProcessing {
   /** called after any change with the sections that changed */
   onChange(listener: (sections: GraphicsSection[]) => void): void
   aoView: AoView
+  /** the SSR pass, for tuning from the console (`garage.post.ssr.debugView = 1`) */
+  readonly ssr: SsrPass
   setSize(width: number, height: number): void
   render(dt: number): void
 }
 
 /**
  * pmndrs/postprocessing pipeline:
- *   scene (4× MSAA, half-float) → N8AO → [bloom · grade · tone mapping · vignette]
+ *   scene (4× MSAA, half-float) → N8AO or SSAO → SSR → [air · flare · bloom · grade · tone mapping ·
+ *   colour balance · vignette] → SMAA → [sharpen · aberration · grain]
  * The effects share one fullscreen pass. Toggling an effect or switching bloom
  * mode / tone mapper rebuilds that pass; sliders only touch uniforms.
  */
@@ -323,6 +398,8 @@ export function createPostProcessing(
   scene: THREE.Scene,
   camera: THREE.PerspectiveCamera,
   glowMeshes: () => THREE.Object3D[],
+  /** the roots whose meshes take screen-space reflections, for a scope */
+  reflectors: (scope: Exclude<SsrScope, 'off'>) => THREE.Object3D[],
 ): PostProcessing {
   // tone mapping happens in the effect pass, not in every material
   renderer.toneMapping = THREE.NoToneMapping
@@ -341,6 +418,16 @@ export function createPostProcessing(
   // at full resolution AO was the single most expensive pass (~5 ms at 1080p on an RX 7600)
   ao.configuration.halfRes = true
   composer.addPass(ao)
+  // (only one of the two runs)
+  const ssao = new SsaoPass(camera)
+  composer.addPass(ssao)
+
+  // reflections after AO (a reflection shows the occluded frame) and before the metering and grade
+  const ssr = new SsrPass(scene, camera)
+  composer.addPass(ssr)
+  let ssrScope: SsrScope = 'off'
+  /** the scope's meshes are gathered again before the next frame (a hover in the parts editor can ask often) */
+  let reflectorsStale = false
 
   // metering for auto exposure: after the scene (and its depth of field), before the effect pass
   const meter = new ExposureMeter()
@@ -352,6 +439,10 @@ export function createPostProcessing(
 
   let effectPass: EffectPass | null = null
   let smaaPass: EffectPass | null = null
+  let filmPass: EffectPass | null = null
+  let film: FilmEffect | null = null
+  let toneMap: ToneMapEffect | null = null
+  let balance: ColourBalanceEffect | null = null
   let bloom: BloomEffect | null = null
   let grade: GradeEffect | null = null
   let vignette: VignetteEffect | null = null
@@ -367,15 +458,15 @@ export function createPostProcessing(
   let structureKey = ''
 
   function rebuildEffects(): void {
-    for (const pass of [dofPass, effectPass, smaaPass]) {
+    for (const pass of [dofPass, effectPass, smaaPass, filmPass]) {
       if (!pass) continue
       composer.removePass(pass)
       pass.dispose() // also disposes the effects it holds
     }
-    smaaPass = dofPass = null
+    smaaPass = dofPass = filmPass = null
     const s = settings
     const effects: Effect[] = []
-    bloom = grade = vignette = atmosphere = lensFlare = dof = null
+    bloom = grade = vignette = atmosphere = lensFlare = dof = toneMap = balance = film = null
     // Depth of field in its own pass, first: it blurs the scene's light as the lens would, and the
     // air, bloom and grade then work on the blurred image (merged into the effect pass, its blur read
     // the frame before the haze — far land lost its haze where it went soft)
@@ -412,7 +503,8 @@ export function createPostProcessing(
       effects.push(bloom)
     }
     if (s.grade.enabled) effects.push((grade = new GradeEffect()))
-    effects.push(new ToneMappingEffect({ mode: TONE_MAPPING[s.grade.toneMapper] }))
+    effects.push((toneMap = new ToneMapEffect(s.toneMapping.mode)))
+    if (s.balance.enabled) effects.push((balance = new ColourBalanceEffect()))
     if (s.vignette.enabled) effects.push((vignette = new VignetteEffect()))
 
     effectPass = new EffectPass(camera, ...effects)
@@ -426,6 +518,21 @@ export function createPostProcessing(
       smaaPass = new EffectPass(camera, new SMAAEffect({ preset: SMAA_PRESET[s.aa.smaa] }))
       composer.addPass(smaaPass)
     }
+
+    // sharpening, fringes and grain last: on the anti-aliased image, and SMAA doesn't mistake grain for edges
+    if (s.sharpen.enabled || s.aberration.enabled || s.grain.enabled) {
+      filmPass = new EffectPass(camera, (film = new FilmEffect()))
+      composer.addPass(filmPass)
+    }
+  }
+
+  /** gather the surfaces in scope again (a new car or room, changed materials) */
+  function refreshReflectors(): void {
+    reflectorsStale = false
+    ssrScope = settings.ssr.scope
+    // (the room: its building, not an open-air garage's landscape)
+    ssr.setRoots(ssrScope === 'off' ? [] : reflectors(ssrScope), ssrScope === 'room' ? ROOM_REACH : Infinity)
+    ssr.enabled = ssrScope !== 'off' && ssr.hasSurfaces && !traced
   }
 
   function apply(): void {
@@ -434,9 +541,11 @@ export function createPostProcessing(
       s.bloom.enabled,
       s.bloom.lightsOnly,
       s.grade.enabled,
-      s.grade.toneMapper,
+      s.toneMapping.mode,
+      s.balance.enabled,
       s.vignette.enabled,
       s.aa.smaa,
+      s.sharpen.enabled || s.aberration.enabled || s.grain.enabled,
       (s.atmosphere.enabled || s.volumetric.enabled) && atmosphereParams !== null,
       s.lensFlare.enabled && atmosphereParams !== null,
       dofWanted(),
@@ -448,14 +557,27 @@ export function createPostProcessing(
 
     if (composer.multisampling !== s.aa.msaa) composer.multisampling = s.aa.msaa // reallocates the frame buffers
 
-    ao.enabled = s.ao.enabled && !traced
+    ao.enabled = s.ao.enabled && s.ao.method === 'n8ao' && !traced
     if (s.ao.quality !== aoQuality) {
       aoQuality = s.ao.quality
       ao.setQualityMode(s.ao.quality) // recompiles — only on change
     }
     ao.configuration.intensity = s.ao.intensity
     ao.configuration.aoRadius = s.ao.radius
-    ao.configuration.distanceFalloff = 1
+    ao.configuration.distanceFalloff = s.ao.falloff
+    ssao.enabled = s.ao.enabled && s.ao.method === 'ssao' && !traced
+    ssao.intensity = s.ao.ssaoIntensity
+    ssao.radius = s.ao.ssaoRadius
+    ssao.bias = s.ao.ssaoBias
+    ssao.samples = SSAO_SAMPLES[s.ao.quality]
+    ssao.aoOnly = aoView !== 'final'
+
+    if (s.ssr.scope !== ssrScope) refreshReflectors()
+    ssr.enabled = ssrScope !== 'off' && ssr.hasSurfaces && !traced
+    ssr.steps = SsrPass.stepsFor(s.ssr.quality)
+    ssr.strength = s.ssr.strength
+    ssr.roughCut = s.ssr.roughness
+    ssr.maxDistance = s.ssr.distance
 
     if (bloom) {
       bloom.intensity = s.bloom.intensity
@@ -467,6 +589,14 @@ export function createPostProcessing(
       const look = LOOKS[s.grade.look]
       grade.set({ ...s.grade, shadowTint: look.shadowTint, highlightTint: look.highlightTint, lift: look.lift, key: exposureKey })
     }
+    if (toneMap) toneMap.whitePoint = s.toneMapping.whitePoint
+    balance?.set(s.balance.lift, s.balance.gamma, s.balance.gain)
+    film?.set({
+      sharpness: s.sharpen.enabled ? s.sharpen.amount : 0,
+      aberration: s.aberration.enabled ? s.aberration.strength : 0,
+      grain: s.grain.enabled ? s.grain.amount : 0,
+      grainSize: s.grain.size,
+    })
     if (vignette) {
       vignette.darkness = s.vignette.darkness
       vignette.offset = s.vignette.offset
@@ -512,9 +642,10 @@ export function createPostProcessing(
       Object.assign(settings.aa, p.aa)
       Object.assign(settings.quality, p.quality)
       Object.assign(settings.ao, p.ao)
+      Object.assign(settings.ssr, p.ssr)
       apply()
       save()
-      for (const l of listeners) l(['aa', 'quality', 'ao'])
+      for (const l of listeners) l(['aa', 'quality', 'ao', 'ssr'])
     },
     onChange(listener) {
       listeners.push(listener)
@@ -541,21 +672,24 @@ export function createPostProcessing(
       const nowTraced = texture !== null && weight > 0.5
       if (nowTraced !== traced) {
         traced = nowTraced
-        ao.enabled = settings.ao.enabled && !traced
+        apply() // screen-space AO and reflections off under a traced image, back on after
       }
     },
     refreshGlow() {
       if (bloom instanceof SelectiveBloomEffect) bloom.selection.set(glowMeshes())
+      if (settings.ssr.scope !== 'off') reflectorsStale = true
     },
+    ssr,
     get aoView() {
       return aoView
     },
     set aoView(view) {
       aoView = view
       ao.setDisplayMode(AO_DISPLAY[view])
+      apply()
     },
     reset() {
-      for (const k of Object.keys(settings) as GraphicsSection[]) Object.assign(settings[k], DEFAULT_GRAPHICS[k])
+      for (const k of Object.keys(settings) as GraphicsSection[]) Object.assign(settings[k], structuredClone(DEFAULT_GRAPHICS[k]))
       apply()
       save()
       for (const l of listeners) l(Object.keys(settings) as GraphicsSection[])
@@ -564,6 +698,7 @@ export function createPostProcessing(
       composer.setSize(width, height)
     },
     render(dt) {
+      if (reflectorsStale) refreshReflectors()
       composer.render(dt)
     },
   }
