@@ -52,8 +52,9 @@ export interface PalmSpec {
 }
 
 export const PALMS: Record<'slender' | 'coconut' | 'leaning' | 'young' | 'mature', PalmSpec> = {
-  slender: { radius: [0.02, 0.011], bow: 0.03, lean: 0.02, fronds: 20, frond: 0.2, droop: 0.55, skirt: 0, nuts: 0, seed: 1 },
-  coconut: { radius: [0.028, 0.016], bow: 0.08, lean: 0.06, fronds: 24, frond: 0.33, droop: 0.75, skirt: 0, nuts: 7, seed: 2 },
+  // (a coconut's fronds are 4–6 m: at 0.2 of a 15 m trunk the crown was a tuft on a matchstick)
+  slender: { radius: [0.02, 0.011], bow: 0.06, lean: 0.06, fronds: 22, frond: 0.27, droop: 0.6, skirt: 0, nuts: 0, seed: 1 },
+  coconut: { radius: [0.028, 0.016], bow: 0.1, lean: 0.13, fronds: 24, frond: 0.34, droop: 0.75, skirt: 0, nuts: 7, seed: 2 },
   leaning: { radius: [0.03, 0.017], bow: 0.22, lean: 0.3, fronds: 22, frond: 0.32, droop: 0.8, skirt: 0, nuts: 5, seed: 3 },
   young: { radius: [0.07, 0.05], bow: 0.02, lean: 0.03, fronds: 16, frond: 0.62, droop: 0.45, skirt: 0, nuts: 0, seed: 4 },
   mature: { radius: [0.06, 0.05], bow: 0.04, lean: 0.03, fronds: 38, frond: 0.36, droop: 0.6, skirt: 12, nuts: 0, asym: 0.35, seed: 5 },

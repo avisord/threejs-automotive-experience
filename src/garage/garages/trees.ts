@@ -3,14 +3,16 @@ import { receiveFarShadow } from './far-shadow'
 import { SURFACES, pbrMaps } from './kit'
 import { seeded } from './landform'
 import { foliage, leafGain } from './foliage'
+import { FLORA, withTropical, type FloraId, type TreeSpec } from './flora'
 import { createImpostors, type ImpostorSet } from './impostors'
 import { createMasses } from './masses'
 import { OUTDOOR_SKY_LIGHT } from './sky'
 import { VEGETATION, type Plant, type VegetationLayout } from './vegetation-layout'
 
 /**
- * The valley's woods: mixed conifer and broadleaf trees, as around the Fuji
- * lakes. Where each tree and shrub stands is decided by vegetation-layout.ts
+ * A landscape's woods: the species of its flora (flora.ts) — mixed conifer and
+ * broadleaf trees around the Fuji lakes, emergents over rain trees and figs on
+ * the tropical coast. Where each tree and shrub stands is decided by vegetation-layout.ts
  * (clusters, lone trees, clearings); here each is given a level of detail by
  * its distance from the pavilion:
  *  - LOD 0, near (< VEGETATION.bands.near): full ez-tree trees (procedural, MIT)
@@ -32,6 +34,8 @@ export interface ForestOptions {
   /** trees placed by hand near the building: pines framing the view, a few cherries */
   accents: { x: number; z: number; kind: 'pine' | 'sakura'; height: number }[]
   seed: number
+  /** which species grow (flora.ts; default temperate) */
+  flora?: FloraId
 }
 
 export interface Forest {
@@ -109,32 +113,16 @@ export function grow(Tree: TreeCtor, preset: PresetJson, seed: number, light: bo
 
 export async function createForest(opts: ForestOptions): Promise<Forest> {
   const { Tree, TreePreset } = await import('@dgreenheck/ez-tree')
-  const presets = TreePreset as unknown as Record<string, PresetJson>
+  const presets = withTropical(TreePreset as unknown as Record<string, PresetJson>)
   const rand = seeded(opts.seed)
+  const flora = FLORA[opts.flora ?? 'temperate']
 
-  // The species, as archetypes: pines; a broad oak (A); a tall, narrow aspen (B); a rounded oak (C); an
-  // irregular ash (D). Far off (E) they're impostors of the same trees (impostors.ts). Each grown full.
-  const near: Variant[] = [
-    grow(Tree, presets['Pine Medium'], 101, false, true, 1.5),
-    grow(Tree, presets['Pine Large'], 202, false, true, 1.5),
-    grow(Tree, presets['Oak Large'], 303, false, false, 2.2),
-    grow(Tree, presets['Oak Medium'], 404, false, false, 2.4),
-    grow(Tree, presets['Ash Large'], 505, false, false, 2.2),
-    grow(Tree, presets['Aspen Large'], 606, false, false, 2),
-  ]
-  const mid: Variant[] = [
-    grow(Tree, presets['Pine Medium'], 707, true, true, 1.5),
-    grow(Tree, presets['Pine Large'], 808, true, true, 1.5),
-    grow(Tree, presets['Oak Large'], 909, true, false, 2.2),
-    grow(Tree, presets['Oak Medium'], 1010, true, false, 2.4),
-    grow(Tree, presets['Ash Large'], 1111, true, false, 2.2),
-    grow(Tree, presets['Aspen Large'], 1212, true, false, 2),
-  ]
-  const bushes: Variant[] = [
-    grow(Tree, presets['Bush 1'], 11, false, false),
-    grow(Tree, presets['Bush 2'], 12, false, false),
-    grow(Tree, presets['Bush 3'], 13, false, false),
-  ]
+  // The species (flora.ts), each grown full: near (LOD 0), light for the masses (LOD 1); far off they're
+  // impostors of the same trees (impostors.ts)
+  const growAll = (specs: TreeSpec[], light: boolean) => specs.map((t) => grow(Tree, presets[t.preset], t.seed, light, t.tall, t.fullness))
+  const near = growAll(flora.near, false)
+  const mid = growAll(flora.mid, true)
+  const bushes = growAll(flora.bushes, false)
 
   const bark = pbrMaps(SURFACES.cedarBark, [2, 1])
   const barkMaterial = new THREE.MeshStandardMaterial({ ...bark.maps, color: 0xffffff, roughness: 1, envMapIntensity: OUTDOOR_SKY_LIGHT })
@@ -194,8 +182,8 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
   const q = new THREE.Quaternion()
   const up = new THREE.Vector3(0, 1, 0)
   const c = new THREE.Color()
-  /** foliage tints: dark cedar and pine greens; fresher greens for broadleaves */
-  const tint = (conifer: boolean, t: number) => foliageTint(conifer ? 'conifer' : 'broadleaf', t, c)
+  /** foliage tints: the flora's palette, by kind */
+  const tint = (conifer: boolean, t: number) => foliageTint(conifer ? 'conifer' : 'broadleaf', t, c, flora.palette)
 
   /** a hand-placed spot, or a planned plant with its own size, shape, lean and tone */
   type Spot = { x: number; z: number; height?: number; plan?: Plant }
@@ -352,7 +340,7 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
   for (const o of bushMeshes) o.name = 'bush'
 
   // LOD 2 (three crossed cards) and LOD 3 (two), from one atlas of the same trees (impostors.ts)
-  const impostors = await createImpostors(Tree, presets)
+  const impostors = await createImpostors(Tree, presets, flora.impostors, flora.palette)
   // (cards stand straight up — a tilted card shows it's a card — and sink a little deeper, as they have
   // no trunk flare to hide the join on a slope)
   const upright = (spot: Spot, h: number) => {
@@ -384,7 +372,14 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
  * leaf cards (near) and the impostor atlas (far) keep only their texture's
  * light and dark, so a tree is this colour at every distance.
  */
-export function foliageTint(kind: Plant['kind'], tone: number, out = new THREE.Color()): THREE.Color {
+export function foliageTint(kind: Plant['kind'], tone: number, out = new THREE.Color(), palette: FloraId = 'temperate'): THREE.Color {
+  if (palette === 'tropical') {
+    // Evergreen tropical canopy: deeper, bluer and more saturated than a temperate summer wood (glossy
+    // leaves in a wet climate), the emergents a touch darker than the canopy under them
+    if (kind === 'conifer') return out.setHSL(0.27 + tone * 0.04, 0.34 + tone * 0.12, 0.2 + tone * 0.07, THREE.SRGBColorSpace)
+    if (kind === 'shrub') return out.setHSL(0.25 + tone * 0.05, 0.34 + tone * 0.12, 0.22 + tone * 0.07, THREE.SRGBColorSpace)
+    return out.setHSL(0.24 + tone * 0.06, 0.36 + tone * 0.14, 0.22 + tone * 0.09, THREE.SRGBColorSpace)
+  }
   if (kind === 'conifer') return out.setHSL(0.28 + tone * 0.04, 0.24 + tone * 0.12, 0.19 + tone * 0.08, THREE.SRGBColorSpace)
   if (kind === 'shrub') return out.setHSL(0.22 + tone * 0.05, 0.28 + tone * 0.12, 0.22 + tone * 0.07, THREE.SRGBColorSpace)
   // (restrained: summer foliage in late sun is olive-green, not the fresh green of a spring leaf)
@@ -419,7 +414,7 @@ export function plantImpostors(
     mesh.name = 'impostors'
     list.forEach((p, i) => {
       mesh.setMatrixAt(i, place({ x: p.x, z: p.z, plan: p }, p.height))
-      mesh.setColorAt(i, impostorTint(p.kind, p.tone, c))
+      mesh.setColorAt(i, impostorTint(p.kind, p.tone, c, impostors.palette))
     })
     mesh.castShadow = castShadow
     mesh.receiveShadow = true

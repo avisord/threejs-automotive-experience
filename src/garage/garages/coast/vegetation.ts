@@ -79,8 +79,9 @@ const HERO_PALMS: Omit<PalmSpot, 'y' | 'tone'>[] = [
   { x: 28, z: -6, kind: 'coconut', height: 12, turn: 0.8 },
 ]
 
-function placePalms(rand: () => number): PalmSpot[] {
+function placePalms(rand: () => number): { spots: PalmSpot[]; clumps: PalmClump[] } {
   const spots: PalmSpot[] = HERO_PALMS.map((p) => ({ ...p, y: heightAt(p.x, p.z), tone: rand() }))
+  const clumps: PalmClump[] = []
   const taken = (x: number, z: number, gap: number) => spots.some((s) => (s.x - x) ** 2 + (s.z - z) ** 2 < gap * gap)
   const pickKind = (w: Partial<Record<PalmKind, number>>): PalmKind => {
     const total = Object.values(w).reduce((a, b) => a + b, 0)
@@ -132,24 +133,44 @@ function placePalms(rand: () => number): PalmSpot[] {
       tryPlace(x, z, pickKind({ coconut: 2, slender: 2, mature: 1, young: 2, leaning: 1 }))
     }
   }
-  // palms scattered through the valley and the low hills, clumped, out to ~2 km
-  for (let i = 0; i < 30000 && spots.length < 1400; i++) {
+  // palms through the valley and the low hills out to ~2 km, in groups as they seed: three to seven
+  // close together (2–7 m), each leaning out away from the others toward the light, of mixed ages —
+  // one by one in a clump field they stood evenly spaced and upright, a plantation of matchsticks
+  for (let i = 0; i < 20000 && spots.length < 1400; i++) {
     const r = 80 + 2000 * rand() ** 1.3
     const b = (rand() - 0.5) * 250 * DEG
-    const x = Math.sin(b) * r
-    const z = -Math.cos(b) * r
-    const h = heightAt(x, z)
-    if (h - SEA > 90) continue
-    const clump = smoothstep(fbm(x / 120 + 7, z / 120 - 3, 2), 0.5, 0.68)
-    if (rand() > clump * 0.6) continue
-    tryPlace(x, z, pickKind({ coconut: 3, slender: 3, mature: 1, young: 1, leaning: 1 }))
+    const cx = Math.sin(b) * r
+    const cz = -Math.cos(b) * r
+    if (heightAt(cx, cz) - SEA > 90) continue
+    const field = smoothstep(fbm(cx / 120 + 7, cz / 120 - 3, 2), 0.46, 0.66)
+    if (rand() > field * 0.5) continue
+    const n = 3 + Math.floor(rand() * 5)
+    const spread = 2 + rand() * 5
+    let placed = 0
+    for (let k = 0; k < n * 3 && placed < n; k++) {
+      const a = rand() * Math.PI * 2
+      const d = spread * Math.sqrt(rand())
+      const x = cx + Math.cos(a) * d
+      const z = cz + Math.sin(a) * d
+      // (palm geometry leans toward +x: turned to lean out from the group, give or take)
+      const out = Math.atan2(z - cz, x - cx) + (rand() - 0.5) * 0.9
+      if (tryPlace(x, z, pickKind({ coconut: 3, leaning: 3, slender: 1, young: 2, mature: 1 }), -out)) placed++
+    }
+    if (placed > 0) clumps.push({ x: cx, z: cz, r: spread })
   }
-  return spots
+  return { spots, clumps }
+}
+
+/** where a group of palms stands (its undergrowth grows there) */
+interface PalmClump {
+  x: number
+  z: number
+  r: number
 }
 
 // ─── garden plants, shrubs and beach grass ─────────────────────────────────
 
-function placePlants(rand: () => number, planter: boolean): PlantSpot[] {
+function placePlants(rand: () => number, planter: boolean, clumps: PalmClump[]): PlantSpot[] {
   const spots: PlantSpot[] = []
   const add = (x: number, z: number, kind: PlantKind, size: number, y = heightAt(x, z)) =>
     spots.push({ x, y, z, kind, size, turn: rand() * Math.PI * 2, tone: rand() })
@@ -226,6 +247,23 @@ function placePlants(rand: () => number, planter: boolean): PlantSpot[] {
     if (s < 8 || s > 60 || beachness(x, z) > 0.3 || onRoad(x, z) > 0) continue
     if (rand() > 0.3) continue
     add(x, z, rand() < 0.6 ? 'seagrape' : 'beachgrass', 0.9 + rand() * 1.2)
+  }
+  // undergrowth round the palm groups' feet (the near ones: a 2 m shrub is a pixel past ~600 m) — a palm
+  // group rises out of its own thicket, not out of mown grass
+  for (const c of clumps) {
+    if (Math.hypot(c.x, c.z) > 600) continue
+    const n = 2 + Math.floor(rand() * 4)
+    for (let k = 0; k < n; k++) {
+      const a = rand() * Math.PI * 2
+      const d = (c.r + 1.5) * Math.sqrt(rand())
+      const x = c.x + Math.cos(a) * d
+      const z = c.z + Math.sin(a) * d
+      if (inGarage(x, z) || shore(x, z) < 8 || onRoad(x, z) > 0) continue
+      const pick = rand()
+      const kind: PlantKind = pick < 0.5 ? 'seagrape' : pick < 0.75 ? 'strelitzia' : pick < 0.9 ? 'cycad' : 'hibiscus'
+      const size = Math.min((1.2 + rand() * 1.4) * (kind === 'seagrape' ? 1.3 : 1), roomBelowCove(x, z) / 1.3)
+      if (size >= 0.5) add(x, z, kind, size)
+    }
   }
   return spots
 }
@@ -319,8 +357,9 @@ function planWoods(): VegetationLayout {
         // (thinner on the slope below the garage: shrubs and palms there, not a forest)
         return woodedness(x, z) * (1 - 0.7 * (1 - smoothstep(r, 150, 350)))
       },
-      // (a tropical coast: broadleaf woods, the odd pine high up)
-      conifers: (x, z) => 0.02 + 0.12 * smoothstep(heightAt(x, z) - SEA, 200, 450),
+      // the tall kind is the tropical flora's emergents (kapok, albizia: flora.ts), standing out of the
+      // canopy here and there over the whole forest
+      conifers: () => 0.1,
       allowed(x, z, height) {
         if (inGarage(x, z) || Math.hypot(x, z) < 22) return false
         const s = shore(x, z)
@@ -343,8 +382,8 @@ export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean })
   const rand = seeded(2024)
   const group = new THREE.Group()
   group.name = 'coast-vegetation'
-  const palmSpots = placePalms(rand)
-  const plantSpots = placePlants(rand, opts.planter)
+  const { spots: palmSpots, clumps } = placePalms(rand)
+  const plantSpots = placePlants(rand, opts.planter, clumps)
   const palms = createPalms(palmSpots, opts.bark)
   const plants = createPlants(plantSpots)
   const grass = createCoastGrass(rand)
@@ -354,6 +393,7 @@ export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean })
   console.info(`[garage] coast vegetation planned in ${Math.round(performance.now() - t0)} ms (${layout.plants.length} woodland plants)`)
   const forestReady = createForest({
     seed: 9,
+    flora: 'tropical',
     heightAt,
     layout,
     // no extra bushes round the building: the garden (plants.ts) is its planting

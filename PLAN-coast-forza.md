@@ -18,10 +18,13 @@ Reference views: the user's 5 screenshots (2026-09-27), Coast Overlook, AMG ONE.
   hour, 14:1 at noon, through the tone mapper; ~2–5:1 would be right). A sky-light
   recalibration touches Fuji too (`OUTDOOR_SKY_LIGHT`); do it with Phase 6 (foliage AO).
 
-## Phase 2 — tropical woods
-- [ ] Coast species archetypes (rain tree, fig/banyan, emergents); pines ~0
-- [ ] Impostor atlas with the same species
-- [ ] Palms: leaning, varied heights, clusters of 3–7 with undergrowth
+## Phase 2 — tropical woods ✅ done
+- [x] `flora.ts`: species per landscape (temperate = Fuji, unchanged; tropical = coast). Tropical
+      presets reshaped from ez-tree's: rain tree and fig (broadleaf), kapok and albizia (the
+      layout's tall kind: emergents; evergreen growth, no leader spike). No pines on the coast
+- [x] Impostor atlas built from the flora's species; tropical leaf palette (deeper, bluer)
+- [x] Palms: valley palms in groups of 3–7 leaning out from each other, mixed ages, undergrowth
+      at their feet (< 600 m); longer fronds and more lean on slender/coconut palms
 
 ## Phase 3 — terrain and cliffs
 - [ ] Cliffs from rock meshes: strata, ledges, overhangs, talus, broken top lip
