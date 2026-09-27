@@ -89,9 +89,9 @@ controls.target.set(0, 0.6, 0)
 controls.enableDamping = true
 controls.dampingFactor = 0.06
 controls.enablePan = false // keep the car centred
-controls.minPolarAngle = 0.02 // straight-down top view is fine
+controls.minPolarAngle = 0.001 // straight-down top view is fine
 controls.maxPolarAngle = THREE.MathUtils.degToRad(84) // …but never below the floor line
-controls.minDistance = 3.4
+controls.minDistance = 1.4
 controls.maxDistance = 100
 controls.update()
 
