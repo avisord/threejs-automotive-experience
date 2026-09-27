@@ -1,7 +1,8 @@
-# tstshaders — three.js playgrounds
+# autoxd — three.js playgrounds
 
-Three Vite pages (multi-page build, see `vite.config.ts`), deployed on Vercel at
-https://tstshaders.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
+Repo: https://github.com/avisord/threejs-automotive-experience (renamed from `tstshaders`; the local
+folder keeps the old name). Vite pages (multi-page build, see `vite.config.ts`), deployed on Vercel at
+https://autoxd.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
 
 - **`credits.html` → `src/credits.ts`** — models (from `CARS[].credit`), Poly Haven textures,
   libraries and their licences; linked from the home footer and Menu › Collection.
