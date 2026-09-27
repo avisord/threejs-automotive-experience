@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 
-// multi-page: each html at the root is its own playground
+// multi-page: the home page, and each playground at its own path
 export default defineConfig({
   server: {
     port: 3000
@@ -9,7 +9,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        ballpit: resolve(import.meta.dirname, 'index.html'),
+        home: resolve(import.meta.dirname, 'index.html'),
+        ballpit: resolve(import.meta.dirname, 'balls/index.html'),
         garage: resolve(import.meta.dirname, 'garage.html'),
       },
     },
