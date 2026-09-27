@@ -5,14 +5,13 @@ import * as THREE from 'three'
  * - walk: a person on the ground — WASD/arrows, mouse look, shift to run, a head bob in step
  *   with the stride, gravity when the floor drops away, a dip on landing;
  * - fly: a drone — the same moves with no bob, space up, shift/ctrl down, wheel sets the speed.
- * Both keep inside the room's bounds and out of the car.
+ * Neither is held inside the room — through walls and out into the landscape — only out of the car.
  */
 export type CameraMode = 'orbit' | 'walk' | 'fly'
 
 export interface FreeCameraHooks {
   camera: THREE.PerspectiveCamera
   dom: HTMLElement
-  bounds(): THREE.Box3
   /** height of the ground under (x, z), searched downward from `fromY`; null = nothing found */
   groundAt(x: number, z: number, fromY: number): number | null
   /** solid boxes the camera must stay out of (the car) */
@@ -141,14 +140,6 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
     { passive: false },
   )
 
-  function clampToRoom(): void {
-    const b = hooks.bounds()
-    eye.x = THREE.MathUtils.clamp(eye.x, b.min.x + RADIUS, b.max.x - RADIUS)
-    eye.z = THREE.MathUtils.clamp(eye.z, b.min.z + RADIUS, b.max.z - RADIUS)
-    eye.y = Math.min(eye.y, b.max.y - 0.1)
-    if (mode === 'fly') eye.y = Math.max(eye.y, b.min.y)
-  }
-
   /** push the eye out of the car: in walk only its footprint counts (it's taller than a step) */
   function avoidObstacles(): void {
     for (const box of hooks.obstacles()) {
@@ -239,7 +230,6 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
       changed = true
     }
 
-    clampToRoom()
     if (mode === 'walk') {
       const g = ground()
       if (g !== null) {
@@ -307,7 +297,6 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
       yaw = Math.atan2(-dir.x, -dir.z)
       pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)), -MAX_PITCH, MAX_PITCH)
     }
-    clampToRoom()
     lastProbe.set(Infinity, 0, 0)
     if (next === 'walk') {
       // from the air (or the orbit's height) the walker drops to the ground below

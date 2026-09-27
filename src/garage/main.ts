@@ -80,7 +80,6 @@ const carBox = new THREE.Box3()
 const freeCam = createFreeCamera({
   camera,
   dom: renderer.domElement,
-  bounds: () => room.bounds,
   groundAt,
   obstacles: () => (bay ? [carBox.copy(bay.box).translate(bay.root.position)] : []),
   canLock: () => !picking && !placement.active, // those need the pointer for clicks and the gizmo
@@ -92,10 +91,9 @@ let groundCache: { room: Room; meshes: THREE.Mesh[] } | null = null
 const groundRay = new THREE.Raycaster()
 const groundFrom = new THREE.Vector3()
 const groundNormal = new THREE.Vector3()
-const groundBox = new THREE.Box3()
 const DOWN = new THREE.Vector3(0, -1, 0)
 /**
- * What the walker can stand on: the room's plain meshes within reach of its bounds, each
+ * What the walker can stand on: the room's plain meshes, each
  * with a BVH (a terrain is hundreds of thousands of triangles). Instanced grass and trees,
  * mirrors (a pool, the lake) and meshes with raycasting switched off don't count — except
  * `userData.ground` ones (terrains skip raycasts so the camera's sight test stays cheap).
@@ -103,8 +101,6 @@ const DOWN = new THREE.Vector3(0, -1, 0)
 function groundMeshes(): THREE.Mesh[] {
   if (groundCache?.room === room) return groundCache.meshes
   const bvh = meshBVH!
-  const reach = room.bounds.clone().expandByScalar(2)
-  reach.min.y = -Infinity
   const meshes: THREE.Mesh[] = []
   room.group.updateMatrixWorld()
   room.group.traverseVisible((obj) => {
@@ -112,8 +108,6 @@ function groundMeshes(): THREE.Mesh[] {
     if (!mesh.isMesh || (mesh as THREE.InstancedMesh).isInstancedMesh || mesh.isReflector) return
     if (mesh.raycast !== THREE.Mesh.prototype.raycast && !mesh.userData.ground) return
     const geometry = mesh.geometry
-    if (!geometry.boundingBox) geometry.computeBoundingBox()
-    if (!groundBox.copy(geometry.boundingBox!).applyMatrix4(mesh.matrixWorld).intersectsBox(reach)) return
     // indirect: leaves the geometry's index as it is
     geometry.boundsTree ??= new bvh.MeshBVH(geometry, { indirect: true, maxDepth: 64 })
     meshes.push(mesh)
@@ -181,16 +175,13 @@ function updateControls(dt: number): boolean {
 
 /** framing fov for the current viewport — set in resize(), widened by fitCameraInRoom() */
 let baseFov = camera.fov
-const orbitPosition = new THREE.Vector3()
 const offset = new THREE.Vector3()
 /**
- * If the orbit position is outside the room, render from a point pulled in
- * toward the target and widen the FOV to keep the same framing (a dolly-zoom),
- * so a top view under the ceiling still fits the whole car. The orbit
- * position itself is left untouched — see restoreOrbitCamera().
+ * Videos only (the interactive camera goes anywhere): if a move's position is outside
+ * the room, render from a point pulled in toward the target and widen the FOV to keep
+ * the same framing (a dolly-zoom), so a top view under the ceiling still fits the car.
  */
 function fitCameraInRoom(): void {
-  orbitPosition.copy(camera.position)
   offset.subVectors(camera.position, controls.target)
   let k = 1
   for (const axis of ['x', 'y', 'z'] as const) {
@@ -206,10 +197,6 @@ function fitCameraInRoom(): void {
     camera.fov = fov
     camera.updateProjectionMatrix()
   }
-}
-/** hand OrbitControls back its unclamped position so zoom distance isn't lost */
-function restoreOrbitCamera(): void {
-  camera.position.copy(orbitPosition)
 }
 
 // ─── garage: the room and its lighting, swappable (Menu › Garage) ──────────
@@ -942,7 +929,7 @@ function meshesAt(clientX: number, clientY: number): THREE.Mesh[] {
   if (!bay) return []
   const rect = renderer.domElement.getBoundingClientRect()
   ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
-  // camera.matrixWorld is still the pose last drawn (fitCameraInRoom), so rays match the picture
+  // camera.matrixWorld is still the pose last drawn, so rays match the picture
   raycaster.setFromCamera(ndc, camera)
   const seen = new Set<THREE.Object3D>()
   const out: THREE.Mesh[] = []
@@ -1094,7 +1081,7 @@ function tracerWanted(now: number): boolean {
 
 function traceStep(): void {
   const t = tracer!
-  // the camera is at the pose being drawn now (fitCameraInRoom), which is what the tracer must see
+  // the camera is at the pose being drawn now, which is what the tracer must see
   if (tracerCameraStale) {
     t.cameraChanged()
     tracerCameraStale = false
@@ -1184,15 +1171,13 @@ function frame(timestamp: number): void {
 
   bay?.configurator.update()
   room.update?.(dt)
-  if (orbiting) fitCameraInRoom()
-  else if (camera.fov !== baseFov) {
-    // walking and flying stay inside the room: the lens as set
+  // no mode is held inside the room (videos still are, see videoStage.draw): the lens as set
+  if (camera.fov !== baseFov) {
     camera.fov = baseFov
     camera.updateProjectionMatrix()
   }
   if (tracing) traceStep()
   post.render(dt)
-  if (orbiting) restoreOrbitCamera()
   framesDrawn++
 }
 
