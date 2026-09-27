@@ -35,10 +35,14 @@ Reference views: the user's 5 screenshots (2026-09-27), Coast Overlook, AMG ONE.
 - [x] Hills: erosion spurs/hollows (ridged, ±8 m) past 220 m, off the garage's ground
 - Not done: paths; ground scale cues were already in the lawn shader (pebbles, bare soil)
 
-## Phase 4 — clouds
-- [ ] Grey flat bases, sun-lit tops, wispy edges, layers (cumulus + cirrus)
-- [ ] Colour from sun elevation (no pink at midday)
-- [ ] The lone round "moon" blob (image 4)
+## Phase 4 — clouds ✅ done
+- [x] Edges eroded by two-scale noise (not a union of discs); a slightly ragged flat base
+- [x] Puff clefts baked into the atlas (how far the surface stands out) and shaded; less light
+      wrap; grey undersides (`aloft`); less haze over them
+- [x] Low-sun colour: sun term paled toward warm white, haze peach-grey (was pink)
+- [x] The lone high cloud (7.5°, the "moon") removed
+- Not done: a separate cirrus layer (the sky's own thin cloud deck covers it). Front-lit clouds
+  at golden hour are still fairly flat peach — that's also how they look in reality.
 
 ## Phase 5 — set dressing and context
 - [ ] Road to the pad (asphalt, markings, kerb) joining the coast road

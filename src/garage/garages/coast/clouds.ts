@@ -16,7 +16,7 @@ import { fbm, seeded, smoothstep } from '../landform'
 const CELL = { w: 512, h: 256 }
 const VARIANTS = 4
 
-/** bake the cumulus atlas: rgb = the puffs' normals (billboard space), a = density */
+/** bake the cumulus atlas: rg = the puffs' normals (billboard space), b = how far the surface stands out, a = density */
 function cloudAtlas(): THREE.DataTexture {
   const W = CELL.w * VARIANTS
   const H = CELL.h
@@ -64,6 +64,7 @@ function cloudAtlas(): THREE.DataTexture {
         let ny = 0
         let nz = 0.05
         let dens = 0
+        let front = 0
         for (const p of puffs) {
           const dx = (x - p.x) / p.r
           const dy = (y - p.y) / p.r
@@ -71,6 +72,7 @@ function cloudAtlas(): THREE.DataTexture {
           if (d2 >= 1) continue
           const h = Math.sqrt(1 - d2)
           dens += (1 - d2) * 0.9
+          front = Math.max(front, p.z + h * p.r * 3)
           const w = (1 - d2) ** 2 * (0.4 + p.z + h * p.r * 8)
           nx += dx * w
           ny += dy * w
@@ -89,14 +91,20 @@ function cloudAtlas(): THREE.DataTexture {
         nx /= nl2
         ny /= nl2
         nz2 /= nl2
-        // a flat base, wispy edges eaten by noise
-        const baseCut = smoothstep(y, base - 0.02, base + 0.03)
-        const wisp = smoothstep(fbm(x * 26 + v * 7, y * 26, 4), 0.3, 0.65)
-        const a = Math.min(1, dens * 1.4) * baseCut * (0.5 + 0.5 * wisp) * smoothstep(dens, 0.02, 0.4)
+        // A flat (slightly ragged) base, and edges eroded by noise at two scales: the density is cut
+        // back where the noise is low, so the outline breaks into lobes and frays into wisps instead of
+        // tracing the puffs' circles — a union of discs read as a cut-out sticker
+        const baseCut = smoothstep(y, base - 0.02 + (fbm(x * 30 + v, 3.1, 2) - 0.5) * 0.012, base + 0.025)
+        const erode = fbm(x * 22 + v * 7, y * 22, 4) * 0.65 + fbm(x * 70 - v * 3, y * 70 + 5, 3) * 0.35
+        const core = dens * 1.4 - (1 - erode) * 0.75
+        const a = smoothstep(core, 0.0, 0.55) * baseCut
         const k = (j * W + v * CELL.w + i) * 4
         data[k] = Math.round((nx * 0.5 + 0.5) * 255)
         data[k + 1] = Math.round((ny * 0.5 + 0.5) * 255)
-        data[k + 2] = Math.round(nz2 * 255)
+        // (blue: how far this point of the surface stands out toward us — low in the clefts between
+        // puffs, which sit in the cloud's own shade; the normal's z is rebuilt from x and y)
+        data[k + 2] = Math.round(Math.min(1, front / 0.45) * 255)
+        void nz2
         data[k + 3] = Math.round(a * 255)
       }
     }
@@ -144,7 +152,10 @@ const fragmentShader = /* glsl */ `
     #include <logdepthbuf_fragment>
     vec4 t = texture2D( uAtlas, vUv );
     if ( t.a < 0.01 ) discard;
-    vec3 n = vec3( t.rg * 2.0 - 1.0, t.b );
+    vec3 n = vec3( t.rg * 2.0 - 1.0, 0.0 );
+    n.z = sqrt( max( 0.0, 1.0 - dot( n.xy, n.xy ) ) );
+    // the clefts between puffs: in the cloud's own shade, lit mostly by the sky
+    float cleft = smoothstep( 0.15, 0.75, t.b );
     // the sun in the card's own frame (x right, y up, z toward the garage)
     vec3 s = normalize( vec3( dot( uSunDir, vRight ), dot( uSunDir, vUp ), dot( uSunDir, vFacing ) ) );
     // thickness at the scale of the puffs, not of the billows: a blurred mip of the density. Light
@@ -156,9 +167,13 @@ const fragmentShader = /* glsl */ `
     float behind = max( -s.z, 0.0 );
     float density = mix( t.a, max( t.a, smoothstep( 0.3, 0.7, thick ) * step( 0.2, t.a ) ), smoothstep( 0.0, 0.5, behind ) );
     // wrapped diffuse: the sunlit side, the shade side still lit a little through the cloud
-    float lit = clamp( dot( n, s ) * 0.55 + 0.45, 0.0, 1.0 );
+    // (less wrap than a soft 0.55/0.45: every cloud came out one flat tone, a paper cut-out)
+    float lit = clamp( dot( n, s ) * 0.75 + 0.25, 0.0, 1.0 ) * mix( 0.45, 1.0, cleft );
     // thick cores sit in their own shadow; the base is darker still
     float self = mix( 1.0, 0.55, smoothstep( 0.5, 1.0, t.a ) ) * mix( 0.7, 1.0, clamp( n.y * 0.5 + 0.6, 0.0, 1.0 ) );
+    // the base: a cumulus is lit from above and shades itself — its flat underside a darker grey
+    // (vUv.y: 0 at the card's foot, the base sits at ~0.07)
+    float aloft = smoothstep( 0.06, 0.45, vUv.y );
     // the sun behind the cloud: forward scattering. What reaches us falls off with the thickness
     // crossed — the thin edges blaze (the silver lining), the body is a dark silhouette lit by the sky
     float forward = pow( behind, 4.0 );
@@ -166,8 +181,8 @@ const fragmentShader = /* glsl */ `
     vec3 ambient = mix( uSkyLow, uSkyTop, clamp( n.y * 0.5 + 0.5, 0.0, 1.0 ) );
     // (seen from the shaded side, the sunlit-face term fades out: we're looking at its back, lit by
     // the sky and by the little sunlight that diffuses all the way through)
-    vec3 col = ambient * ( 0.6 + 0.4 * lit ) * mix( 1.0, 0.55, forward )
-      + uSunColor * ( lit * self * ( 1.0 - 0.9 * forward ) + forward * ( 0.04 + 5.0 * through ) );
+    vec3 col = ambient * ( 0.45 + 0.35 * lit ) * mix( 0.75, 1.0, cleft ) * mix( 1.0, 0.55, forward ) * mix( 0.72, 1.0, aloft )
+      + uSunColor * ( lit * self * mix( 0.35, 1.0, aloft ) * ( 1.0 - 0.9 * forward ) + forward * ( 0.04 + 5.0 * through ) );
     // seen through tens of kilometres of air: the low ones fade into the horizon's haze (less where
     // the cloud stands against the sun: its silhouette is what reads there)
     col = mix( col, uHaze, uHazeAmount * ( 1.0 - 0.5 * forward ) );
@@ -183,7 +198,7 @@ const CLOUDS = [
   { bearing: 47, elevation: 2.8, width: 24, height: 12, variant: 1 },
   { bearing: 64, elevation: 1.2, width: 15, height: 7.5, variant: 2 },
   { bearing: 6, elevation: 1.0, width: 11, height: 5.5, variant: 3 },
-  { bearing: 34, elevation: 7.5, width: 9, height: 4.5, variant: 2 },
+  // (no small cloud high on its own: at 7.5° one read as a lone round blob, a moon)
   { bearing: -78, elevation: 2.5, width: 16, height: 8, variant: 1 },
   { bearing: 105, elevation: 3, width: 22, height: 11, variant: 0 },
   { bearing: 150, elevation: 2, width: 18, height: 9, variant: 3 },
@@ -222,7 +237,8 @@ export function createCumulus(): Cumulus {
     geometry.translate(0, h / 2, 0) // the base on the card's origin
     geometry.setAttribute('variant', new THREE.Float32BufferAttribute(new Array(4).fill(c.variant), 1))
     const material = new THREE.ShaderMaterial({
-      uniforms: { ...uniforms, uHazeAmount: { value: 0.45 - 0.05 * Math.min(c.elevation, 6) } },
+      // (the haze veils them, but not flat: at 0.45 their shading washed out to one tone)
+      uniforms: { ...uniforms, uHazeAmount: { value: 0.32 - 0.04 * Math.min(c.elevation, 6) } },
       vertexShader,
       fragmentShader,
       transparent: true,
@@ -252,10 +268,12 @@ export function createCumulus(): Cumulus {
       uniforms.uSunDir.value.copy(direction)
       // (in the sky shader's units: its output is scaled to the scene by skyGain; calibrated by eye against it)
       // sunlit faces: the low sun's gold, paled toward white (the cloud scatters every colour); shade: the blue sky's
-      uniforms.uSunColor.value.copy(color).lerp(new THREE.Color(1, 1, 1), 0.35).multiplyScalar(1.5 + 1.5 * day)
+      // (paled toward a warm white, not white: the red of a low sun over the sky's blue went pink)
+      uniforms.uSunColor.value.copy(color).lerp(new THREE.Color(1, 0.94, 0.8), 0.35).multiplyScalar(1.5 + 1.5 * day)
       uniforms.uSkyTop.value.setRGB(0.26, 0.36, 0.62).multiplyScalar(0.8 + 0.8 * day)
       uniforms.uSkyLow.value.setRGB(0.36, 0.38, 0.48).multiplyScalar(0.8 + 0.8 * day)
-      uniforms.uHaze.value.setRGB(0.72, 0.66, 0.66).lerp(new THREE.Color(0.7, 0.78, 0.92), day).multiplyScalar(0.8 + 0.8 * day)
+      // (a low sun's haze is peach-grey, not pink: pink crept into every cloud at golden hour)
+      uniforms.uHaze.value.setRGB(0.76, 0.7, 0.64).lerp(new THREE.Color(0.7, 0.78, 0.92), day).multiplyScalar(0.8 + 0.8 * day)
     },
   }
 }
