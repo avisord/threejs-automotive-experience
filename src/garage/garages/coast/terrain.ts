@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { pbrMaps, type PbrMaps } from '../kit'
 import { fbm, noRaycast, polarGrid, smoothstep } from '../landform'
 import { outdoorMaterial } from '../terrain'
-import { COAST, SEA, SURF, SURF_GLSL, beachness, cliffness, onRoad, heightAt, shore, shoreTexture, woodedness } from './site'
+import { COAST, SEA, SURF, SURF_GLSL, beachness, cliffness, lawnWeight, onRoad, heightAt, shore, shoreTexture, woodedness, type LawnBox } from './site'
 
 /** the coast's photographed surfaces (Poly Haven, CC0): `tile` = metres one copy covers */
 export const COAST_SURFACES = {
@@ -64,7 +64,7 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
     base.call(material, shader, renderer)
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 coast;\nvarying vec3 vCoast;\nvarying vec3 vGround;\nvarying vec3 vGroundNormal;')
+      .replace('#include <common>', '#include <common>\nattribute vec4 coast;\nvarying vec4 vCoast;\nvarying vec3 vGround;\nvarying vec3 vGroundNormal;')
       .replace(
         '#include <begin_vertex>',
         '#include <begin_vertex>\nvCoast = coast;\nvGround = ( modelMatrix * vec4( position, 1.0 ) ).xyz;\nvGroundNormal = normalize( mat3( modelMatrix ) * objectNormal );',
@@ -73,7 +73,7 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
       .replace(
         '#include <common>',
         `#include <common>
-        varying vec3 vCoast; // x: rockiness of the shore, y: woodedness, z: road
+        varying vec4 vCoast; // x: rockiness of the shore, y: woodedness, z: road, w: the lawn round the paving
         varying vec3 vGround;
         varying vec3 vGroundNormal;
         uniform sampler2D uShore;
@@ -160,17 +160,21 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
           tint = mix( tint, vec3( 1.1, 1.02, 0.72 ), smoothstep( 0.4, 0.68, m1 ) * 0.7 ); // olive
           tint = mix( tint, vec3( 1.28, 1.14, 0.66 ), smoothstep( 0.55, 0.78, m1 * 0.55 + m2 * 0.45 ) * 0.75 ); // dry, yellow-green
           tint = mix( tint, vec3( 0.7, 0.82, 0.72 ), smoothstep( 0.56, 0.78, m3 ) * 0.6 ); // deep green
-          c = mix( c, c * tint, open * near );
+          // the lawn round the paving: even, watered turf — no dry drifts, bare soil, laid-over streaks or
+          // stones (they showed between the lawn's grass patches as pale blotches, and the lawn ended in them)
+          float lawn = vCoast.w;
+          float rough = 1.0 - lawn;
+          c = mix( c, c * tint, open * near * mix( 1.0, 0.25, lawn ) );
           // meso, a few metres: dry straw patches, bare soil, grass flattened by the wind
           float d1 = gDetail( p.xz + 5.0, 7.0 );
           float d2 = gDetail( p.xz * 1.7 - 13.0, 3.1 );
           float dryPatch = smoothstep( 0.6, 0.78, d1 * 0.65 + d2 * 0.35 );
-          c = mix( c, lum * vec3( 1.9, 1.62, 1.02 ), dryPatch * 0.6 * open * near );
+          c = mix( c, lum * vec3( 1.9, 1.62, 1.02 ), dryPatch * 0.6 * open * near * rough );
           float bare = smoothstep( 0.7, 0.84, gDetail( p.xz - 41.0, 4.3 ) * 0.7 + d2 * 0.3 ) * ( 1.0 - smoothstep( 0.93, 0.99, n.y ) * 0.6 );
-          c = mix( c, vec3( 0.2, 0.15, 0.1 ) * ( 0.75 + 0.5 * d2 ), bare * 0.7 * open * near );
+          c = mix( c, vec3( 0.2, 0.15, 0.1 ) * ( 0.75 + 0.5 * d2 ), bare * 0.7 * open * near * rough );
           // lodged grass: long streaks laid over along the sea wind, paler (their blades catch the sky)
           vec2 wq = vec2( dot( p.xz, vec2( 0.82, 0.57 ) ), dot( p.xz, vec2( -0.57, 0.82 ) ) );
-          gLodge = smoothstep( 0.62, 0.8, gDetail( wq * vec2( 0.25, 1.0 ), 2.2 ) ) * smoothstep( 0.45, 0.6, d1 ) * open * ( 1.0 - bare );
+          gLodge = smoothstep( 0.62, 0.8, gDetail( wq * vec2( 0.25, 1.0 ), 2.2 ) ) * smoothstep( 0.45, 0.6, d1 ) * open * ( 1.0 - bare ) * rough;
           c *= 1.0 + 0.18 * gLodge * near;
           // micro: the grass photo's light and dark (two scales, so its 2 m tile doesn't show), and fine colour noise
           vec3 gTex = texture2D( uGrassMap, p.xz / 2.0 ).rgb;
@@ -190,7 +194,7 @@ function coastGround<M extends THREE.MeshStandardMaterial>(
             float r = 0.09 + 0.14 * surfHash( cell + 1.7 );
             float px = length( fwidth( q ) );
             float stone = step( 0.9, h ) * ( 1.0 - smoothstep( r - px - 0.02, r + px, length( fract( q ) - 0.5 - o * 0.5 ) ) );
-            gSpeck = stone * ( 1.0 - smoothstep( 0.15, 0.5, px ) ) * open * ( 0.5 + bare );
+            gSpeck = stone * ( 1.0 - smoothstep( 0.15, 0.5, px ) ) * open * ( 0.5 + bare ) * rough;
             c = mix( c, vec3( 0.34, 0.32, 0.29 ) * ( 0.7 + 0.6 * h ), gSpeck * 0.85 );
           }
           // contact: dark, damp, leaf-littered ground round everything standing on the land
@@ -305,6 +309,7 @@ export function createCoastTerrain(
   cliff: PbrMaps,
   cover: (x: number, z: number) => number,
   contact: { texture: THREE.Texture; rect: THREE.Vector4 },
+  paving: LawnBox[],
 ): { mesh: THREE.Mesh; ready: Promise<void>; textures: THREE.Texture[] } {
   const grassC = srgb(0x5d7c32)
   const lush = srgb(0x44692a)
@@ -318,6 +323,7 @@ export function createCoastTerrain(
   const rocky = new Float32Array(1 + COAST_GRID.rings * COAST_GRID.segments)
   const wooded = new Float32Array(rocky.length)
   const road = new Float32Array(rocky.length)
+  const lawn = new Float32Array(rocky.length)
   let k = 0
   const geometry = polarGrid(COAST.realRadius, COAST_GRID.rings, COAST_GRID.segments, COAST_GRID.spacing, (x, z, _t, _a, c) => {
     const h = heightAt(x, z)
@@ -330,8 +336,10 @@ export function createCoastTerrain(
       c.copy(grassC).lerp(dry, smoothstep(fbm(x / 70, z / 70), 0.45, 0.72) * 0.8)
       c.lerp(lush, smoothstep(fbm(x / 40 + 9, z / 40), 0.55, 0.75) * 0.6)
       c.lerp(soil, smoothstep(fbm(x / 22 + 40, z / 22), 0.62, 0.76) * 0.7 * smoothstep(r, 25, 50))
-      // the terrace lawn: mown and even
-      c.lerp(srgb(0x587a2c), 1 - smoothstep(r, 20, 40))
+      // the lawn round the paving: mown and even, the grass patches' own green (vegetation.ts)
+      const lw = r < 90 ? lawnWeight(x, z, paving) : 0
+      c.lerp(srgb(0x4f7a2c), lw)
+      lawn[k] = lw
       // scrub and woods on the hillsides
       const w = woodedness(x, z)
       c.lerp(scrub, smoothstep(w, 0.1, 0.5) * 0.6)
@@ -357,13 +365,14 @@ export function createCoastTerrain(
     c.fromBufferAttribute(color, i).lerp(scrub, steep * 0.7)
     color.setXYZ(i, c.r, c.g, c.b)
   }
-  const coast = new Float32Array(rocky.length * 3)
+  const coast = new Float32Array(rocky.length * 4)
   for (let i = 0; i < rocky.length; i++) {
-    coast[i * 3] = rocky[i]
-    coast[i * 3 + 1] = wooded[i]
-    coast[i * 3 + 2] = road[i]
+    coast[i * 4] = rocky[i]
+    coast[i * 4 + 1] = wooded[i]
+    coast[i * 4 + 2] = road[i]
+    coast[i * 4 + 3] = lawn[i]
   }
-  geometry.setAttribute('coast', new THREE.BufferAttribute(coast, 3))
+  geometry.setAttribute('coast', new THREE.BufferAttribute(coast, 4))
   const maps = { grass: pbrMaps(COAST_SURFACES.grass), sand: pbrMaps(COAST_SURFACES.sand), cliff }
   maps.grass.maps.roughnessMap.dispose()
   maps.sand.maps.roughnessMap.dispose()

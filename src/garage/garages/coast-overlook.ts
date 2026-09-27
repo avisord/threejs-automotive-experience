@@ -3,12 +3,17 @@ import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { SURFACES, box, boxUV, disposeTree, pbrMaps, type GarageDef, type Room } from './kit'
 import { createGlassMaterial, glassPane } from './glass'
-import { GROUND } from './coast/site'
+import { GROUND, type LawnBox } from './coast/site'
 import { OUTDOOR_SKY_LIGHT } from './sky'
 import { createCoastWorld } from './coast/world'
 
 /** the terrace the car stands on (x × z), its front edge toward the cove (−z) */
 const DECK = { w: 16, front: -7, back: 5.5 }
+/** the terrace and its steps on the ground (x0, z0, x1, z1) */
+const PAVING: LawnBox[] = [
+  [-DECK.w / 2, DECK.front, DECK.w / 2, DECK.back],
+  [-3, DECK.back, 3, DECK.back + 1.2],
+]
 /** the glass balustrade along the front and sides */
 const RAIL = { h: 1.05, bay: 2 }
 
@@ -128,11 +133,9 @@ function createCoastOverlook(): Room {
   group.name = 'coast-overlook'
   const world = createCoastWorld(group, {
     planter: false,
-    // the terrace and its steps stand on the lawn: the grass darkens along their feet
-    footprints: [
-      [-DECK.w / 2, DECK.front, DECK.w / 2, DECK.back],
-      [-3, DECK.back, 3, DECK.back + 1.2],
-    ],
+    // the terrace and its steps stand on the lawn: it runs right up to them, darkening along their feet
+    lawn: PAVING,
+    footprints: PAVING,
   })
 
   // ─── the terrace: honed limestone slabs on a plinth, steps down to the lawn behind ─

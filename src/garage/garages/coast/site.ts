@@ -611,6 +611,27 @@ export function heightAt(x: number, z: number): number {
   return h
 }
 
+/** a paved area a room's lawn surrounds: x0, z0, x1, z1 */
+export type LawnBox = [number, number, number, number]
+/** the Coast House's plinth */
+export const HOUSE_LAWN: LawnBox[] = [[-10.6, -9.1, 10.6, 9.3]]
+
+/** metres from the nearest paving (0 on it) */
+export function fromPaving(x: number, z: number, boxes: LawnBox[]): number {
+  let d = Infinity
+  for (const [x0, z0, x1, z1] of boxes) d = Math.min(d, Math.hypot(Math.max(0, x0 - x, x - x1), Math.max(0, z0 - z, z - z1)))
+  return d
+}
+
+/**
+ * 0–1: the lawn round a room's paving — even, mown turf out to ~22–34 m from its edge (the edge
+ * wandering with noise), fading into the rough beyond. The grass patches (vegetation.ts) and the
+ * terrain's colour (terrain.ts) both follow it, so the lawn ends as one thing.
+ */
+export function lawnWeight(x: number, z: number, boxes: LawnBox[]): number {
+  return 1 - smoothstep(fromPaving(x, z, boxes) + (fbm(x / 9 + 4, z / 9 - 2, 2) - 0.5) * 16, 22, 34)
+}
+
 /** 0–1: how wooded the land is here (hillsides and gullies wooded, the shore and the cliff tops open) */
 export function woodedness(x: number, z: number): number {
   const s = shore(x, z)

@@ -6,7 +6,7 @@ import { WIND } from '../foliage'
 import { createSky, sunDirection, sunLight, type SunPosition } from '../sky'
 import { createCumulus } from './clouds'
 import { createOcean } from './ocean'
-import { COAST, SEA, SURF } from './site'
+import { COAST, HOUSE_LAWN, SEA, SURF, type LawnBox } from './site'
 import { COAST_SURFACES, createCoastTerrain } from './terrain'
 import { createRocks } from './rocks'
 import { createCoastRanges } from './ranges'
@@ -34,6 +34,8 @@ export interface CoastWorldOptions {
   dust?: THREE.Box3
   /** plant the bed along the garage's glass (default true; the open-air overlook has no garage) */
   planter?: boolean
+  /** the paving the lawn surrounds (boxes x0, z0, x1, z1; default the Coast House's plinth) */
+  lawn?: LawnBox[]
   /** what the room builds on the land (x0, z0, x1, z1): the ground darkens along their feet */
   footprints?: [number, number, number, number][]
 }
@@ -66,7 +68,7 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   const sky = createSky({ coverage: 0.38, scale: 0.42, density: 0.8 })
   const cumulus = createCumulus()
   // every plant, planned first: the terrain darkens the ground under the woods
-  const vegetation = createCoastVegetation({ bark: pbrMaps(COAST_SURFACES.palmBark), planter: opts.planter ?? true })
+  const vegetation = createCoastVegetation({ bark: pbrMaps(COAST_SURFACES.palmBark), planter: opts.planter ?? true, lawn: opts.lawn })
   // the cliff photo is shared by the terrain's rock faces and the rocks themselves
   const cliffMaps = pbrMaps(COAST_SURFACES.cliff)
   const rocks = createRocks(cliffMaps)
@@ -76,7 +78,7 @@ export function createCoastWorld(group: THREE.Group, opts: CoastWorldOptions = {
   for (const f of rocks.feet) contact.blob(f.x, f.z, Math.max(f.w, f.d) * 0.62, 0.65, Math.min(f.w, f.d) * 0.3)
   for (const [x0, z0, x1, z1] of opts.footprints ?? []) contact.box(x0, z0, x1, z1, 0.9, 0.7)
   const contactMap = contact.texture()
-  const terrain = createCoastTerrain(cliffMaps, vegetation.layout.cover, contactMap)
+  const terrain = createCoastTerrain(cliffMaps, vegetation.layout.cover, contactMap, opts.lawn ?? HOUSE_LAWN)
   const ocean = createOcean()
   const ranges = createCoastRanges()
   outdoor.add(terrain.mesh, ocean.mesh, rocks.group, ranges, vegetation.group)

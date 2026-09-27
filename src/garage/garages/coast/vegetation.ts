@@ -9,7 +9,7 @@ import { layoutVegetation, type VegetationLayout } from '../vegetation-layout'
 import { createPalms, type PalmKind, type PalmSpot } from './palms'
 import { createPlants, type PlantKind, type PlantSpot } from './plants'
 import type { ContactMap } from './contact'
-import { SEA, VIEW_EYE, beachness, bearing, heightAt, inView, onRoad, nearestRoad, shore, woodedness } from './site'
+import { HOUSE_LAWN, SEA, VIEW_EYE, beachness, fromPaving, lawnWeight, type LawnBox, bearing, heightAt, inView, onRoad, nearestRoad, shore, woodedness } from './site'
 
 /**
  * Where the coast's plants grow — not spread evenly, but in the ecological
@@ -272,9 +272,10 @@ function placePlants(rand: () => number, planter: boolean, clumps: PalmClump[]):
 const FAR_GRASS = 90
 
 /** the lawn and coastal grass round the garage (grass.ts patches), thinning out down the slope */
-function createCoastGrass(rand: () => number): { group: THREE.Group; far: THREE.Object3D[] } {
-  const COUNT = 22000
+function createCoastGrass(rand: () => number, paving: LawnBox[]): { group: THREE.Group; far: THREE.Object3D[] } {
   const NEAR = 18
+  /** patch spacing on the lawn, metres (a jittered grid: ~3.8 patches per m²) */
+  const CELL = 0.52
   const material = foliage(outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })), {
     wind: 'grass',
     translucency: 0.3,
@@ -285,37 +286,45 @@ function createCoastGrass(rand: () => number): { group: THREE.Group; far: THREE.
   const dry = srgb(0xa89a62)
   type Spot = { x: number; y: number; z: number; yaw: number; scale: number; color: THREE.Color }
   const spots = new Map<string, Spot[]>()
-  let n = 0
-  for (let t = 0; n < COUNT && t < COUNT * 10; t++) {
-    const r = 6 + 150 * rand() ** 1.6
-    const a = rand() * Math.PI * 2
-    const x = Math.sin(a) * r
-    const z = -Math.cos(a) * r
-    if (inGarage(x, z) || (Math.abs(x) < 10.6 && z > -9.1 && z < 9.3)) continue
-    const s = shore(x, z)
-    if (s < 12 || onRoad(x, z) > 0.2) continue
-    const keep = r < 30 ? 1 : (30 / r) ** 1.2
-    if (rand() > keep) continue
-    // past ~90 m a patch is a few pixels: the terrain's own shading carries the grass there (counted, so the
-    // density closer in stays as it was)
-    if (r > FAR_GRASS) {
-      n++
-      continue
+  // A lawn round the terrace, grass wall to wall out to the shrubs, then thinning to tufts in the rough.
+  // Sampled on a jittered grid at an even density: drawn at random radii, the patches crowded the
+  // terrace and thinned fast within 10–30 m, so the lawn ended in a dark ring with bare, smooth ground
+  // showing between blotches. Its edge wanders (noise), not a circle.
+  for (let gx = -FAR_GRASS; gx < FAR_GRASS; gx += CELL) {
+    for (let gz = -FAR_GRASS; gz < FAR_GRASS; gz += CELL) {
+      const x = gx + rand() * CELL
+      const z = gz + rand() * CELL
+      const r = Math.hypot(x, z)
+      if (r < 6 || r > FAR_GRASS) continue
+      // (right up to the paving's edge: a gap there showed bare ground round the terrace)
+      if (fromPaving(x, z, paving) < 0.05) continue
+      const lawn = lawnWeight(x, z, paving)
+      const keep = lawn + (1 - lawn) * 0.28 * Math.min(1, (40 / r) ** 1.3)
+      if (rand() > keep) continue
+      const sh = shore(x, z)
+      if (sh < 12 || onRoad(x, z) > 0.2) continue
+      const room = roomBelowCove(x, z)
+      if (room < 0.3) continue
+      // mown lawn by the terrace, longer coastal grass beyond, tufts and tall stands in patches
+      const tall = smoothstep(fbm(x / 10 + 3, z / 10, 2), 0.52, 0.7) * (1 - lawn)
+      // (the lawn: the fine sward with a quarter short tufts in it — the sward alone is too fine to see
+      // from a few metres, and the lawn read as bare painted ground)
+      const mown = rand() < lawn
+      const kind: PatchKind = mown ? (rand() < 0.25 ? 'tuft' : 'base') : rand() < tall ? (rand() < 0.4 ? 'dry' : 'tall') : rand() < 0.15 ? 'forb' : 'tuft'
+      const tallest = PATCH_KINDS[kind].height[1]
+      const scale = Math.min(room / tallest, (0.8 + rand() * 0.5) * (mown && kind === 'tuft' ? 0.55 : 1))
+      const c = lush.clone().lerp(warm, smoothstep(fbm(x / 25, z / 25, 2), 0.4, 0.7)).lerp(dry, smoothstep(r, 40, 140) * 0.5 * rand())
+      const lod = r < NEAR ? 0 : 1
+      const k = `${kind}|${Math.floor(rand() * 3)}|${lod}`
+      const spot = { x, y: heightAt(x, z), z, yaw: Math.atan2(WIND.direction.value.y, WIND.direction.value.x) + (rand() - 0.5) * 2, scale, color: c.multiplyScalar(0.9 + 0.2 * rand()) }
+      const list = spots.get(k)
+      if (list) list.push(spot)
+      else spots.set(k, [spot])
     }
-    const room = roomBelowCove(x, z)
-    if (room < 0.3) continue
-    // mown lawn on the terrace, longer coastal grass beyond, tufts and tall stands in patches
-    const tall = smoothstep(fbm(x / 10 + 3, z / 10, 2), 0.52, 0.7) * smoothstep(r, 25, 45)
-    const kind: PatchKind = r < 24 ? 'base' : rand() < tall ? (rand() < 0.4 ? 'dry' : 'tall') : rand() < 0.15 ? 'forb' : 'tuft'
-    const tallest = PATCH_KINDS[kind].height[1]
-    const scale = Math.min(room / tallest, 0.8 + rand() * 0.5)
-    const c = lush.clone().lerp(warm, smoothstep(fbm(x / 25, z / 25, 2), 0.4, 0.7)).lerp(dry, smoothstep(r, 40, 140) * 0.5 * rand())
-    const lod = x * x + z * z < NEAR * NEAR ? 0 : 1
-    const k = `${kind}|${Math.floor(rand() * 3)}|${lod}`
-    const spot = { x, y: heightAt(x, z), z, yaw: Math.atan2(WIND.direction.value.y, WIND.direction.value.x) + (rand() - 0.5) * 2, scale, color: c.multiplyScalar(0.9 + 0.2 * rand()) }
-    spots.set(k, [...(spots.get(k) ?? []), spot])
-    n++
   }
+  let count = 0
+  for (const list of spots.values()) count += list.length
+  console.info(`[garage] coast grass: ${count} patches`)
   const group = new THREE.Group()
   group.name = 'coast-grass'
   const far: THREE.Object3D[] = []
@@ -377,7 +386,8 @@ function planWoods(): VegetationLayout {
 }
 
 /** `planter`: plant the garage's bed along its glass (a room without the garage has none) */
-export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean }): CoastVegetation {
+/** `lawn`: the paving the lawn surrounds (default: the Coast House's plinth) */
+export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean; lawn?: LawnBox[] }): CoastVegetation {
   const t0 = performance.now()
   const rand = seeded(2024)
   const group = new THREE.Group()
@@ -386,7 +396,7 @@ export function createCoastVegetation(opts: { bark: PbrMaps; planter: boolean })
   const plantSpots = placePlants(rand, opts.planter, clumps)
   const palms = createPalms(palmSpots, opts.bark)
   const plants = createPlants(plantSpots)
-  const grass = createCoastGrass(rand)
+  const grass = createCoastGrass(rand, opts.lawn ?? HOUSE_LAWN)
   const layout = planWoods()
   group.add(palms.group, plants.group, grass.group)
   const far: THREE.Object3D[] = [...palms.far, ...plants.far, ...grass.far]
