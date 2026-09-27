@@ -4,7 +4,9 @@ import * as THREE from 'three'
  * Camera modes besides the orbit round the car:
  * - walk: a person on the ground — WASD/arrows, mouse look, shift to run, a head bob in step
  *   with the stride, gravity when the floor drops away, a dip on landing;
- * - fly: a drone — the same moves with no bob, space up, shift/ctrl down, wheel sets the speed.
+ * - fly: a drone — the same moves with no bob, shift for speed, space/E up, C/Q down (not ctrl:
+ *   ctrl+W closes the tab).
+ * In both the wheel zooms the lens (`zoom`, eased), and mouse look slows as it zooms in.
  * Neither is held inside the room — through walls and out into the landscape — only out of the car.
  */
 export type CameraMode = 'orbit' | 'walk' | 'fly'
@@ -26,8 +28,8 @@ export interface FreeCamera {
   setMode(mode: CameraMode): void
   /** step the walk/fly camera and write its pose to the camera; true if the picture changes */
   update(dt: number): boolean
-  /** fly speed, m/s (the wheel changes it) */
-  readonly flySpeed: number
+  /** lens zoom: 1 = the display's field of view, more is longer (narrower); back to 1 on a mode change */
+  readonly zoom: number
 }
 
 /** eye height above the feet */
@@ -38,6 +40,12 @@ const STEP = 0.45
 const RADIUS = 0.3
 const WALK_SPEED = 1.45
 const RUN_SPEED = 4.2
+const FLY_SPEED = 6
+const FLY_FAST_SPEED = 24
+const MIN_ZOOM = 0.6
+const MAX_ZOOM = 8
+/** zoom factor per wheel notch */
+const ZOOM_STEP = 1.15
 /** one step, m — the bob advances half a cycle per step */
 const STRIDE = 0.74
 const GRAVITY = 9.81
@@ -54,9 +62,9 @@ const MOVE_KEYS: Record<string, [forward: number, right: number]> = {
   KeyD: [0, 1],
   ArrowRight: [0, 1],
 }
-const UP_KEYS = new Set(['Space'])
-const DOWN_KEYS = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight'])
-const RUN_KEYS = new Set(['ShiftLeft', 'ShiftRight'])
+const UP_KEYS = new Set(['Space', 'KeyE'])
+const DOWN_KEYS = new Set(['KeyC', 'KeyQ'])
+const FAST_KEYS = new Set(['ShiftLeft', 'ShiftRight'])
 
 /** typing in the panel (a number field) must not walk the camera */
 function typing(e: KeyboardEvent): boolean {
@@ -76,7 +84,8 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
   let pitch = 0
   let lookX = 0 // mouse movement not yet applied, px
   let lookY = 0
-  let flySpeed = 5
+  let zoom = 1
+  let zoomTarget = 1
 
   // walking
   let feet = 0 // ground height under the eye
@@ -108,9 +117,9 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
   window.addEventListener('keydown', (e) => {
     if (mode === 'orbit' || e.metaKey || e.altKey || typing(e)) return
     const code = e.code
-    if (!(code in MOVE_KEYS) && !UP_KEYS.has(code) && !DOWN_KEYS.has(code)) return
+    if (!(code in MOVE_KEYS) && !UP_KEYS.has(code) && !DOWN_KEYS.has(code) && !FAST_KEYS.has(code)) return
     keys.add(code)
-    // ctrl+D would bookmark, space would scroll, arrows would move sliders
+    // space would scroll, arrows would move sliders
     e.preventDefault()
   })
   window.addEventListener('keyup', (e) => keys.delete(e.code))
@@ -133,9 +142,9 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
   dom.addEventListener(
     'wheel',
     (e) => {
-      if (mode !== 'fly') return
+      if (mode === 'orbit') return
       e.preventDefault()
-      flySpeed = THREE.MathUtils.clamp(flySpeed * Math.pow(1.15, -Math.sign(e.deltaY)), 0.5, 40)
+      zoomTarget = THREE.MathUtils.clamp(zoomTarget * Math.pow(ZOOM_STEP, -Math.sign(e.deltaY)), MIN_ZOOM, MAX_ZOOM)
     },
     { passive: false },
   )
@@ -190,9 +199,17 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
   function update(dt: number): boolean {
     if (mode === 'orbit') return false
     let changed = false
+    if (zoom !== zoomTarget) {
+      // eased in log space, so zooming in and out feel the same
+      zoom *= Math.pow(zoomTarget / zoom, 1 - Math.exp(-12 * dt))
+      if (Math.abs(Math.log(zoom / zoomTarget)) < 1e-3) zoom = zoomTarget
+      changed = true
+    }
     if (lookX !== 0 || lookY !== 0) {
-      yaw -= lookX * LOOK_SPEED
-      pitch = THREE.MathUtils.clamp(pitch - lookY * LOOK_SPEED, -MAX_PITCH, MAX_PITCH)
+      // (zoomed in, a pixel of mouse turns the view less: aiming stays as fine on screen)
+      const look = LOOK_SPEED / Math.max(zoom, 1)
+      yaw -= lookX * look
+      pitch = THREE.MathUtils.clamp(pitch - lookY * look, -MAX_PITCH, MAX_PITCH)
       lookX = lookY = 0
       changed = true
     }
@@ -206,8 +223,8 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
       if (move) wish.addScaledVector(forward, move[0]).addScaledVector(right, move[1])
     }
     if (wish.lengthSq() > 0) wish.normalize()
-    const run = mode === 'walk' && [...keys].some((k) => RUN_KEYS.has(k))
-    const speed = mode === 'fly' ? flySpeed : run ? RUN_SPEED : WALK_SPEED
+    const fast = [...keys].some((k) => FAST_KEYS.has(k))
+    const speed = mode === 'fly' ? (fast ? FLY_FAST_SPEED : FLY_SPEED) : fast ? RUN_SPEED : WALK_SPEED
     wish.multiplyScalar(speed)
     if (mode === 'fly') {
       let vertical = 0
@@ -215,7 +232,7 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
         if (UP_KEYS.has(code)) vertical += 1
         if (DOWN_KEYS.has(code)) vertical -= 1
       }
-      wish.y = Math.sign(vertical) * flySpeed * 0.7
+      wish.y = Math.sign(vertical) * speed * 0.7
     }
 
     // a person gets going in a few steps and stops in one; a drone glides
@@ -286,6 +303,7 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
     keys.clear()
     velocity.set(0, 0, 0)
     lookX = lookY = 0
+    zoom = zoomTarget = 1
     if (next === 'orbit') {
       if (locked()) document.exitPointerLock()
       return
@@ -319,8 +337,8 @@ export function createFreeCamera(hooks: FreeCameraHooks): FreeCamera {
     },
     setMode,
     update,
-    get flySpeed() {
-      return flySpeed
+    get zoom() {
+      return zoom
     },
   }
 }
