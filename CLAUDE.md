@@ -3,6 +3,8 @@
 Three Vite pages (multi-page build, see `vite.config.ts`), deployed on Vercel at
 https://tstshaders.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
 
+- **`credits.html` → `src/credits.ts`** — models (from `CARS[].credit`), Poly Haven textures,
+  libraries and their licences; linked from the home footer and Menu › Collection.
 - **`index.html`** — static home page (no JS) describing the garage, screenshots in
   `public/home/` (1280 px WebP + `og.jpg`, captured headless from the real app). `public/sitemap.xml`
   + `robots.txt` list `/`, `/garage.html`, `/balls/` for Google Search Console — add new pages there.
@@ -78,7 +80,8 @@ top on purpose. Moving them below their first use is a TDZ crash at load.
 | (lens) | Default Display › Field of view is 36° (~37 mm) with the start camera a little farther back — a photographer's lens, not a wide game camera. Saved settings keep their own value. |
 | `camera-moves.ts` | `CAMERA_MOVES`: 15 parametric moves (turntable, hero sweep, push in, flyover, side track, detail reveal, top-down, dolly zoom, spiral rise, dutch orbit, ground skim, wheel orbit, headlight slide, crane down, handheld hero hold) — `pose(u, framing, out, seconds)` in car space, framed from the car's size, lens and aspect; a pose may set its own `fov` (lens) and `roll` (dutch angle). |
 | `director.ts` | Reel model (shots = move + garage + length, fade/cut, resolution, fps, quality), `preview()` live in the window and `exportVideo()`: fixed-timestep render → `CanvasSource` (captured in the same task as the draw) → MP4. Talks to the app only through a `Stage` (implemented in `main.ts`: takes the view, swaps garages without the UI fade, restores camera/garage/grade after). |
-| `ui/` | Side panel shell (`panel.ts`: page stack + breadcrumb + `leave()` hook), widgets, and pages: Garage, Collection, Car, Parts, Lights, Video, Settings › Graphics / Display. `material-controls.ts` is the shared material picker. |
+| `ui/` | Side panel shell (`panel.ts`: page stack + breadcrumb + `leave()` hook), widgets, and pages: Garage, Collection, Car, Parts, Lights, Capture › Photo / Video, Settings › Graphics / Display. `material-controls.ts` is the shared material picker. (A saved panel path straight to Video is rewritten through Capture at load.) |
+| `ui/photo-page.ts` | Menu › Capture › Photo: a still of the current view (orbit, walk or fly — the free camera's zoom included) without the UI. While the page is open a guide (`.photo-guide`, box-shadow dimming, first child of `#app` so the panel draws over it) frames the shot: the largest rect of the aspect in the free area, centred on the lens. `main.photoCamera.take` borrows `videoStage` (`begin` at the photo size, pixel ratio 1), sets the same eye and a lens as tall as the guide, renders 3 warm-up frames (auto exposure) + 1 and reads the canvas in that task (2× supersample → high-quality 2D downscale). Sizes HD / QHD / 4K / screen; supersample only up to QHD: rendering 8K (7680×4320) took 2.4 s and then crashed the tab. PNG / JPEG / WebP, saved in `garage.photo.v1`. `videoStage.end()` restores the placement gizmo's visibility as it was (it used to force it on after every video). |
 
 Rendering model:
 - **On-demand rendering** is the default: frames are drawn only after `invalidate(n)`
@@ -118,8 +121,17 @@ configurator, lamps, placement, tracer, invalidate, showGarage, setSun`.
    see-through, lamps detected (four spot lights: two head, two tail), texture and
    geometry counts back to baseline after switching away.
 
-Licences: Roxy (toddeppe), AMG ONE (VTX), 930 (Lionsharp Studios) are CC-BY-4.0 and
-credited on their cards; the SLS, W201, GT3 RS and RX-7 came without licence info.
+5. Give it a `credit` (Sketchfab title, URL, author, licence, `basedOn` if the page credits an
+   original): it shows on its card and on `/credits.html` (`src/credits.ts` renders `CARS`).
+   Only CC BY / CC0 / CC BY-NC(-SA) models — never ND (we adapt them) or Store licences (the
+   .glb is publicly downloadable from the site).
+
+Licences (matched 2026-09-27 via the Sketchfab API by triangle count — within the few % that
+gltf-transform's prune drops — and any author the file names): GT3 R "Roxy" (toddeppe, based on
+MattDoesBlender), 930 (Lionsharp Studios), SLS and 190E (Dave Love SketchFab), AMG ONE (kevin
+(ケビン) — the file came from a spam re-upload whose metadata named a coffee brand) are CC BY 4.0;
+GT3 RS (VTX) and RX-7 (Ddiaz Design) are CC BY-NC-SA 4.0 — non-commercial only. Several meshes
+look ripped from games (`amgprojone_`, `fast:…_lodA`, `.col` nodes).
 
 ## Gotchas learned the hard way
 

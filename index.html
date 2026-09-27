@@ -9,7 +9,9 @@
       content="A futuristic car showroom built with three.js: orbit a car in nine garages, repaint and re-material its parts, upload your own model, switch on its lights, and export MP4 videos."
     />
     <link rel="canonical" href="https://tstshaders.vercel.app/" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="color-scheme" content="dark" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://tstshaders.vercel.app/" />
@@ -131,6 +133,14 @@
       li {
         margin: 4px 0;
       }
+      .cta {
+        padding: 56px 0 8px;
+        border-top: 1px solid var(--line);
+        text-align: center;
+      }
+      .cta p {
+        margin-bottom: 20px;
+      }
       footer {
         margin-top: 48px;
         padding: 32px 0 56px;
@@ -166,7 +176,6 @@
         </p>
         <div class="actions">
           <a class="btn primary" href="/garage.html">Open the garage</a>
-          <a class="btn" href="/balls/">Ball pit playground</a>
         </div>
       </header>
 
@@ -239,7 +248,7 @@
             <img src="/home/video.webp" width="1280" height="720" loading="lazy" alt="The video panel with a shot list, next to a Porsche 930 Turbo in the sunset hangar" />
           </figure>
           <div>
-            <h2>Film it</h2>
+            <h2>Capture it</h2>
             <p>
               Build a shot list from fifteen camera moves — hero sweep, flyover, dolly zoom, wheel orbit — across any garages,
               then export an MP4 up to 4K at 60 fps, straight from the browser.
@@ -248,24 +257,18 @@
               <li>Preview live, fade or cut between shots</li>
               <li>Bloom, colour grade, depth of field and lens flare</li>
               <li>Optional path tracing for photoreal stills</li>
+              <li>Photos too: PNG, JPEG or WebP up to 4K, framed on screen</li>
             </ul>
           </div>
         </section>
 
-        <section class="feature">
-          <figure>
-            <img src="/home/balls.webp" width="1280" height="720" loading="lazy" alt="Glowing and glassy balls piled on a blue floor in the ball pit playground" />
-          </figure>
-          <div>
-            <h2>Ball pit</h2>
-            <p>
-              The first playground: a pile of physics balls, each with its own procedural shader surface. Grab one, throw it,
-              watch it fall.
-            </p>
-            <p><a href="/balls/">Open the ball pit →</a></p>
-          </div>
-        </section>
       </main>
+
+      <section class="cta">
+        <h2>Take it for a spin</h2>
+        <p>Runs in any modern desktop browser — nothing to install.</p>
+        <a class="btn primary" href="/garage.html">Open the garage</a>
+      </section>
 
       <footer>
         <p>
@@ -273,8 +276,8 @@
           with a dedicated GPU.
         </p>
         <p>
-          Car models: Porsche 992 GT3 R by toddeppe, Mercedes-AMG ONE by VTX and Porsche 930 Turbo by Lionsharp
-          Studios, all under CC BY 4.0.
+          The car models come from Sketchfab creators under Creative Commons licences —
+          <a href="/credits.html">see the credits</a> for every model, texture and library.
         </p>
       </footer>
     </div>

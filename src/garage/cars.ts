@@ -22,6 +22,29 @@ export interface LampMatchers {
   auto?: PartMatch
 }
 
+export type Licence = 'CC BY 4.0' | 'CC BY-NC-SA 4.0'
+
+export const LICENCE_URL: Record<Licence, string> = {
+  'CC BY 4.0': 'https://creativecommons.org/licenses/by/4.0/',
+  'CC BY-NC-SA 4.0': 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+}
+
+/**
+ * Where a built-in model came from (all Sketchfab downloads), for its card and /credits.html.
+ * Matched on 2026-09-27 by triangle count against the Sketchfab API (within the few % that
+ * gltf-transform's prune drops) and the author the file names, where it names one.
+ */
+export interface Credit {
+  /** the model's title on Sketchfab */
+  title: string
+  url: string
+  author: string
+  authorUrl: string
+  licence: Licence
+  /** the model it was made from, when the page credits one */
+  basedOn?: { author: string; authorUrl: string }
+}
+
 export interface CarProfile {
   id: string
   make: string
@@ -51,7 +74,7 @@ export interface CarProfile {
   lamps?: LampMatchers
   /** body/wing factory style is a livery rather than plain paint */
   livery?: boolean
-  credit?: string
+  credit?: Credit
 }
 
 export const CARS: CarProfile[] = [
@@ -75,7 +98,14 @@ export const CARS: CarProfile[] = [
       cage: { node: /^Interior-RollCage_\d+$/ },
       glass: { node: /^Glass-(Glass|RearWindows)_\d+$/ },
     },
-    credit: 'toddeppe · CC-BY-4.0',
+    credit: {
+      title: 'Porsche 992 GT3R- Roxy',
+      url: 'https://sketchfab.com/3d-models/porsche-992-gt3r-roxy-191f10fd51c64e06ba68ffba0bb65ed6',
+      author: 'toddeppe',
+      authorUrl: 'https://sketchfab.com/toddeppe',
+      licence: 'CC BY 4.0',
+      basedOn: { author: 'MattDoesBlender', authorUrl: 'https://sketchfab.com/MattDoesBlender' },
+    },
   },
   {
     id: 'gt3rs',
@@ -100,6 +130,14 @@ export const CARS: CarProfile[] = [
       calipers: { node: /^hub_(lf|lr|rf|rr)(_\d+)?$/ },
       glass: { material: /^glasswindows2(\.001)?$/ },
     },
+    // (the file names VTX as its copyright holder)
+    credit: {
+      title: 'Porsche 992 GT3 RS',
+      url: 'https://sketchfab.com/3d-models/porsche-992-gt3-rs-80bf174857414a57ac9741567d3c4534',
+      author: 'VTX',
+      authorUrl: 'https://sketchfab.com/VTX_car',
+      licence: 'CC BY-NC-SA 4.0',
+    },
   },
   {
     id: '930-turbo',
@@ -116,7 +154,13 @@ export const CARS: CarProfile[] = [
       rims: { material: /^930_rim$/ },
       glass: { material: /^glass$/ },
     },
-    credit: 'Lionsharp Studios · CC-BY-4.0',
+    credit: {
+      title: 'FREE 1975 Porsche 911 (930) Turbo',
+      url: 'https://sketchfab.com/3d-models/free-1975-porsche-911-930-turbo-8568d9d14a994b9cae59499f0dbed21e',
+      author: 'Lionsharp Studios',
+      authorUrl: 'https://sketchfab.com/lionsharp',
+      licence: 'CC BY 4.0',
+    },
   },
   {
     id: 'sls',
@@ -138,6 +182,13 @@ export const CARS: CarProfile[] = [
       calipers: { material: /^Brake_Caliper\./ },
       glass: { material: /^Glass_Windows\./ },
     },
+    credit: {
+      title: '2010 Mercedes SLS AMG',
+      url: 'https://sketchfab.com/3d-models/2010-mercedes-sls-amg-fa3fd5eeea674f37bb03283f2c53d563',
+      author: 'Dave Love SketchFab',
+      authorUrl: 'https://sketchfab.com/Tyler_Dave',
+      licence: 'CC BY 4.0',
+    },
   },
   {
     id: 'amg-one',
@@ -154,7 +205,14 @@ export const CARS: CarProfile[] = [
       rims: { node: /_amgprojone_wheels_0$/ },
       glass: { material: /^amgprojone_clearglass2$/ },
     },
-    credit: 'VTX · CC-BY-4.0',
+    // (the file came from a re-upload under another title; this is the earliest upload of the same mesh)
+    credit: {
+      title: '2022 | Mercedes-AMG Project ONE',
+      url: 'https://sketchfab.com/3d-models/2022-mercedes-amg-project-one-f43c294909a84c7a9f3981111a5aa506',
+      author: 'kevin (ケビン)',
+      authorUrl: 'https://sketchfab.com/sohyalebret',
+      licence: 'CC BY 4.0',
+    },
   },
   {
     id: 'w201',
@@ -171,6 +229,14 @@ export const CARS: CarProfile[] = [
       rims: { material: /^EXT_Rim$/ },
       calipers: { material: /^EXT_Calipers$/ },
       glass: { material: /^EXT_Glass$/ },
+    },
+    // (the same mesh is also up as "1982 Mercedes W201" by the same author)
+    credit: {
+      title: '1984 Mercedes 190E',
+      url: 'https://sketchfab.com/3d-models/1984-mercedes-190e-dc0799500bc4478296514b25a6541282',
+      author: 'Dave Love SketchFab',
+      authorUrl: 'https://sketchfab.com/Tyler_Dave',
+      licence: 'CC BY 4.0',
     },
   },
   {
@@ -193,6 +259,13 @@ export const CARS: CarProfile[] = [
       rims: { material: /Wheel1A/ },
       calipers: { material: /CalliperA_Zone/ },
       glass: { material: /WindowA_Material/ },
+    },
+    credit: {
+      title: '1993 Versus Motorsport Mazda RX-7 Julius 2F2F',
+      url: 'https://sketchfab.com/3d-models/1993-versus-motorsport-mazda-rx-7-julius-2f2f-292a3ae59ced4e479c62f9c18bfaa1bd',
+      author: 'Ddiaz Design',
+      authorUrl: 'https://sketchfab.com/ddiaz-design',
+      licence: 'CC BY-NC-SA 4.0',
     },
   },
 ]

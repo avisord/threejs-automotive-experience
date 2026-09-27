@@ -43,6 +43,7 @@ import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { DEFAULT_CAR_SIZE, type CameraPose } from './camera-moves'
 import type { Stage } from './director'
 import { videoPage } from './ui/video-page'
+import { photoPage, type PhotoCamera } from './ui/photo-page'
 import { createCarPlacement, type CarPlacement } from './placement'
 import { createFreeCamera, type CameraMode } from './free-camera'
 import './style.css'
@@ -850,7 +851,13 @@ function clearLineOfSight(target: THREE.Vector3): void {
 
 /** what preview and export borrow from the app; they give it back as it was */
 const videoStage: Stage = (() => {
-  let saved: { position: THREE.Vector3; target: THREE.Vector3; garage: string; grade: typeof post.settings.grade } | null = null
+  let saved: {
+    position: THREE.Vector3
+    target: THREE.Vector3
+    garage: string
+    grade: typeof post.settings.grade
+    gizmo: boolean
+  } | null = null
   return {
     canvas: renderer.domElement,
     begin(size) {
@@ -859,6 +866,7 @@ const videoStage: Stage = (() => {
         target: controls.target.clone(),
         garage: garageDef.id,
         grade: { ...post.settings.grade },
+        gizmo: placement.helper.visible,
       }
       setPicking(false)
       if (document.pointerLockElement) document.exitPointerLock()
@@ -876,8 +884,9 @@ const videoStage: Stage = (() => {
         controls.target.copy(saved.target)
         controls.update()
       }
+      // (as it was: showing it regardless put the gizmo on the car after every video or photo)
+      placement.helper.visible = saved?.gizmo ?? placement.helper.visible
       saved = null
-      placement.helper.visible = true
       directing = null
       app.classList.remove('is-directing')
       resize()
@@ -921,6 +930,71 @@ const videoStage: Stage = (() => {
     },
   }
 })()
+
+// ─── photos (Menu › Capture › Photo) ────────────────────────────────────────
+/** the free part of the window (left of the panel, or above the sheet) and the lens's focal length there, px */
+function viewLens(): { freeW: number; freeH: number; focal: number } {
+  const w = window.innerWidth
+  const h = window.innerHeight
+  const wide = w > 640
+  const insetY = wide ? 0 : Math.round(h * SHEET_INSET)
+  // (the lens is centred on the free area — see resize(); its fov spans the virtual frame's height)
+  const focal = (h + insetY) / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+  return { freeW: w - (wide ? PANEL_INSET : 0), freeH: h - insetY, focal }
+}
+
+const photoCamera: PhotoCamera = {
+  guide(aspect) {
+    if (directing) return null
+    const { freeW, freeH } = viewLens()
+    const margin = Math.min(28, freeW * 0.04)
+    let width = freeW - 2 * margin
+    let height = width / aspect
+    if (height > freeH - 2 * margin) {
+      height = freeH - 2 * margin
+      width = height * aspect
+    }
+    return { x: (freeW - width) / 2, y: (freeH - height) / 2, width, height }
+  },
+  async take(width, height, supersample, type, quality) {
+    // the guide's view: the same eye and look, a lens as tall as the guide
+    const guide = photoCamera.guide(width / height)!
+    const fov = THREE.MathUtils.radToDeg(2 * Math.atan(guide.height / 2 / viewLens().focal))
+    const position = camera.position.clone()
+    const quaternion = camera.quaternion.clone()
+    const scale = supersample ? 2 : 1
+    videoStage.begin({ width: width * scale, height: height * scale })
+    try {
+      camera.position.copy(position)
+      camera.quaternion.copy(quaternion)
+      camera.fov = baseFov = fov
+      camera.updateProjectionMatrix()
+      camera.updateMatrixWorld()
+      bay?.configurator.update()
+      // a few frames first: auto exposure meters the frame it grades, the new size compiles nothing
+      for (let i = 0; i < 3; i++) post.render(0)
+      post.render(0)
+      // read in the same task as the draw (the drawing buffer isn't preserved past it)
+      const canvas = renderer.domElement
+      let source: HTMLCanvasElement = canvas
+      if (supersample) {
+        source = document.createElement('canvas')
+        source.width = width
+        source.height = height
+        const ctx = source.getContext('2d')!
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.drawImage(canvas, 0, 0, width, height)
+      }
+      return await new Promise<Blob>((resolve, reject) =>
+        source.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('the browser could not encode the image'))), type, quality),
+      )
+    } finally {
+      await videoStage.end()
+    }
+  },
+  subject: () => `${bay?.id ?? 'garage'}-${garageDef.id}`,
+}
 
 // ─── part roles (Menu › Car › Part roles) ───────────────────────────────────
 /** roles as being edited on the page; applied by reloading the car */
@@ -1051,7 +1125,7 @@ const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
     render: (body, nav) =>
-      body.append(menuList(pages, ['garage', 'collection', 'car', 'roles', 'parts', 'lights', 'video', 'settings'], nav)),
+      body.append(menuList(pages, ['garage', 'collection', 'car', 'roles', 'parts', 'lights', 'capture', 'settings'], nav)),
   },
   garage: garagePage({
     current: () => garageDef.id,
@@ -1159,9 +1233,22 @@ const pages: Record<string, Page> = {
     hint: 'Graphics, display',
     render: (body, nav) => body.append(menuList(pages, ['graphics', 'display'], nav)),
   },
+  capture: {
+    title: 'Capture',
+    hint: 'Photos and videos of the car',
+    render: (body, nav) => body.append(menuList(pages, ['photo', 'video'], nav)),
+  },
+  photo: photoPage(app, photoCamera),
   video: videoPage(app, () => videoStage, () => garageDef.id),
   graphics: graphicsPage(post),
   display: displayPage(post),
+}
+// Video used to sit on the menu itself: a saved path to it goes through Capture now
+try {
+  const path = JSON.parse(localStorage.getItem('garage.panel-path.v1') ?? 'null') as string[] | null
+  if (path?.[1] === 'video') localStorage.setItem('garage.panel-path.v1', JSON.stringify(['menu', 'capture', ...path.slice(1)]))
+} catch {
+  // default path
 }
 const panelNav: Nav = mountPanel(app, pages, 'menu')
 

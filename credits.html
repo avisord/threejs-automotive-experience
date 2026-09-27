@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Credits — tstshaders</title>
+    <meta name="description" content="The 3D car models, textures and open-source libraries behind the tstshaders car showroom, with their authors and licences." />
+    <link rel="canonical" href="https://tstshaders.vercel.app/credits.html" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="color-scheme" content="dark" />
+    <style>
+      :root {
+        --bg: #07090d;
+        --panel: #0e1117;
+        --line: rgba(255, 255, 255, 0.08);
+        --text: #e8ebf0;
+        --muted: #9aa3b0;
+        --accent: #35e0ff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      a {
+        color: var(--accent);
+      }
+      .wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 56px 20px 72px;
+      }
+      nav {
+        margin-bottom: 32px;
+        font-size: 14px;
+      }
+      nav a {
+        margin-right: 16px;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(30px, 5vw, 44px);
+        line-height: 1.1;
+      }
+      h2 {
+        margin: 48px 0 12px;
+        padding-top: 32px;
+        border-top: 1px solid var(--line);
+        font-size: 22px;
+      }
+      p {
+        margin: 0 0 12px;
+        color: var(--muted);
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 12px;
+        margin: 20px 0;
+        padding: 0;
+        list-style: none;
+      }
+      .cards li {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .cards strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+        font-size: 16px;
+      }
+      .cards span {
+        display: block;
+      }
+      .licence {
+        display: inline-block;
+        margin-top: 8px;
+        padding: 2px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        font-size: 12px;
+      }
+      ul.plain {
+        padding-left: 20px;
+        color: var(--muted);
+      }
+      ul.plain li {
+        margin: 6px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <nav><a href="/">← Home</a><a href="/garage.html">Open the garage</a></nav>
+      <h1>Credits</h1>
+      <p>
+        The showroom is built on other people's generous work. Here's everything it uses, who made it, and the licence
+        it's shared under.
+      </p>
+
+      <h2>Car models</h2>
+      <p>
+        All from <a href="https://sketchfab.com">Sketchfab</a>. We changed them: compressed the files (meshopt geometry,
+        WebP textures), set their orientation, scale and glass, and let you repaint, re-material and move their parts.
+      </p>
+      <ul class="cards" id="cars"></ul>
+      <p>
+        Models under CC BY-NC-SA are used non-commercially, and our adapted versions of them are shared under the same
+        licence. Car makes, models and designs are trademarks of their owners; this is a non-commercial fan project, not
+        affiliated with or endorsed by any of them.
+      </p>
+      <p>Models you upload yourself stay in your browser and are never sent anywhere.</p>
+
+      <h2>Textures</h2>
+      <p>
+        Photographed surfaces from <a href="https://polyhaven.com">Poly Haven</a>, released under
+        <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a> — free to use, no credit required, credited
+        with thanks.
+      </p>
+      <ul class="plain">
+        <li><a href="https://polyhaven.com/a/concrete_floor_worn_001">Concrete Floor Worn 001</a> — Dimitrios Savva, Rico Cilliers</li>
+        <li><a href="https://polyhaven.com/a/concrete">Concrete</a> — Rob Tuytel</li>
+        <li><a href="https://polyhaven.com/a/japanese_cedar_bark">Japanese Cedar Bark</a> — Charlotte Baglioni</li>
+        <li><a href="https://polyhaven.com/a/sparse_grass">Sparse Grass</a> — Amal Kumar</li>
+        <li><a href="https://polyhaven.com/a/dry_river_pebbles">Dry River Pebbles</a> — Amal Kumar</li>
+        <li><a href="https://polyhaven.com/a/cliff_side">Cliff Side</a> — James Ray Cock, Jenelle van Heerden, Dario Barresi</li>
+        <li><a href="https://polyhaven.com/a/coast_sand_05">Coast Sand 05</a> — Rob Tuytel, Dario Barresi</li>
+        <li><a href="https://polyhaven.com/a/palm_tree_bark">Palm Tree Bark</a> — Dimitrios Savva, Rico Cilliers</li>
+        <li><a href="https://polyhaven.com/a/dark_wood">Dark Wood</a> — Dario Barresi, Dimitrios Savva, Rico Cilliers</li>
+        <li><a href="https://polyhaven.com/a/rock_wall_02">Rock Wall 02</a> — Rob Tuytel</li>
+      </ul>
+
+      <h2>Software</h2>
+      <p>Open-source libraries, each under its own licence (full texts in their repositories):</p>
+      <ul class="plain">
+        <li><a href="https://github.com/mrdoob/three.js">three.js</a> — MIT</li>
+        <li><a href="https://github.com/pmndrs/postprocessing">postprocessing</a> — Zlib</li>
+        <li><a href="https://github.com/N8python/n8ao">N8AO</a> — ISC</li>
+        <li><a href="https://github.com/gkjohnson/three-gpu-pathtracer">three-gpu-pathtracer</a> — MIT</li>
+        <li><a href="https://github.com/gkjohnson/three-mesh-bvh">three-mesh-bvh</a> — MIT</li>
+        <li><a href="https://github.com/Vanilagy/mediabunny">Mediabunny</a> — MPL-2.0 (used unmodified; source at the link)</li>
+        <li><a href="https://github.com/dgreenheck/ez-tree">EZ-Tree</a> by Daniel Greenheck — MIT</li>
+      </ul>
+    </div>
+    <script type="module" src="/src/credits.ts"></script>
+  </body>
+</html>

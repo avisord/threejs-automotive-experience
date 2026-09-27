@@ -59,7 +59,17 @@ export function collectionPage(state: CollectionState): Page {
           el('span', 'cfg-car-tag', car.tag),
         )
         if (active || loading) card.append(el('span', 'cfg-car-badge', loading ? 'Loading…' : 'In the bay'))
-        if (car.credit) card.append(el('span', 'cfg-car-credit', car.credit))
+        if (car.credit) {
+          // (a link can't sit inside the card's button: a span that opens the model's page)
+          const { author, licence, url, title } = car.credit
+          const credit = el('span', 'cfg-car-credit is-link', `${author} · ${licence}`)
+          credit.title = `“${title}” on Sketchfab`
+          credit.addEventListener('click', (e) => {
+            e.stopPropagation()
+            window.open(url, '_blank', 'noopener')
+          })
+          card.append(credit)
+        }
         card.addEventListener('click', () => {
           if (active || loading) return
           state.select(car.id)
@@ -68,6 +78,12 @@ export function collectionPage(state: CollectionState): Page {
         grid.append(card)
       }
       body.append(grid)
+      const credits = el('p', 'cfg-note')
+      const link = el('a', '', 'Model credits and licences')
+      link.href = '/credits.html'
+      link.target = '_blank'
+      credits.append(link)
+      body.append(credits)
     },
   }
 }
