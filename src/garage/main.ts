@@ -25,6 +25,7 @@ import { DEFAULT_CAR_SIZE, type CameraPose } from './camera-moves'
 import type { Stage } from './director'
 import { videoPage } from './ui/video-page'
 import { createCarPlacement, type CarPlacement } from './placement'
+import { createFreeCamera, type CameraMode } from './free-camera'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -74,11 +75,95 @@ controls.minDistance = 3.4
 controls.maxDistance = 100
 controls.update()
 
+// ─── walk / fly: the other camera modes (HUD bottom left, V cycles) ─────────
+const carBox = new THREE.Box3()
+const freeCam = createFreeCamera({
+  camera,
+  dom: renderer.domElement,
+  bounds: () => room.bounds,
+  groundAt,
+  obstacles: () => (bay ? [carBox.copy(bay.box).translate(bay.root.position)] : []),
+  canLock: () => !picking && !placement.active, // those need the pointer for clicks and the gizmo
+})
+
+/** three-mesh-bvh, fetched the first time the camera leaves the orbit */
+let meshBVH: typeof import('three-mesh-bvh') | null = null
+let groundCache: { room: Room; meshes: THREE.Mesh[] } | null = null
+const groundRay = new THREE.Raycaster()
+const groundFrom = new THREE.Vector3()
+const groundNormal = new THREE.Vector3()
+const groundBox = new THREE.Box3()
+const DOWN = new THREE.Vector3(0, -1, 0)
+/**
+ * What the walker can stand on: the room's plain meshes within reach of its bounds, each
+ * with a BVH (a terrain is hundreds of thousands of triangles). Instanced grass and trees,
+ * mirrors (a pool, the lake) and meshes with raycasting switched off don't count — except
+ * `userData.ground` ones (terrains skip raycasts so the camera's sight test stays cheap).
+ */
+function groundMeshes(): THREE.Mesh[] {
+  if (groundCache?.room === room) return groundCache.meshes
+  const bvh = meshBVH!
+  const reach = room.bounds.clone().expandByScalar(2)
+  reach.min.y = -Infinity
+  const meshes: THREE.Mesh[] = []
+  room.group.updateMatrixWorld()
+  room.group.traverseVisible((obj) => {
+    const mesh = obj as THREE.Mesh & { isReflector?: boolean }
+    if (!mesh.isMesh || (mesh as THREE.InstancedMesh).isInstancedMesh || mesh.isReflector) return
+    if (mesh.raycast !== THREE.Mesh.prototype.raycast && !mesh.userData.ground) return
+    const geometry = mesh.geometry
+    if (!geometry.boundingBox) geometry.computeBoundingBox()
+    if (!groundBox.copy(geometry.boundingBox!).applyMatrix4(mesh.matrixWorld).intersectsBox(reach)) return
+    // indirect: leaves the geometry's index as it is
+    geometry.boundsTree ??= new bvh.MeshBVH(geometry, { indirect: true, maxDepth: 64 })
+    meshes.push(mesh)
+  })
+  groundCache = { room, meshes }
+  return meshes
+}
+const groundHits: THREE.Intersection[] = []
+/** height of the first floor-like surface below (x, fromY, z) */
+function groundAt(x: number, z: number, fromY: number): number | null {
+  if (!meshBVH) return null
+  groundRay.set(groundFrom.set(x, fromY, z), DOWN)
+  groundRay.far = 1000
+  groundHits.length = 0
+  // the BVH's raycast called directly: the meshes' own raycast stays as the room set it
+  for (const mesh of groundMeshes()) meshBVH.acceleratedRaycast.call(mesh, groundRay, groundHits)
+  groundHits.sort((a, b) => a.distance - b.distance)
+  for (const hit of groundHits) {
+    if (!hit.face) continue
+    groundNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld)
+    if (Math.abs(groundNormal.y) > 0.35) return hit.point.y // not a wall's edge
+  }
+  return null
+}
+
+/** the orbit camera's place while walking or flying — the orbit comes back to it */
+let orbitHome: THREE.Vector3 | null = null
+async function setCameraMode(mode: CameraMode): Promise<void> {
+  if (mode === freeCam.mode) return
+  if (mode !== 'orbit' && !meshBVH) {
+    meshBVH = await import('three-mesh-bvh')
+    if (mode === freeCam.mode) return
+  }
+  if (freeCam.mode === 'orbit') orbitHome = camera.position.clone()
+  freeCam.setMode(mode)
+  if (mode === 'orbit' && orbitHome) {
+    camera.position.copy(orbitHome)
+    controls.update() // looks at the car again
+  }
+  controls.enabled = mode === 'orbit'
+  syncCameraHud()
+  noteActivity()
+  invalidate(2)
+}
+
 // ─── keyboard zoom: + / - ───────────────────────────────────────────────────
 const KEY_ZOOM_STEP = 0.18 // ln(distance ratio) per press, ≈ 20%
 let zoomPending = 0 // zoom still to apply, eased out over a few frames
 window.addEventListener('keydown', (e) => {
-  if (e.ctrlKey || e.metaKey || e.altKey) return // leave browser page zoom alone
+  if (e.ctrlKey || e.metaKey || e.altKey || freeCam.mode !== 'orbit') return // leave browser page zoom alone
   if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') zoomPending -= KEY_ZOOM_STEP
   else if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') zoomPending += KEY_ZOOM_STEP
   else return
@@ -389,10 +474,44 @@ function applyQuality(): void {
 }
 
 // ─── hud ────────────────────────────────────────────────────────────────────
+const HINTS: Record<CameraMode, string> = {
+  orbit: 'drag to orbit · scroll or +/− to zoom',
+  walk: 'click to look · wasd walk · shift runs · esc frees the mouse',
+  fly: 'click to look · wasd · space up · shift/ctrl down · scroll: speed',
+}
+const PICK_HINT = 'click a part to select · shift+click to add · alt+click picks behind · esc clears'
 const hint = document.createElement('div')
 hint.className = 'hint'
-hint.textContent = 'drag to orbit · scroll or +/− to zoom'
+hint.textContent = HINTS.orbit
 app.appendChild(hint)
+
+const CAMERA_MODES: CameraMode[] = ['orbit', 'walk', 'fly']
+const MODE_LABEL: Record<CameraMode, string> = { orbit: 'Orbit', walk: 'Walk', fly: 'Fly' }
+const cameraHud = document.createElement('div')
+cameraHud.className = 'cam-modes'
+for (const mode of CAMERA_MODES) {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.dataset.mode = mode
+  button.textContent = MODE_LABEL[mode]
+  button.title = 'V switches camera'
+  button.addEventListener('click', () => void setCameraMode(mode))
+  cameraHud.append(button)
+}
+app.appendChild(cameraHud)
+cameraHud.querySelector('[data-mode="orbit"]')!.classList.add('is-on') // syncCameraHud reads `picking`, declared below
+function syncCameraHud(): void {
+  for (const button of cameraHud.querySelectorAll<HTMLButtonElement>('button')) {
+    button.classList.toggle('is-on', button.dataset.mode === freeCam.mode)
+  }
+  hint.textContent = picking ? PICK_HINT : HINTS[freeCam.mode]
+}
+window.addEventListener('keydown', (e) => {
+  const t = e.target as HTMLElement
+  if (e.code !== 'KeyV' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || directing) return
+  if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return
+  void setCameraMode(CAMERA_MODES[(CAMERA_MODES.indexOf(freeCam.mode) + 1) % CAMERA_MODES.length])
+})
 
 const fpsEl = document.createElement('div')
 fpsEl.className = 'fps'
@@ -434,6 +553,8 @@ interface Bay {
   lamps: LampSystem
   /** width, height, length — what camera moves frame */
   size: THREE.Vector3
+  /** its bounds where it was loaded, at the origin (walk/fly keep out of it) */
+  box: THREE.Box3
 }
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
@@ -444,7 +565,7 @@ const placement = createCarPlacement({
   dom: renderer.domElement,
   scene,
   bounds: () => room.bounds,
-  dragging: (on) => (controls.enabled = !on), // the drag is the gizmo's, not an orbit
+  dragging: (on) => (controls.enabled = !on && freeCam.mode === 'orbit'), // the drag is the gizmo's, not an orbit
   changed: () => invalidate(),
   moved() {
     // the car's lamps bake their shadow maps once — re-bake them where the car now stands
@@ -468,9 +589,11 @@ function carCentre(out = new THREE.Vector3()): THREE.Vector3 {
 /** bring the orbit round to the car, keeping the camera's angle and distance */
 function centreOnCar(): void {
   const centre = carCentre()
-  camera.position.add(offset.subVectors(centre, controls.target))
+  // walking or flying: the orbit waits where it was, and follows the car there
+  const orbiting = freeCam.mode === 'orbit'
+  ;(orbiting ? camera.position : orbitHome)?.add(offset.subVectors(centre, controls.target))
   controls.target.copy(centre)
-  controls.update()
+  if (orbiting) controls.update()
   invalidate()
 }
 
@@ -526,7 +649,8 @@ async function showCar(id: string): Promise<void> {
     }
     clearBay()
     scene.add(root)
-    const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3())
+    const box = new THREE.Box3().setFromObject(root)
+    const size = box.getSize(new THREE.Vector3())
     const shadow = bakeContactShadow(renderer, root, { width: size.x + 2.4, depth: size.z + 2.4, height: 0.9 }) // room for the blur
     scene.add(shadow)
     room.floorLayers.push(shadow)
@@ -543,7 +667,7 @@ async function showCar(id: string): Promise<void> {
       post.refreshGlow()
       traceSceneChanged()
     })
-    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size }
+    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size, box }
     applyDaylight()
     placement.attach({ id: profile.id, root, shadow, size }) // its saved place (the shadow was baked at the origin)
     centreOnCar()
@@ -690,6 +814,7 @@ const videoStage: Stage = (() => {
         grade: { ...post.settings.grade },
       }
       setPicking(false)
+      if (document.pointerLockElement) document.exitPointerLock()
       if (tracedShown) hideTraced()
       placement.helper.visible = false // never in a video
       directing = { size }
@@ -801,12 +926,11 @@ try {
   // no storage — default car
 }
 // ─── picking parts in 3D (Menu › Parts) ─────────────────────────────────────
-const HINT = 'drag to orbit · scroll or +/− to zoom'
-const PICK_HINT = 'click a part to select · shift+click to add · alt+click picks behind · esc clears'
 function setPicking(on: boolean): void {
   picking = on
+  if (on && document.pointerLockElement) document.exitPointerLock() // the pointer is needed to pick
   renderer.domElement.style.cursor = on ? 'crosshair' : ''
-  hint.textContent = on ? PICK_HINT : HINT
+  syncCameraHud()
   if (!on) bay?.groups.highlight('hover', [])
   invalidate()
 }
@@ -891,6 +1015,9 @@ const garage: {
   invalidate: typeof invalidate
   /** the path tracer while it's switched on (Settings › Graphics) */
   readonly tracer: PathTracer | null
+  /** orbit, walk or fly: garage.setCameraMode('fly') */
+  setCameraMode: typeof setCameraMode
+  readonly cameraMode: CameraMode
 } = {
   scene,
   camera,
@@ -906,6 +1033,10 @@ const garage: {
   placement,
   get tracer() {
     return tracer
+  },
+  setCameraMode,
+  get cameraMode() {
+    return freeCam.mode
   },
 }
 declare global {
@@ -1040,7 +1171,8 @@ function frame(timestamp: number): void {
 
   timer.update(timestamp)
   const dt = Math.min(timer.getDelta(), 0.05)
-  if (updateControls(dt)) {
+  const orbiting = freeCam.mode === 'orbit'
+  if (orbiting ? updateControls(dt) : freeCam.update(dt)) {
     invalidate() // includes damping settling after a drag
     noteActivity()
   }
@@ -1052,10 +1184,15 @@ function frame(timestamp: number): void {
 
   bay?.configurator.update()
   room.update?.(dt)
-  fitCameraInRoom()
+  if (orbiting) fitCameraInRoom()
+  else if (camera.fov !== baseFov) {
+    // walking and flying stay inside the room: the lens as set
+    camera.fov = baseFov
+    camera.updateProjectionMatrix()
+  }
   if (tracing) traceStep()
   post.render(dt)
-  restoreOrbitCamera()
+  if (orbiting) restoreOrbitCamera()
   framesDrawn++
 }
 

@@ -218,6 +218,7 @@ export function createTerrain(cover: (x: number, z: number) => number = () => 0)
   grass.maps.roughnessMap.dispose() // the ground is fully rough; only colour detail and relief are used
   terrain.name = 'terrain'
   terrain.castShadow = true // hills shade the ground behind them (far shadow map)
+  terrain.userData.ground = true // what the walking camera stands on, raycasts or not
   return { mesh: noRaycast(terrain), ready: grass.ready }
 }
 
