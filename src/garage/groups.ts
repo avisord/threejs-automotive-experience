@@ -85,12 +85,15 @@ export function createGroupEditor(
   /** `materials` is true when what the car is made of changed, false for overlays and selection */
   onChange: (materials: boolean) => void,
 ): GroupEditor {
+  // members are saved by mesh key (unique — uploads repeat names or have none); older saves by name
   const byName = new Map<string, THREE.Mesh>()
+  const memberId = (m: THREE.Mesh): string => m.userData.partKey ?? m.name
   const pickable: THREE.Mesh[] = []
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh
     if (!mesh.isMesh || mesh.userData.overlay) return
-    byName.set(mesh.name, mesh)
+    if (!byName.has(mesh.name)) byName.set(mesh.name, mesh)
+    if (mesh.userData.partKey) byName.set(mesh.userData.partKey, mesh)
     pickable.push(mesh)
   })
 
@@ -113,7 +116,7 @@ export function createGroupEditor(
     const data: SavedGroup[] = groups.map((g) => ({
       id: g.id,
       name: g.name,
-      members: [...g.members].map((m) => m.name),
+      members: [...g.members].map(memberId),
       material: g.material,
     }))
     try {

@@ -19,6 +19,8 @@ import {
   type UploadRecord,
 } from './uploads'
 import { uploadPage } from './ui/upload-page'
+import { createRoleTint, loadRoles, partKey, profileWithRoles, saveRoles, type HiddenPart, type RoleId, type RoleMap } from './roles'
+import { rolesPage } from './ui/roles-page'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
 import { LOOKS, REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
@@ -97,7 +99,7 @@ const freeCam = createFreeCamera({
   camera,
   dom: renderer.domElement,
   groundAt,
-  obstacles: () => (bay ? [carBox.copy(bay.box).translate(bay.root.position)] : []),
+  obstacles: () => (bay ? [carBox.copy(bay.box).applyMatrix4(bay.root.matrixWorld)] : []), // moved and turned
   canLock: () => !picking && !placement.active, // those need the pointer for clicks and the gizmo
 })
 
@@ -565,6 +567,8 @@ interface Bay {
   size: THREE.Vector3
   /** its bounds where it was loaded, at the origin (walk/fly keep out of it) */
   box: THREE.Box3
+  /** what each mesh is (Menu › Car › Part roles): saved by the user, or guessed */
+  roles: { map: RoleMap; saved: boolean; hidden: HiddenPart[] }
 }
 let loadingId: string | null = null
 const CAR_KEY = 'garage.car.v1'
@@ -627,6 +631,8 @@ function frameLength(length: number): void {
 /** take the car out of the bay and free it */
 function clearBay(): void {
   if (!bay) return
+  roleTint.set(null) // overlays on the car's meshes
+  roleDraft = null
   placement.attach(null)
   scene.remove(bay.root, bay.shadow)
   room.floorLayers.splice(room.floorLayers.indexOf(bay.shadow), 1)
@@ -668,7 +674,11 @@ async function showCar(id: string): Promise<void> {
   loaderFill.style.transform = 'scaleX(0)'
   panelNav?.refresh()
   try {
-    const root = await loadCar(profile, (f) => (loaderFill.style.transform = `scaleX(${f})`))
+    const savedRoles = loadRoles(profile.id)
+    const loaded = await loadCar(profile, (f) => (loaderFill.style.transform = `scaleX(${f})`), savedRoles, !!profile.open)
+    const root = loaded.root
+    // roles decide what's painted and what glows once saved — or always, for an upload
+    const dressed = savedRoles || profile.open ? profileWithRoles(profile, loaded.roles) : profile
     if (loadingId !== profile.id) {
       disposeCar(root) // the user picked another car meanwhile
       return
@@ -680,7 +690,7 @@ async function showCar(id: string): Promise<void> {
     const shadow = bakeContactShadow(renderer, root, { width: size.x + 2.4, depth: size.z + 2.4, height: 0.9 }) // room for the blur
     scene.add(shadow)
     room.floorLayers.push(shadow)
-    const configurator = createConfigurator(root, profile, traceSceneChanged)
+    const configurator = createConfigurator(root, dressed, traceSceneChanged)
     applyAnisotropy(root)
     const groups = createGroupEditor(root, profile, configurator.carSpace, (materials) => {
       scheduleGhosts()
@@ -689,12 +699,13 @@ async function showCar(id: string): Promise<void> {
       if (materials) traceSceneChanged()
     })
     groups.setOverlaysVisible(false) // the Parts page shows them
-    const lamps = createLampSystem(root, profile, () => {
+    const lamps = createLampSystem(root, dressed, () => {
       invalidate()
       post.refreshGlow()
       traceSceneChanged()
     })
-    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size, box }
+    const roles = { map: loaded.roles, saved: !!savedRoles, hidden: loaded.hidden }
+    bay = { id: profile.id, root, shadow, configurator, groups, lamps, size, box, roles }
     applyDaylight()
     placement.attach({ id: profile.id, root, shadow, size }) // its saved place (the shadow was baked at the origin)
     frameLength(Math.max(size.x, size.z))
@@ -876,11 +887,11 @@ const videoStage: Stage = (() => {
     },
     draw(pose: CameraPose, dt, black) {
       baseFov = pose.fov ?? post.settings.display.fov // the room clamps widen from this lens
-      // moves are laid out around a car at the origin: carry them to wherever it's been moved
-      const at = bay?.root.position
-      if (at) {
-        pose.position.add(at)
-        pose.target.add(at)
+      // moves are laid out around a car at the origin, nose to +z: carry them to wherever it's been moved and turned
+      if (bay) {
+        bay.root.updateMatrixWorld()
+        pose.position.applyMatrix4(bay.root.matrixWorld)
+        pose.target.applyMatrix4(bay.root.matrixWorld)
       }
       camera.position.copy(pose.position)
       controls.target.copy(pose.target)
@@ -902,6 +913,44 @@ const videoStage: Stage = (() => {
     },
   }
 })()
+
+// ─── part roles (Menu › Car › Part roles) ───────────────────────────────────
+/** roles as being edited on the page; applied by reloading the car */
+let roleDraft: RoleMap | null = null
+let roleTintOn = true
+let rolesShowing = false
+const roleTint = createRoleTint()
+function draftRoles(): RoleMap {
+  if (!roleDraft) roleDraft = { ...(bay?.roles.map ?? {}) }
+  return roleDraft
+}
+function rolesDirty(): boolean {
+  if (!roleDraft || !bay) return false
+  const saved = bay.roles.map
+  return Object.keys(roleDraft).some((k) => roleDraft![k] !== saved[k])
+}
+/** role colours over the car while the page shows them (not on ghosted or hidden parts) */
+function syncRoleTint(): void {
+  if (!bay || !rolesShowing || !roleTintOn) {
+    roleTint.set(null)
+    return invalidate()
+  }
+  const draft = draftRoles()
+  const { ghosts, hidden } = bay.groups.xray
+  const tints = new Map<THREE.Mesh, RoleId>()
+  for (const mesh of bay.groups.pickable) {
+    const role = draft[partKey(mesh) ?? '']
+    if (role && !ghosts.has(mesh) && !hidden.has(mesh)) tints.set(mesh, role)
+  }
+  roleTint.set(tints)
+  invalidate()
+}
+function applyRoles(): void {
+  if (!bay || !roleDraft) return
+  saveRoles(bay.id, roleDraft)
+  roleDraft = null
+  void showCar(bay.id)
+}
 
 // ─── uploads: the user's own models (Menu › Collection › Upload) ─────────────
 /** a model just parsed at import — the bay takes it instead of parsing the files again */
@@ -992,7 +1041,7 @@ const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
     render: (body, nav) =>
-      body.append(menuList(pages, ['garage', 'collection', 'car', 'parts', 'lights', 'video', 'settings'], nav)),
+      body.append(menuList(pages, ['garage', 'collection', 'car', 'roles', 'parts', 'lights', 'video', 'settings'], nav)),
   },
   garage: garagePage({
     current: () => garageDef.id,
@@ -1032,6 +1081,48 @@ const pages: Record<string, Page> = {
   }),
   car: carPage(() => bay?.configurator, bayPlaceholder, placement),
   lights: lightsPage(() => bay?.lamps, bayPlaceholder),
+  roles: rolesPage({
+    editor: () => bay?.groups,
+    roleOf: (mesh) => draftRoles()[partKey(mesh) ?? ''] ?? 'other',
+    hiddenAtLoad: () => (bay?.roles.hidden ?? []).filter((h) => draftRoles()[h.key] === 'hidden'), // ↺ takes one off
+    curated: () => !!bay && !bay.roles.saved && !bay.configurator.profile.open,
+    upload: () => !!bay?.configurator.profile.open,
+    dirty: rolesDirty,
+    assign(meshes, role) {
+      const draft = draftRoles()
+      for (const m of meshes) draft[partKey(m) ?? ''] = role
+      // a hidden part leaves the view now (for real once applied)
+      if (role === 'hidden') bay?.groups.xray.hide(meshes)
+      syncRoleTint()
+    },
+    unhide(key) {
+      draftRoles()[key] = 'other'
+    },
+    apply: applyRoles,
+    discard() {
+      roleDraft = null
+      bay?.groups.xray.unhideAll()
+      syncRoleTint()
+    },
+    reset() {
+      if (!bay) return
+      saveRoles(bay.id, null)
+      roleDraft = null
+      void showCar(bay.id)
+    },
+    picking: () => picking,
+    setPicking,
+    tint: () => roleTintOn,
+    setTint(on) {
+      roleTintOn = on
+      syncRoleTint()
+    },
+    showing(on) {
+      rolesShowing = on
+      syncRoleTint()
+    },
+    placeholder: bayPlaceholder,
+  }),
   parts: partsPage({
     editor: () => bay?.groups,
     picking: () => picking,
@@ -1234,7 +1325,8 @@ function updateGhosts(): void {
   bay!.root.updateMatrixWorld()
   const eye = camera.getWorldPosition(new THREE.Vector3())
   editor.xray.setGhosts(findOccluders(targets, candidates, eye, castMesh))
-  invalidate()
+  if (rolesShowing) syncRoleTint() // tints stay off ghosted parts
+  else invalidate()
 }
 function cameraMovedForPicking(): void {
   pickCycle = null

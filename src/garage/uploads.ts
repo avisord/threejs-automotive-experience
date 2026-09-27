@@ -186,7 +186,7 @@ export function applyTurn(wrapper: THREE.Object3D, turn: { yaw: number; pitch: n
   wrapper.rotation.set(turn.pitch, turn.yaw, turn.roll, 'YXZ')
 }
 
-interface Wheel {
+export interface Wheel {
   centre: THREE.Vector3
   diameter: number
   /** the axle's direction: the disc's thin side */
@@ -198,7 +198,7 @@ interface Wheel {
  * thinner) of a wheel's share of the model's size. Tyre, rim and hub of one wheel
  * are merged by position; the biggest set of matching discs (≥ 2) wins.
  */
-function findWheels(model: THREE.Object3D, box: THREE.Box3): Wheel[] {
+export function findWheels(model: THREE.Object3D, box: THREE.Box3): Wheel[] {
   const longest = Math.max(...box.getSize(new THREE.Vector3()).toArray())
   const found: Wheel[] = []
   const b = new THREE.Box3()

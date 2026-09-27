@@ -5,6 +5,8 @@ import type { PartId } from './configurator'
 export interface PartMatch {
   material?: RegExp
   node?: RegExp
+  /** mesh keys (`roles.ts`: the mesh's order in the file) — how user-set roles pick meshes */
+  keys?: ReadonlySet<string>
 }
 
 /** a material the export marks opaque (or fully transparent) that should read as tinted glass */
@@ -204,7 +206,8 @@ export const carTitle = (c: CarProfile) => `${c.make} ${c.model}`
 
 /** does this mesh fall under `m`? checks the material and the mesh's node chain up to the car root */
 export function matches(m: PartMatch, mesh: THREE.Mesh, root: THREE.Object3D): boolean {
-  const material = mesh.material as THREE.Material
+  const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material
+  if (m.keys?.has(mesh.userData.partKey)) return true
   if (m.material && m.material.test(material.name)) return true
   if (m.node) {
     for (let o: THREE.Object3D | null = mesh; o && o !== root; o = o.parent) {

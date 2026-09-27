@@ -3,6 +3,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { matches, type CarProfile, type GlassFix } from './cars'
 import { applyTurn } from './uploads'
+import { applyRoles, keyMeshes, suggestRoles, type HiddenPart, type RoleMap } from './roles'
+import { meshLabel } from './groups'
 
 // Every model in public/models is optimised from its Sketchfab export (meshopt + 2k webp) with:
 //   gltf-transform optimize in.glb out.glb --compress meshopt --texture-compress webp --texture-size 2048 \
@@ -22,7 +24,26 @@ const SEE_THROUGH = /glass|window|windscreen|vetro|lens|clear|alpha|trans|refrac
  * materials, and sit it on the floor centred on the origin, nose toward +z.
  * Returns a clean root the caller can move without touching the car's own offset.
  */
-export async function loadCar(profile: CarProfile, onProgress?: (fraction: number) => void): Promise<THREE.Group> {
+export interface LoadedCar {
+  root: THREE.Group
+  /** every mesh's role: the saved ones, or guessed */
+  roles: RoleMap
+  /** meshes left out by role, for the roles page to list */
+  hidden: HiddenPart[]
+}
+
+/**
+ * `roles`: saved roles, put into effect before the car is measured (hidden parts
+ * don't count toward its size). Without them roles are guessed once the car is in
+ * car space; `applyGuess` puts the guess into effect too (uploads — a built-in's
+ * look stays as its profile has it until roles are saved for it).
+ */
+export async function loadCar(
+  profile: CarProfile,
+  onProgress?: (fraction: number) => void,
+  saved: RoleMap | null = null,
+  applyGuess = false,
+): Promise<LoadedCar> {
   let car: THREE.Object3D
   if (profile.open) {
     // an upload: turned on a wrapper, whatever transform the file's own root carries
@@ -35,6 +56,7 @@ export async function loadCar(profile: CarProfile, onProgress?: (fraction: numbe
     car = gltf.scene
   }
   car.name = profile.id
+  keyMeshes(car) // before anything is dropped: keys stay put from load to load
 
   const doomed: THREE.Mesh[] = []
   car.traverse((obj) => {
@@ -53,6 +75,7 @@ export async function loadCar(profile: CarProfile, onProgress?: (fraction: numbe
     mesh.geometry.dispose()
   }
   bakeSkinnedMeshes(car)
+  const hidden = saved ? applyRoles(car, saved, meshLabel) : []
   // the body blocks its own lamps' light (glass lets it through)
   car.traverse((obj) => {
     const mesh = obj as THREE.Mesh
@@ -81,10 +104,16 @@ export async function loadCar(profile: CarProfile, onProgress?: (fraction: numbe
   const center = box.getCenter(new THREE.Vector3())
   car.position.set(car.position.x - center.x, car.position.y - box.min.y, car.position.z - center.z)
 
+  let roles = saved
+  if (!roles) {
+    roles = suggestRoles(car, profile)
+    if (applyGuess) applyRoles(car, roles, meshLabel) // a guess hides nothing, so the measurements stand
+  }
+
   const root = new THREE.Group()
   root.name = `${profile.id}-root`
   root.add(car)
-  return root
+  return { root, roles, hidden }
 }
 
 /**

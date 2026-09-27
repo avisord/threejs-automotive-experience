@@ -3,7 +3,7 @@ import { createPaintMaterial, type PaintMaterial } from './paint'
 import type { MaterialId } from './materials'
 import { matches, type CarProfile } from './cars'
 
-export type PartId = 'body' | 'wing' | 'rims' | 'calipers' | 'cage' | 'glass'
+export type PartId = 'body' | 'wing' | 'rims' | 'tyres' | 'calipers' | 'cage' | 'interior' | 'trim' | 'glass'
 
 export interface PartConfig {
   /** entry from the material library */
@@ -28,8 +28,11 @@ export const PART_DEFS: PartDef[] = [
   { id: 'body', label: 'Body' },
   { id: 'wing', label: 'Rear wing' },
   { id: 'rims', label: 'Rims' },
+  { id: 'tyres', label: 'Tyres' },
   { id: 'calipers', label: 'Brake calipers' },
   { id: 'cage', label: 'Roll cage' },
+  { id: 'interior', label: 'Interior' },
+  { id: 'trim', label: 'Other parts' },
   { id: 'glass', label: 'Window tint' },
 ]
 
@@ -48,6 +51,9 @@ export const DEFAULT_CONFIG: CarConfig = {
   rims: part({ colorA: '#1b1d21' }),
   calipers: part({ colorA: '#c8102e' }),
   cage: part({ colorA: '#15171b' }),
+  tyres: part({ colorA: '#16171a' }),
+  interior: part({ colorA: '#2a2c31' }),
+  trim: part({ colorA: '#30343b' }),
   glass: part(),
 }
 

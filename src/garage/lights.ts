@@ -152,6 +152,9 @@ export function createLampSystem(car: THREE.Object3D, profile: CarProfile, onCha
       const right = sided.filter((e) => e.x < 0).map((e) => e.mesh)
       if (left.length > 0 && right.length > 0) {
         group.positions.push(centreOf(left), centreOf(right))
+      } else if (bounds.max.x - bounds.min.x < 0.35) {
+        // one lamp on the centre line (a bike's): one light
+        group.positions.push(bounds.getCenter(new THREE.Vector3()))
       } else {
         // lamps modelled as one mesh across the car: put a light near each end of it
         const c = bounds.getCenter(new THREE.Vector3())

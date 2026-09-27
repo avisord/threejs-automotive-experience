@@ -1044,3 +1044,67 @@ body,
   pointer-events: none;
   z-index: 50;
 }
+
+/* Menu › Car › Part roles */
+.cfg-role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.cfg-role-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+.cfg-role-btn::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--role);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.cfg-role {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.cfg-role-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cfg-role-head:hover .cfg-role-name {
+  color: var(--cfg-accent);
+}
+.cfg-role-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+.cfg-role-name {
+  flex: 1;
+}
+.cfg-role .cfg-actions,
+.cfg-role .cfg-parts {
+  margin-top: 6px;
+}
+.cfg-role-chip {
+  padding-right: 8px;
+  color: inherit;
+  cursor: pointer;
+}
+.cfg-role-chip:hover {
+  border-color: var(--cfg-accent);
+}

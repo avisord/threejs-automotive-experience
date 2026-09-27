@@ -148,7 +148,7 @@ export function uploadPage(state: UploadState): Page {
     }
     const after = el('div', 'cfg-actions')
     if (setup.length) after.append(mini('Auto size', () => state.setSetup({ length: null })))
-    after.append(mini('Next: position it ›', () => nav.open('car'), 'cfg-mini is-primary'))
+    after.append(mini('Next: part roles ›', () => nav.open('roles'), 'cfg-mini is-primary'), mini('Position ›', () => nav.open('car')))
     s.append(after)
     return s
   }
