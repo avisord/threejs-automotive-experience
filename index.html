@@ -102,7 +102,7 @@
         border-radius: 12px;
         background: var(--panel);
       }
-      /* hero: a CSS crossfade through six shots, 6 s each. The first sits underneath and never
+      /* hero: a CSS crossfade through five shots, 6 s each. The first sits underneath and never
          fades (it's the LCP image and what reduced motion shows); each later one fades in over the
          one before and holds until the next has covered it; the last fades out to the first. */
       .hero {
@@ -139,7 +139,7 @@
       }
       .hero .slide:not(:first-child) {
         opacity: 0;
-        animation: hero-hold 36s linear infinite backwards;
+        animation: hero-hold 30s linear infinite backwards;
       }
       .hero .slide:nth-child(2) {
         animation-delay: 6s;
@@ -151,21 +151,18 @@
         animation-delay: 18s;
       }
       .hero .slide:nth-child(5) {
-        animation-delay: 24s;
-      }
-      .hero .slide:nth-child(6) {
         animation-name: hero-last;
-        animation-delay: 30s;
+        animation-delay: 24s;
       }
       @keyframes hero-hold {
         0% {
           opacity: 0;
         }
-        2.8%,
-        19.4% {
+        3.3%,
+        23.3% {
           opacity: 1;
         }
-        19.5%,
+        23.4%,
         100% {
           opacity: 0;
         }
@@ -174,11 +171,11 @@
         0% {
           opacity: 0;
         }
-        2.8%,
-        16.7% {
+        3.3%,
+        20% {
           opacity: 1;
         }
-        19.4%,
+        23.3%,
         100% {
           opacity: 0;
         }
@@ -278,11 +275,7 @@
 
       <figure class="hero">
         <div class="slide">
-          <img src="/home/fuji.webp" width="1280" height="720" alt="A Porsche 911 GT3 RS in a glass pavilion, with cherry trees, farmland and a lake outside" />
-          <span>Fuji Pavilion</span>
-        </div>
-        <div class="slide">
-          <img src="/home/hero-overlook-sunset.webp" width="1920" height="1080" decoding="async" alt="A race car on a clifftop terrace at sunset, the sun setting over a tropical bay" />
+          <img src="/home/hero-overlook-sunset.webp" width="1920" height="1080" alt="A race car on a clifftop terrace at sunset, the sun setting over a tropical bay" />
           <span>Coast Overlook</span>
         </div>
         <div class="slide">

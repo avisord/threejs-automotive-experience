@@ -12,8 +12,9 @@ https://autoxd.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
   (`magick in -resize 2560x1440 -quality 84 -define webp:method=6 out.webp`); the home page shows
   three thumbs under "From the gallery" and links it in the header and footer. Photo-mode files carry
   a partly transparent alpha (min ~0.6) — flatten with `-background black -alpha remove -alpha off`.
-  The home hero is a pure-CSS crossfade (`.hero .slide`, 6 × 6 s; the first slide never fades — LCP,
-  and all that reduced motion shows) of `public/home/fuji.webp` + `hero-*.webp` (1920 px q80).
+  The home hero is a pure-CSS crossfade (`.hero .slide`, 5 × 6 s; the first slide never fades — LCP,
+  and all that reduced motion shows) of `public/home/hero-*.webp` (1920 px q80); keyframe
+  percentages and delays depend on the slide count.
 - **`index.html`** — static home page (no JS) describing the garage, screenshots in
   `public/home/` (1280 px WebP + `og.jpg`, captured headless from the real app). `public/sitemap.xml`
   + `robots.txt` list `/`, `/garage.html`, `/gallery.html`, `/credits.html`, `/balls/` for Google Search Console — add new pages there.
