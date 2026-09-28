@@ -102,8 +102,91 @@
         border-radius: 12px;
         background: var(--panel);
       }
+      /* hero: a CSS crossfade through six shots, 6 s each. The first sits underneath and never
+         fades (it's the LCP image and what reduced motion shows); each later one fades in over the
+         one before and holds until the next has covered it; the last fades out to the first. */
       .hero {
+        position: relative;
+        aspect-ratio: 16 / 9;
         margin: 8px 0 72px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+      }
+      .hero .slide {
+        position: absolute;
+        inset: 0;
+      }
+      .hero img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border: 0;
+        border-radius: 0;
+      }
+      .hero span {
+        position: absolute;
+        bottom: 14px;
+        left: 16px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: rgba(7, 9, 13, 0.6);
+        color: var(--text);
+        font: 11px/1.6 ui-monospace, 'SFMono-Regular', Menlo, monospace;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+      }
+      .hero .slide:not(:first-child) {
+        opacity: 0;
+        animation: hero-hold 36s linear infinite backwards;
+      }
+      .hero .slide:nth-child(2) {
+        animation-delay: 6s;
+      }
+      .hero .slide:nth-child(3) {
+        animation-delay: 12s;
+      }
+      .hero .slide:nth-child(4) {
+        animation-delay: 18s;
+      }
+      .hero .slide:nth-child(5) {
+        animation-delay: 24s;
+      }
+      .hero .slide:nth-child(6) {
+        animation-name: hero-last;
+        animation-delay: 30s;
+      }
+      @keyframes hero-hold {
+        0% {
+          opacity: 0;
+        }
+        2.8%,
+        19.4% {
+          opacity: 1;
+        }
+        19.5%,
+        100% {
+          opacity: 0;
+        }
+      }
+      @keyframes hero-last {
+        0% {
+          opacity: 0;
+        }
+        2.8%,
+        16.7% {
+          opacity: 1;
+        }
+        19.4%,
+        100% {
+          opacity: 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .hero .slide:not(:first-child) {
+          display: none;
+        }
       }
       section.feature {
         display: grid;
@@ -194,12 +277,30 @@
       </header>
 
       <figure class="hero">
-        <img
-          src="/home/fuji.webp"
-          width="1280"
-          height="720"
-          alt="A Porsche 911 GT3 RS in a glass pavilion, with cherry trees, farmland and a lake outside"
-        />
+        <div class="slide">
+          <img src="/home/fuji.webp" width="1280" height="720" alt="A Porsche 911 GT3 RS in a glass pavilion, with cherry trees, farmland and a lake outside" />
+          <span>Fuji Pavilion</span>
+        </div>
+        <div class="slide">
+          <img src="/home/hero-overlook-sunset.webp" width="1920" height="1080" decoding="async" alt="A race car on a clifftop terrace at sunset, the sun setting over a tropical bay" />
+          <span>Coast Overlook</span>
+        </div>
+        <div class="slide">
+          <img src="/home/hero-street.webp" width="1920" height="1080" decoding="async" alt="A race car on a cobbled colonial street lined with colourful houses" />
+          <span>Calle Colonial</span>
+        </div>
+        <div class="slide">
+          <img src="/home/hero-190e.webp" width="1920" height="1080" decoding="async" alt="A Mercedes 190E at a street corner outside a papelería" />
+          <span>Calle Colonial</span>
+        </div>
+        <div class="slide">
+          <img src="/home/hero-coast-house.webp" width="1920" height="1080" decoding="async" alt="The Coast House at dusk, a car behind its glass front" />
+          <span>Coast House</span>
+        </div>
+        <div class="slide">
+          <img src="/home/hero-overlook-day.webp" width="1920" height="1080" decoding="async" alt="A race car on the clifftop terrace at midday with palms and islands" />
+          <span>Coast Overlook</span>
+        </div>
       </figure>
 
       <main>
@@ -280,9 +381,9 @@
           <h2>From the gallery</h2>
           <p>Real-time screenshots, straight from the photo mode.</p>
           <div class="shots">
-            <a href="/gallery.html"><img src="/gallery/thumbs/coast-overlook-01.webp" width="960" height="540" loading="lazy" alt="A race car on a clifftop terrace at sunset over a tropical bay" /></a>
+            <a href="/gallery.html"><img src="/gallery/thumbs/coast-overlook-05.webp" width="960" height="540" loading="lazy" alt="Aerial view of the clifftop terrace in the green headland above a beach" /></a>
             <a href="/gallery.html"><img src="/gallery/thumbs/calle-colonial-09.webp" width="960" height="540" loading="lazy" alt="A race car on a colonial town street at dusk, street lamps lit" /></a>
-            <a href="/gallery.html"><img src="/gallery/thumbs/calle-colonial-13.webp" width="960" height="540" loading="lazy" alt="A Mercedes 190E at a street corner outside a papelería" /></a>
+            <a href="/gallery.html"><img src="/gallery/thumbs/fuji-meadow-02.webp" width="960" height="540" loading="lazy" alt="A lake and a town’s lights at dusk under Mount Fuji" /></a>
           </div>
           <a class="btn" href="/gallery.html">See all 27 shots</a>
         </section>
