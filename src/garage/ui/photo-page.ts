@@ -1,3 +1,4 @@
+import { track } from '../../analytics'
 import type { Page } from './panel'
 import { actionButton, el, section, segmented, slider, toggle } from './widgets'
 
@@ -114,6 +115,7 @@ export function photoPage(app: HTMLElement, camera: PhotoCamera): Page {
       a.download = `${camera.subject()}-${stamp}.${s.format === 'jpeg' ? 'jpg' : s.format}`
       a.click()
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000)
+      track('photo_capture', { width, height, format: s.format, supersample: s.supersample && canSupersample() })
       last = `Saved ${a.download} — ${width} × ${height}, ${(blob.size / 1e6).toFixed(1)} MB`
     } catch (err) {
       console.error('[garage] photo failed', err)

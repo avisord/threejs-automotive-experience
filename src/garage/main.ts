@@ -4,6 +4,7 @@ import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLigh
 import { DEFAULT_GARAGE, GARAGES, collectGlowMeshes, type GarageDef, type Room } from './garages'
 import { disposeCar, loadCar } from './car'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { track } from '../analytics'
 import { CARS, DEFAULT_CAR, NO_CAR, carTitle, type CarProfile } from './cars'
 import {
   collectFiles,
@@ -170,6 +171,7 @@ async function setCameraMode(mode: CameraMode): Promise<void> {
   }
   if (freeCam.mode === 'orbit') orbitHome = camera.position.clone()
   freeCam.setMode(mode)
+  track('camera_mode', { mode })
   if (mode === 'orbit' && orbitHome) {
     camera.position.copy(orbitHome)
     controls.update() // looks at the car again
@@ -732,8 +734,10 @@ async function showCar(id: string, { quiet = false } = {}): Promise<void> {
     }
     loader.classList.add('done')
     console.info(`[garage] ${profile.id} ready`)
+    if (!quiet) track('car_select', { car_id: profile.id, car_name: carTitle(profile), uploaded: !!profile.open })
   } catch (err: unknown) {
     console.error(`[garage] failed to load ${profile.id}`, err)
+    track('car_load_failed', { car_id: profile.id, error: String((err as Error)?.message ?? err).slice(0, 100) })
     loader.querySelector('.loader-label')!.textContent = `failed to load ${carTitle(profile)} — see console`
   } finally {
     if (loadingId === profile.id) loadingId = null
@@ -778,6 +782,7 @@ async function showGarage(id: string): Promise<void> {
   requestAnimationFrame(() => requestAnimationFrame(() => fade.classList.remove('is-on')))
   announceGarage(def)
   console.info(`[garage] now in ${def.id}`)
+  track('garage_select', { garage_id: def.id, garage_name: def.name })
 }
 
 /** replace the room — geometry, lights, reflections, grade look — ready to draw when it resolves */
@@ -1085,8 +1090,10 @@ async function importUpload(input: { file: File; path: string }[]): Promise<void
     void navigator.storage?.persist?.() // ask the browser not to evict it under storage pressure
     await showCar(record.id)
     console.info(`[garage] uploaded ${main}: ${meshes} meshes, guessed`, setup)
+    track('model_upload', { format: main.slice(main.lastIndexOf('.') + 1).toLowerCase(), meshes })
   } catch (err) {
     console.error('[garage] upload failed', err)
+    track('model_upload_failed', { error: String((err as Error)?.message ?? err).slice(0, 100) })
     setUploadStatus(`Couldn’t load that: ${(err as Error)?.message ?? err}`, true)
   }
 }
@@ -1655,6 +1662,7 @@ function syncTracer(): void {
 }
 
 function startTracer(createPathTracer: typeof import('./pathtrace').createPathTracer): void {
+  track('path_tracing_on')
   {
     tracer = createPathTracer(renderer, {
       scene,

@@ -1,3 +1,4 @@
+import { track } from '../../analytics'
 import { el } from './widgets'
 
 export interface Nav {
@@ -65,7 +66,10 @@ export function mountPanel(parent: HTMLElement, pages: Record<string, Page>, roo
 
   function go(next: string[]): void {
     const samePage = next.join('/') === path.join('/')
-    if (!samePage) pages[path[path.length - 1]].leave?.()
+    if (!samePage) {
+      pages[path[path.length - 1]].leave?.()
+      track('panel_page', { page: next.join('/') })
+    }
     path = next
     try {
       localStorage.setItem(PATH_KEY, JSON.stringify(path))

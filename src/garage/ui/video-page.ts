@@ -1,3 +1,4 @@
+import { track } from '../../analytics'
 import { CAMERA_MOVES, moveById } from '../camera-moves'
 import {
   QUALITIES,
@@ -103,15 +104,28 @@ export function videoPage(app: HTMLElement, stage: () => Stage, currentGarage: (
     stopBtn.textContent = mode === 'export' ? 'Cancel' : 'Stop'
     showProgress({ done: 0, label: mode === 'export' ? 'preparing encoder…' : 'starting…' })
     app.append(bar)
+    const r = getReel()
+    const about = {
+      shots: r.shots.length,
+      seconds: r.shots.reduce((t, s) => t + s.duration, 0),
+      resolution: r.resolution,
+      fps: r.fps,
+      quality: r.quality,
+    }
+    track(`video_${mode}`, about)
     try {
       if (mode === 'preview') {
-        await preview(getReel(), stage(), running.signal, showProgress)
+        await preview(r, stage(), running.signal, showProgress)
       } else {
-        const blob = await exportVideo(getReel(), stage(), running.signal, showProgress)
-        if (blob) download(blob)
+        const blob = await exportVideo(r, stage(), running.signal, showProgress)
+        if (blob) {
+          download(blob)
+          track('video_export_done', { ...about, mb: Math.round(blob.size / 1e5) / 10 })
+        }
       }
     } catch (err) {
       console.error('[garage] video failed', err)
+      track('video_failed', { mode, error: String((err as Error)?.message ?? err).slice(0, 100) })
       alertInPanel = `${mode === 'export' ? 'Export' : 'Preview'} failed: ${(err as Error).message}`
     } finally {
       running = null
