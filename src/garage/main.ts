@@ -47,6 +47,7 @@ import { videoPage } from './ui/video-page'
 import { photoPage, type PhotoCamera } from './ui/photo-page'
 import { createCarPlacement, type CarPlacement } from './placement'
 import { createFreeCamera, type CameraMode } from './free-camera'
+import { buildInfoElement } from '../build-info'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -1132,7 +1133,10 @@ const pages: Record<string, Page> = {
   menu: {
     title: 'Menu',
     render: (body, nav) =>
-      body.append(menuList(pages, ['garage', 'collection', 'car', 'roles', 'parts', 'lights', 'capture', 'settings'], nav)),
+      body.append(
+        menuList(pages, ['garage', 'collection', 'car', 'roles', 'parts', 'lights', 'capture', 'settings'], nav),
+        buildInfoElement('cfg-note cfg-build'),
+      ),
   },
   garage: garagePage({
     current: () => garageDef.id,

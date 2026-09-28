@@ -11,6 +11,9 @@ https://autoxd.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
   + `robots.txt` list `/`, `/garage.html`, `/balls/` for Google Search Console — add new pages there.
   GA4 is injected into every page at build time by the `ga4` plugin in `vite.config.ts` from the
   `GA_MEASUREMENT_ID` env var (Vercel project env; nothing injected without it or in dev).
+  The build's commit + time are baked in by `define: __BUILD__` (`vite.config.ts`; commit from
+  `VERCEL_GIT_COMMIT_SHA` on Vercel — no `.git` there — else `git rev-parse`), read via
+  `src/build-info.ts`, and shown under the garage's Menu (commit links to GitHub).
   Custom events go through `track()` in `src/analytics.ts` (no-op without gtag): `car_select`,
   `car_load_failed`, `garage_select`, `camera_mode`, `panel_page`, `photo_capture`, `video_preview`,
   `video_export`, `video_export_done`, `video_failed`, `model_upload(_failed)`, `path_tracing_on`.

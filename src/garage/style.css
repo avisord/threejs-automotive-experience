@@ -586,6 +586,11 @@ body,
   color: rgba(255, 255, 255, 0.42);
 }
 
+.cfg-build {
+  margin-top: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ─── parts editor ─── */
 .cfg-actions {
   display: flex;
