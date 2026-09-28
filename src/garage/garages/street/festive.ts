@@ -70,7 +70,7 @@ export interface FestiveMaterials {
   wire: THREE.Material
 }
 
-export function createFestive(buildings: Buildings, materials: FestiveMaterials): THREE.Group {
+export function createFestive(buildings: Buildings, materials: FestiveMaterials): { group: THREE.Group; lights: THREE.Vector4[] } {
   const group = new THREE.Group()
   group.name = 'festive'
   const rand = seeded(1225)
@@ -84,6 +84,7 @@ export function createFestive(buildings: Buildings, materials: FestiveMaterials)
   // ─── strings of bulbs across the main street, house to house ────────
   const wires = new Wires()
   const bulbs: THREE.Matrix4[] = []
+  const lights: THREE.Vector4[] = []
   const junction = (s: number) => SIDES.some((j) => Math.abs(s - j.at) < SIDE_ROAD.width / 2 + SIDE_ROAD.sidewalk + 1)
   for (let s = -60; s < 330; s += 13 + rand() * 5) {
     // (the far end a few metres on up the street: the strings cross on a slant, some left to right, some back)
@@ -97,6 +98,14 @@ export function createFestive(buildings: Buildings, materials: FestiveMaterials)
     const b = new THREE.Vector3(b2.x, yb, b2.y)
     const sag = 0.6 + rand() * 0.5
     wires.span(a, b, sag, 0.006, 20)
+    // where the string's light comes from, for the street's materials (lamplight.ts): a point every ~3 m
+    const lightsN = Math.max(2, Math.round(a.distanceTo(b) / 3))
+    for (let i = 0; i < lightsN; i++) {
+      const t = (i + 0.5) / lightsN
+      const p = a.clone().lerp(b, t)
+      p.y = a.y + (b.y - a.y) * t - sag * 4 * t * (1 - t) - 0.05
+      lights.push(new THREE.Vector4(p.x, p.y, p.z, 1))
+    }
     const n = Math.floor(a.distanceTo(b) / 0.32)
     for (let i = 1; i < n; i++) {
       const t = i / n
@@ -179,5 +188,5 @@ export function createFestive(buildings: Buildings, materials: FestiveMaterials)
     }
     group.add(noRaycast(m))
   }
-  return group
+  return { group, lights }
 }

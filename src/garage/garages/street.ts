@@ -124,7 +124,7 @@ function createStreet(): Room {
   // the festive layer, off until asked for (Menu › Garage › Scene)
   const bulbs = outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#fff4dc'), emissive: new THREE.Color('#ffe2b0'), emissiveIntensity: 2.2, roughness: 0.3 }))
   bulbs.userData.glow = true
-  const festive = createFestive(buildings, { props, bulbs, wire: outdoorMaterial(wireMaterial()) })
+  const { group: festive, lights: festiveLights } = createFestive(buildings, { props, bulbs, wire: outdoorMaterial(wireMaterial()) })
   festive.visible = false
   group.add(festive)
 
@@ -132,6 +132,9 @@ function createStreet(): Room {
   // the lamps' light (lamplight.ts): its designed output — a sodium-warm 2700 K, strength tuned so a pool under
   // a post reads at dusk as clearly as the lit facades do (the shader divides by d² + 1)
   const lampOutput = kelvinToRGB(2700).multiplyScalar(LAMP_STRENGTH)
+  // the strings' glow: set by their group, and none while the decorations are put away
+  const festiveDesign = kelvinToRGB(3200).multiplyScalar(FESTIVE_STRENGTH)
+  const festiveOutput = new THREE.Color(0, 0, 0)
   const interior = createInteriorLights([
     {
       id: 'street-lamps',
@@ -140,7 +143,13 @@ function createStreet(): Room {
       kelvin: 2700,
       members: [{ emissive: lampGlass }, { output: lampOutput }],
     },
-    { id: 'festive-lights', name: 'Festive lights', hint: 'The strings of bulbs across the street (with Scene › Festive decorations on)', kelvin: 3200, members: [{ emissive: bulbs }] },
+    {
+      id: 'festive-lights',
+      name: 'Festive lights',
+      hint: 'The strings of bulbs across the street and their glow on it (with Scene › Festive decorations on)',
+      kelvin: 3200,
+      members: [{ emissive: bulbs }, { output: festiveDesign }],
+    },
   ])
   interior.set({ master: 1, groups: { 'street-lamps': { on: false, intensity: 1, kelvin: 2700 }, 'festive-lights': { on: true, intensity: 1, kelvin: 3200 } } })
   for (const m of new Set(buildings.church.children.map((c) => (c as THREE.Mesh).material as THREE.MeshStandardMaterial))) {
@@ -167,7 +176,15 @@ function createStreet(): Room {
   // (That is the older estimate. With the light probes on — Settings › Graphics › Street lighting — the
   // diffuse sky and bounce come from gi.ts instead: measured sky visibility and coloured bounce.)
   // the lamps' light on everything in the street (switched and warmed by the Street lamps group)
-  const lampLight = createLampLight(infra.lamps, ground.rect, lampOutput)
+  const lampLight = createLampLight(
+    [
+      { points: infra.lamps, color: lampOutput, reach: 26 },
+      { points: festiveLights, color: festiveOutput, reach: 12 },
+    ],
+    ground.rect,
+  )
+  /** the festive strings light the street at their group's level, and only while they're up */
+  const syncFestive = () => festiveOutput.copy(festiveDesign).multiplyScalar(festive.visible ? 1 : 0)
   const gi = createStreetGI({ footprints: buildings.footprints, ground, showSunDisc: (on) => world.sky.showSunDisc(on) })
   mark('light probes')
   console.info(`[garage] street built (ms): ${timings.join(', ')}`)
@@ -239,6 +256,8 @@ function createStreet(): Room {
     view: [1.1, 1.25, -7.4],
     depthOfField: { bokehScale: 3 },
     interior,
+    // (the Festive lights group writes festiveDesign; what reaches the street follows it and the switch)
+    update: syncFestive,
     options: [
       {
         id: 'festive',
@@ -303,6 +322,8 @@ function roadDetail(): RoadDetail {
 
 /** the street lamps' designed output (lamplight.ts) */
 const LAMP_STRENGTH = 18
+/** a festive string's light per point (one every ~3 m) */
+const FESTIVE_STRENGTH = 9
 
 /** how strongly the street-level env map lights the street's own surfaces (see createStreet) */
 const STREET_SKY_LIGHT = 0.75
