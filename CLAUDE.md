@@ -9,6 +9,8 @@ https://autoxd.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
 - **`index.html`** — static home page (no JS) describing the garage, screenshots in
   `public/home/` (1280 px WebP + `og.jpg`, captured headless from the real app). `public/sitemap.xml`
   + `robots.txt` list `/`, `/garage.html`, `/balls/` for Google Search Console — add new pages there.
+  GA4 is injected into every page at build time by the `ga4` plugin in `vite.config.ts` from the
+  `GA_MEASUREMENT_ID` env var (Vercel project env; nothing injected without it or in dev).
 - **`balls/index.html` → `src/main.ts`** — "ball pit": physics balls with procedural surfaces
   (`balls.ts`, `materials.ts`, `physics.ts`, `drag.ts`), scene presets in `src/scenes/`,
   composable environment modules in `src/modules/`. Older, mostly finished.
