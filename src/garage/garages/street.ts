@@ -13,6 +13,7 @@ import { createFestive } from './street/festive'
 import { foliage } from './foliage'
 import { createInteriorLights, kelvinToRGB } from './interior'
 import { createLampLight } from './street/lamplight'
+import { createCarLamps } from './street/car-lamps'
 import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
@@ -175,13 +176,17 @@ function createStreet(): Room {
   // map captured in the open) on top dimmed it twice, and the shade — half the frame — went near black.
   // (That is the older estimate. With the light probes on — Settings › Graphics › Street lighting — the
   // diffuse sky and bounce come from gi.ts instead: measured sky visibility and coloured bounce.)
+  // the lamps nearest the car as real lights: they light the car, and shade the pools round it
+  const carLamps = createCarLamps(infra.lamps, lampOutput, LAMP_REACH)
+  group.add(carLamps.group)
   // the lamps' light on everything in the street (switched and warmed by the Street lamps group)
   const lampLight = createLampLight(
     [
-      { points: infra.lamps, color: lampOutput, reach: 26 },
+      { points: infra.lamps, color: lampOutput, reach: LAMP_REACH },
       { points: festiveLights, color: festiveOutput, reach: 12 },
     ],
     ground.rect,
+    carLamps,
   )
   /** the festive strings light the street at their group's level, and only while they're up */
   const syncFestive = () => festiveOutput.copy(festiveDesign).multiplyScalar(festive.visible ? 1 : 0)
@@ -230,6 +235,16 @@ function createStreet(): Room {
     ready: Promise.all([road.ready, rubble.ready, woods.ready]).then(() => {
       world.shadowsChanged() // (the trees arrived: they cast into both shadow maps)
       woods.group.traverse((o) => o.layers.enable(CAPTURE_LAYER)) // (and the probes see them)
+      // the lamps light the trees by them too (the woods on the hills are outside the lamps' grid and skip it)
+      const leafy = new Set<THREE.MeshStandardMaterial>()
+      woods.group.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+          if ((m as THREE.MeshStandardMaterial).isMeshStandardMaterial) leafy.add(m as THREE.MeshStandardMaterial)
+        }
+      })
+      for (const m of leafy) lampLight.patch(m, { foliage: true })
     }),
     gi: {
       set: (on) => {
@@ -246,6 +261,11 @@ function createStreet(): Room {
       world.dispose()
     },
     ...world.hooks,
+    shadowsChanged: () => {
+      world.shadowsChanged()
+      carLamps.shadowsChanged()
+    },
+    carPlaced: (car) => carLamps.place(car),
     outdoor: {
       root: outdoor,
       probe: new THREE.Vector3(0, 60, 120), // over the rooftops: open sky, the town and hills below
@@ -257,7 +277,10 @@ function createStreet(): Room {
     depthOfField: { bokehScale: 3 },
     interior,
     // (the Festive lights group writes festiveDesign; what reaches the street follows it and the switch)
-    update: syncFestive,
+    update: () => {
+      syncFestive()
+      carLamps.sync()
+    },
     options: [
       {
         id: 'festive',
@@ -322,6 +345,8 @@ function roadDetail(): RoadDetail {
 
 /** the street lamps' designed output (lamplight.ts) */
 const LAMP_STRENGTH = 18
+/** how far a street lamp's light reaches, metres */
+const LAMP_REACH = 26
 /** a festive string's light per point (one every ~3 m) */
 const FESTIVE_STRENGTH = 9
 
