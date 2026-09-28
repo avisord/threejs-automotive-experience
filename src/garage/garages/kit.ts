@@ -103,8 +103,11 @@ export function glowMaterial(color: THREE.ColorRepresentation, glow: number, blo
 export function collectGlowMeshes(root: THREE.Object3D): THREE.Object3D[] {
   const found: THREE.Object3D[] = []
   root.traverse((obj) => {
-    const material = (obj as THREE.Mesh).material as THREE.Material | undefined
-    if ((obj as THREE.Mesh).isMesh && material?.userData.glow) found.push(obj)
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    // imported models (fbx, obj) can carry a material array: one per geometry group
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    if (materials.some((m) => m?.userData.glow)) found.push(obj)
   })
   return found
 }
