@@ -6,9 +6,18 @@ https://autoxd.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
 
 - **`credits.html` → `src/credits.ts`** — models (from `CARS[].credit`), Poly Haven textures,
   libraries and their licences; linked from the home footer and Menu › Collection.
+- **`gallery.html` → `src/gallery.ts`** — screenshot gallery, one section per garage; grid links to
+  the full image (works without JS), the script adds a lightbox (arrows/swipe/Esc). Images in
+  `public/gallery/` (2560 px WebP q84) + `thumbs/` (960 px q78) from the user's 4K photo-mode shots
+  (`magick in -resize 2560x1440 -quality 84 -define webp:method=6 out.webp`); the home page shows
+  three thumbs under "From the gallery" and links it in the header and footer. Photo-mode files carry
+  a partly transparent alpha (min ~0.6) — flatten with `-background black -alpha remove -alpha off`.
+  The home hero is a pure-CSS crossfade (`.hero .slide`, 5 × 6 s; the first slide never fades — LCP,
+  and all that reduced motion shows) of `public/home/hero-*.webp` (1920 px q80); keyframe
+  percentages and delays depend on the slide count.
 - **`index.html`** — static home page (no JS) describing the garage, screenshots in
   `public/home/` (1280 px WebP + `og.jpg`, captured headless from the real app). `public/sitemap.xml`
-  + `robots.txt` list `/`, `/garage.html`, `/balls/` for Google Search Console — add new pages there.
+  + `robots.txt` list `/`, `/garage.html`, `/gallery.html`, `/credits.html`, `/balls/` for Google Search Console — add new pages there.
   GA4 is injected into every page at build time by the `ga4` plugin in `vite.config.ts` from the
   `GA_MEASUREMENT_ID` env var (Vercel project env; nothing injected without it or in dev).
   The build's commit + time are baked in by `define: __BUILD__` (`vite.config.ts`; commit from
