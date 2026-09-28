@@ -31,7 +31,7 @@ export type { SsrQuality, SsrScope } from './ssr'
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 /** N8AO or a classic SSAO (ssao.ts) — both half res, normals from depth */
 export type AoMethod = 'n8ao' | 'ssao'
-export type GradeLook = 'natural' | 'daylight' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
+export type GradeLook = 'natural' | 'daylight' | 'afternoon' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
 export type Msaa = 0 | 2 | 4 | 8
 export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
 /** floor mirror resolution relative to the canvas; 0 turns the mirror off */
@@ -132,6 +132,11 @@ export interface GraphicsSettings {
   }
   /** distance haze in open-air garages — see atmosphere-effect.ts */
   atmosphere: { enabled: boolean; strength: number }
+  /**
+   * How a street garage lights its shade: measured light probes (the sunlit facades' coloured bounce)
+   * and per-point sky visibility, or the earlier estimate (a constant bounce, a fixed sky share)
+   */
+  gi: { probes: boolean }
   /** sunlight shafts through the air (ray-marched through the sun's shadow map), open-air garages */
   volumetric: { enabled: boolean; strength: number; quality: VolumetricQuality }
   /** glare, starburst and ghosts when the sun is in view — see lens-flare-effect.ts */
@@ -282,6 +287,10 @@ export const LOOKS: Record<GradeLook, Look> = {
   // an open-world racing game's clear midday: punchy mid-tones and colour, but the shade opened up and
   // sky blue-teal rather than crushed, whites staying white
   daylight: { contrast: 1.12, saturation: 1.06, temperature: -0.02, split: 0.2, shadowTint: 0x5f93b8, highlightTint: 0xfff1dc, lift: 0.8 },
+  // a warm afternoon in a street: a touch of warmth, gentle bite, and shade kept a soft grey rather than
+  // tinted — between sunny facades the shade is lit by them as much as by the sky, and daylight's blue-teal
+  // shadow tint turned shaded paving navy
+  afternoon: { contrast: 1.08, saturation: 1.04, temperature: 0.06, split: 0.12, shadowTint: 0x8f9aa6, highlightTint: 0xffe9cc, lift: 0.6 },
   // late-afternoon landscape photography: a touch warm, teal shadows, gold highlights, more bite — the
   // long shadows a low sun throws kept readable (they went black-green). The sun is already gold: an
   // orange highlight tint and more saturation on top took every bit of blue out of the sunlit grass
@@ -323,6 +332,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   // ~37 mm on full frame: a photographer's lens for a car, not a wide game camera
   display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 36, showFps: true },
   atmosphere: { enabled: true, strength: 1 },
+  gi: { probes: true },
   volumetric: { enabled: true, strength: 1, quality: 'medium' },
   lensFlare: { enabled: true, intensity: 1 },
   dof: { mode: 'auto', strength: 1, range: 6 },

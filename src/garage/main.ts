@@ -263,6 +263,14 @@ try {
 } catch {
   // defaults
 }
+const OPTIONS_KEY = 'garage.options.v1'
+/** scene switches picked per garage (Room.options) */
+let savedOptions: Record<string, Record<string, boolean>> = {}
+try {
+  savedOptions = JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? '{}') as Record<string, Record<string, boolean>>
+} catch {
+  // defaults
+}
 installRoom()
 
 /** put `room` in the scene and light the car with it */
@@ -279,6 +287,11 @@ function installRoom(): void {
   applyDaylight()
   const interior = savedInteriors[garageDef.id]
   if (room.interior && interior) room.interior.set(interior)
+  for (const option of room.options ?? []) {
+    const saved = savedOptions[garageDef.id]?.[option.id]
+    if (saved !== undefined) option.set(saved)
+  }
+  if (room.view) takeRoomView(room.view)
   captureEnvironment()
   // a sky still loading: capture again once it's in, if this room is still up
   const installed = room
@@ -289,6 +302,15 @@ function installRoom(): void {
     post.refreshGlow() // (its late meshes — trees, props — may reflect)
     invalidate(4)
   })
+}
+
+/** bring the orbit camera round to the room's own view of the car (walking or flying: where the orbit comes back to) */
+function takeRoomView(view: [number, number, number]): void {
+  const at = controls.target.clone().add(new THREE.Vector3(...view))
+  if (freeCam.mode === 'orbit') {
+    camera.position.copy(at)
+    controls.update()
+  } else orbitHome = at
 }
 
 /**
@@ -342,6 +364,8 @@ function captureEnvironment(): void {
   room.outdoor?.afterCapture?.()
   for (const o of hidden) o.visible = true
   pmrem.dispose()
+  // measured indirect light (street garages): rebake it from the scene as it's now lit
+  room.gi?.relight(renderer, scene, () => invalidate(3))
 }
 
 /** open-air rooms: in daylight the car's lamps light nothing around them, only their lenses glow */
@@ -375,6 +399,22 @@ function setInterior(settings: InteriorSettings): void {
   } catch {
     // not remembered — fine
   }
+  lightingChanged()
+}
+
+/** flip one of the room's scene switches (Room.options) and remember it for this garage */
+function setRoomOption(id: string, on: boolean): void {
+  const option = room.options?.find((o) => o.id === id)
+  if (!option) return
+  option.set(on)
+  savedOptions[garageDef.id] = { ...savedOptions[garageDef.id], [id]: on }
+  try {
+    localStorage.setItem(OPTIONS_KEY, JSON.stringify(savedOptions))
+  } catch {
+    // not remembered — fine
+  }
+  post.refreshGlow() // (what glows may have come or gone)
+  room.shadowsChanged?.()
   lightingChanged()
 }
 
@@ -792,6 +832,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   room.dispose()
   garageDef = def
   room = def.create()
+  room.gi?.set(post.settings.gi.probes)
   if (bay) room.floorLayers.push(bay.shadow)
   installRoom()
   placement.refit() // a smaller room may not fit where the car stood
@@ -1146,6 +1187,8 @@ const pages: Record<string, Page> = {
     setSun,
     interior: () => (room.interior ? { groups: room.interior.groups, settings: room.interior.get(), defaults: room.interior.defaults() } : null),
     setInterior,
+    options: () => room.options?.map((o) => ({ id: o.id, name: o.name, hint: o.hint, on: o.get() })) ?? [],
+    setOption: setRoomOption,
   }),
   collection: collectionPage({
     current: () => bay?.id ?? (loadingId ? null : NO_CAR),
@@ -1582,7 +1625,13 @@ declare global {
 window.garage = garage
 
 // ─── settings that live outside the composer ────────────────────────────────
+// (the first room was built before the settings existed)
+room.gi?.set(post.settings.gi.probes)
 post.onChange((sections) => {
+  if (sections.includes('gi') && room.gi) {
+    room.gi.set(post.settings.gi.probes)
+    lightingChanged() // (re-capture, and the probes rebake if they're on)
+  }
   if (sections.includes('quality')) applyQuality()
   if (sections.includes('pathTracing')) syncTracer()
   if (sections.includes('display')) {

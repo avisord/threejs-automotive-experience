@@ -46,6 +46,18 @@ const fragmentHook = '#include <lights_fragment_end>'
 export const GROUND_BOUNCE = { value: new THREE.Color(0, 0, 0) }
 
 /**
+ * Light the sunlit walls round a street throw across it (linear irradiance, 0 = none): in a street
+ * canyon the shaded road and the shaded facades are lit as much by the sunny facades opposite as by
+ * the sky — without it the shade got only blue sky light and went navy. Every face takes it (the
+ * ground a little less than a wall: it sees more sky). Set by a street room from its sun, cleared
+ * when it goes.
+ */
+export const WALL_BOUNCE = { value: new THREE.Color(0, 0, 0) }
+
+/** the default for materials that don't say otherwise: the bounce estimates on */
+const BOUNCE_ON = { value: 1 }
+
+/**
  * three's light loop with the point, spot and area lights compiled out. Out in
  * the landscape they light nothing — the pavilion's area lights and the car's
  * lamp spots are metres away and aimed inside — yet every landscape pixel paid
@@ -70,8 +82,11 @@ export function receiveFarShadow(material: THREE.Material): void {
   material.onBeforeCompile = (shader, renderer) => {
     previous?.call(material, shader, renderer)
     shader.uniforms.uGroundBounce = GROUND_BOUNCE
+    shader.uniforms.uWallBounce = WALL_BOUNCE
+    // (a material lit by measured light probes switches these estimates off: material.userData.bounceOn)
+    shader.uniforms.uBounceOn = (material.userData.bounceOn as { value: number } | undefined) ?? BOUNCE_ON
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uGroundBounce;')
+      .replace('#include <common>', '#include <common>\nuniform vec3 uGroundBounce;\nuniform vec3 uWallBounce;\nuniform float uBounceOn;')
       .replace('#include <lights_fragment_begin>', outdoorLightLoop).replace(
       fragmentHook,
       `${fragmentHook}
@@ -84,7 +99,9 @@ export function receiveFarShadow(material: THREE.Material): void {
           // (a crown's normal is the crown's, up and out; its leaves face every way, a good part of them the ground)
           down = max( down, 0.4 );
         #endif
-        reflectedLight.indirectDiffuse += uGroundBounce * down * BRDF_Lambert( material.diffuseColor );
+        reflectedLight.indirectDiffuse += uGroundBounce * uBounceOn * down * BRDF_Lambert( material.diffuseColor );
+        // the street's sunlit walls, seen from everywhere in it (a face turned up sees the least of them)
+        reflectedLight.indirectDiffuse += uWallBounce * uBounceOn * ( 1.0 - 0.45 * max( 0.0, 1.0 - 2.0 * down ) ) * BRDF_Lambert( material.diffuseColor );
       }
       #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 1
       {

@@ -34,6 +34,8 @@ export type InteriorMember =
   | { glow: THREE.MeshBasicMaterial }
   /** a surface's faint emissive glow */
   | { emissive: THREE.MeshStandardMaterial }
+  /** a colour a shader reads as a light's output (street lamps drawn per pixel): scaled by the group's level */
+  | { output: THREE.Color }
 
 export type InteriorGroupDef = {
   id: string
@@ -106,6 +108,7 @@ export function createInteriorLights(defs: InteriorGroupDef[]): InteriorLights &
         return { ...m, color: m.light.color.clone(), intensity: m.intensity ?? (() => base) }
       }
       if ('glow' in m) return { ...m, color: m.glow.color.clone() }
+      if ('output' in m) return { ...m, color: m.output.clone() }
       return { ...m, color: m.emissive.emissive.clone(), level: m.emissive.emissiveIntensity }
     }),
   }))
@@ -149,6 +152,8 @@ export function createInteriorLights(defs: InteriorGroupDef[]): InteriorLights &
           // or every material in the scene would recompile)
           m.light.intensity = m.intensity() * level
           paint(m.color, m.light.color)
+        } else if ('output' in m) {
+          m.output.copy(paint(m.color, colour)).multiplyScalar(level)
         } else if ('glow' in m) {
           m.glow.color.copy(paint(m.color, colour)).multiplyScalar(level)
         } else {

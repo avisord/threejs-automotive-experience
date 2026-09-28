@@ -86,6 +86,36 @@ export interface Room {
    * right by the lens (the background gets ~a third of it, post.ts `lensCoc`).
    */
   depthOfField?: { bokehScale: number }
+  /**
+   * Where the orbit camera comes to when the garage is opened: its offset from the car's centre (m).
+   * A room built around one view (a street leading away behind the car) frames it; without one the
+   * camera stays where it was.
+   */
+  view?: [number, number, number]
+  /**
+   * Switches for what's in the scene (Menu › Garage › Scene): a seasonal layer, say. Saved per garage;
+   * `set` must invalidate nothing itself — the app redraws, re-captures the environment and re-gathers glow.
+   */
+  options?: RoomOption[]
+  /**
+   * Measured indirect light (Settings › Graphics › Street lighting): `set` switches it against the
+   * room's older estimate; `relight` is called after every environment capture to rebake it from the
+   * scene as it's lit now (asynchronously — `redraw` asks for frames once it's done).
+   */
+  gi?: {
+    set(on: boolean): void
+    relight(renderer: THREE.WebGLRenderer, scene: THREE.Scene, redraw: () => void): void
+  }
+}
+
+export interface RoomOption {
+  id: string
+  name: string
+  hint: string
+  /** how the room is built (before anything is saved) */
+  default: boolean
+  get(): boolean
+  set(on: boolean): void
 }
 
 /**
