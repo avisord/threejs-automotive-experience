@@ -188,9 +188,14 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       joint = mix( joint, clamp( 2.0 * jw / P + 2.0 * jw / L, 0.0, 1.0 ), smoothstep( 0.012, 0.05, px ) );
       vec3 col = mix( stone, uJoint * ( 0.8 + 0.4 * sfNoise( sd * 2.0 ) ), joint );
       // wheel paths polished and a shade darker, an oil drip line between them, dirt in the gutters
-      float wheel = exp( - pow( ( ad - 0.95 ) / 0.35, 2.0 ) ) + exp( - pow( ( ad - 2.5 ) / 0.35, 2.0 ) );
+      // lanes: one each way on a narrow street, two on the broad main street; the wheels run 0.8 m either
+      // side of a lane's middle, oil drips down the middle
+      float lanes = hw > 5.0 ? 2.0 : 1.0;
+      float lane = hw / lanes;
+      float inLane = mod( ad, lane ) - lane * 0.5;
+      float wheel = exp( - pow( ( abs( inLane ) - 0.8 ) / 0.35, 2.0 ) );
       col *= 1.0 - 0.07 * wheel;
-      float drip = exp( - pow( ( ad - 1.75 ) / 0.22, 2.0 ) ) * smoothstep( 0.55, 0.85, sfNoise( vec2( sd.x * 0.8, sd.y * 3.0 ) ) );
+      float drip = exp( - pow( inLane / 0.22, 2.0 ) ) * smoothstep( 0.55, 0.85, sfNoise( vec2( sd.x * 0.8, sd.y * 3.0 ) ) );
       col *= 1.0 - 0.22 * drip;
       float gutter = smoothstep( hw - 1.0, hw - 0.05, ad );
       col = mix( col, col * vec3( 0.78, 0.73, 0.66 ), gutter * ( 0.5 + 0.5 * sfNoise( sd * 1.3 ) ) );

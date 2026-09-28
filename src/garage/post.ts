@@ -31,7 +31,7 @@ export type { SsrQuality, SsrScope } from './ssr'
 export type AoQuality = 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra'
 /** N8AO or a classic SSAO (ssao.ts) — both half res, normals from depth */
 export type AoMethod = 'n8ao' | 'ssao'
-export type GradeLook = 'natural' | 'daylight' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
+export type GradeLook = 'natural' | 'daylight' | 'afternoon' | 'golden' | 'cyber' | 'warm' | 'cold' | 'noir'
 export type Msaa = 0 | 2 | 4 | 8
 export type Smaa = 'off' | 'low' | 'medium' | 'high' | 'ultra'
 /** floor mirror resolution relative to the canvas; 0 turns the mirror off */
@@ -282,6 +282,10 @@ export const LOOKS: Record<GradeLook, Look> = {
   // an open-world racing game's clear midday: punchy mid-tones and colour, but the shade opened up and
   // sky blue-teal rather than crushed, whites staying white
   daylight: { contrast: 1.12, saturation: 1.06, temperature: -0.02, split: 0.2, shadowTint: 0x5f93b8, highlightTint: 0xfff1dc, lift: 0.8 },
+  // a warm afternoon in a street: a touch of warmth, gentle bite, and shade kept a soft grey rather than
+  // tinted — between sunny facades the shade is lit by them as much as by the sky, and daylight's blue-teal
+  // shadow tint turned shaded paving navy
+  afternoon: { contrast: 1.08, saturation: 1.04, temperature: 0.06, split: 0.12, shadowTint: 0x8f9aa6, highlightTint: 0xffe9cc, lift: 0.6 },
   // late-afternoon landscape photography: a touch warm, teal shadows, gold highlights, more bite — the
   // long shadows a low sun throws kept readable (they went black-green). The sun is already gold: an
   // orange highlight tint and more saturation on top took every bit of blue out of the sunlit grass

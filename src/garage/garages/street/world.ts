@@ -1,22 +1,26 @@
 import * as THREE from 'three'
 import type { AtmosphereParams } from '../../atmosphere-effect'
-import { GROUND_BOUNCE, aimFarShadow, createFarShadowLight } from '../far-shadow'
+import { GROUND_BOUNCE, WALL_BOUNCE, aimFarShadow, createFarShadowLight } from '../far-shadow'
 import type { Room } from '../kit'
 import { createSky, sunDirection, sunLight, type SunPosition } from '../sky'
 
 /**
- * Afternoon: the sun behind the camera's right shoulder (−x, −z) and fairly
- * high, so the left-hand facades (facing −x) stand in warm light, the
- * right-hand houses shade their own pavement and part of the road, the car's
+ * Late afternoon: the sun behind the camera's right shoulder (−x, −z) at a
+ * third of the way up the sky, so the left-hand facades (facing −x) stand in warm light, the
+ * right-hand houses shade their own pavement and half the broad road, the car's
  * shadow falls forward and to its left, and the view up the street looks away
  * from the sun into clear blue. (Looking into a low sun the street was all
  * shade — nine-metre houses throw it right across — under a backlit grey
  * cloud deck.)
  */
-export const STREET_SUN: SunPosition = { azimuth: -140, elevation: 42 }
+export const STREET_SUN: SunPosition = { azimuth: -140, elevation: 34 }
 
 /** the mean albedo round the car — stone paving, plaster (linear), for the bounce light */
 const GROUND_ALBEDO = new THREE.Color(0.2, 0.18, 0.15)
+/** the facades' mean albedo (linear): warm pastels and white render */
+const FACADE_ALBEDO = new THREE.Color(0.5, 0.42, 0.34)
+/** a hand on the canyon bounce, for tuning against photographs */
+const WALL_BOUNCE_GAIN = 1.4
 
 export interface StreetWorld {
   sun: THREE.DirectionalLight
@@ -84,6 +88,11 @@ export function createStreetWorld(group: THREE.Group): StreetWorld {
     fill.color.setRGB(0.74, 0.82, 0.94).lerp(new THREE.Color(0.9, 0.7, 0.6), 1 - day)
     const onGround = sun.intensity * Math.max(0, Math.sin(THREE.MathUtils.degToRad(sunAt.elevation))) * 2
     GROUND_BOUNCE.value.copy(GROUND_ALBEDO).multiply(sun.color).multiplyScalar(onGround)
+    // the sunny facades lighting the street: pastel render (ρ ~0.45, warm) under the sun's light on a wall
+    // (∝ cos elevation), about half of them in sun, filling ~a third of what a point in the street sees,
+    // ×2 for the light going on between the walls and the paving
+    const onWalls = sun.intensity * Math.cos(THREE.MathUtils.degToRad(sunAt.elevation)) * 0.7
+    WALL_BOUNCE.value.copy(FACADE_ALBEDO).multiply(sun.color).multiplyScalar(onWalls * 0.5 * 0.35 * 2 * WALL_BOUNCE_GAIN)
     atmosphere.sunDirection.copy(dir)
     atmosphere.sunColor.copy(light.color).multiplyScalar(light.intensity * 0.35)
     atmosphere.airColor.copy(dayAir).lerp(lowAir, 0.35 * (1 - day)).multiplyScalar(0.4 + 0.6 * day)
@@ -104,6 +113,7 @@ export function createStreetWorld(group: THREE.Group): StreetWorld {
     },
     dispose() {
       GROUND_BOUNCE.value.setRGB(0, 0, 0)
+      WALL_BOUNCE.value.setRGB(0, 0, 0)
     },
   }
 }

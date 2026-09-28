@@ -17,7 +17,8 @@ import { fbm, ridged, smoothstep } from '../landform'
  */
 
 /** carriageway width, sidewalk width and kerb height (m) */
-export const ROAD = { width: 7.2, sidewalk: 2.2, curb: 0.14 }
+// (a broad main street — two lanes each way, room to park and to shoot a car from across it)
+export const ROAD = { width: 14.4, sidewalk: 2.2, curb: 0.14 }
 /** from a street's centre to its building line */
 export const FRONT = ROAD.width / 2 + ROAD.sidewalk
 /** side streets are narrower */
@@ -230,9 +231,10 @@ export function mainY(s: number): number {
 // ─── the valley floor every paved surface lies on ────────────────────────────
 const nearMain: StreetPoint = { s: 0, d: 0 }
 
-/** the valley's flanks: level for a street's width, then up (steeper on the +x side) */
+/** the valley's flanks: level across the main street, then up (steeper on the +x side) */
 function flank(d: number): number {
-  const u = Math.max(0, Math.abs(d) - 7)
+  // (level across the street, its pavements and a couple of metres more)
+  const u = Math.max(0, Math.abs(d) - (FRONT + 2))
   // (a hill town: the side streets climb at ~8–10 %, the houses stepping up them)
   const g = d > 0 ? 0.1 : 0.08
   return g * (Math.sqrt(u * u + 22 * 22) - 22)

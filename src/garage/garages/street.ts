@@ -203,16 +203,17 @@ function roadDetail(): RoadDetail {
     const c = w(j.at - 36, j.side * 6)
     return new THREE.Vector3(c.x, c.y, 42)
   })
-  const turnIn = w(-10, 7.5)
-  const older = w(-5, 8.5)
+  // (the side street behind-left of the car leaves the main street at s = −3, its mouth past d = 9.4)
+  const turnIn = w(-12, 11)
+  const older = w(-7, 12)
   const brake = w(40, -300)
   const brake2 = w(118, 300)
   const donut = w(13, 0.4)
   const marks: [THREE.Vector4, THREE.Vector4][] = [
-    arc(turnIn, 7.0, w(-10, 0.5), w(-3, 7.5), 0.85),
-    arc(older, 5.6, w(-5, 2.9), w(1.5, 8.5), 0.4),
-    arc(brake, 300.35 - 0.35, w(30, -1.0), w(52, -1.0), 0.6),
-    arc(brake2, 300.35 - 0.35, w(106, 1.0), w(126, 1.0), 0.35),
+    arc(turnIn, 9.0, w(-12, 2), w(-3, 11), 0.85),
+    arc(older, 7.5, w(-7, 4.5), w(0.5, 12), 0.4),
+    arc(brake, 298.2, w(30, -1.8), w(52, -1.8), 0.6),
+    arc(brake2, 298.2, w(106, 1.8), w(126, 1.8), 0.35),
     [new THREE.Vector4(donut.x, donut.y, 1.4, 0.5), new THREE.Vector4(0, 6.28, 0, 0)],
   ]
   const box = (s: number, d: number, halfAlong: number, halfAcross: number) => {
@@ -227,7 +228,7 @@ export const calleColonial: GarageDef = {
   name: 'Calle Colonial',
   tag: 'Out in the street of a colourful hillside colonial town, the road leading up the valley to the church',
   palette: ['#c65a4a', '#e2b441', '#6d9fc4', '#e8e3d6'],
-  look: 'daylight',
-  exposureKey: -3.8,
+  look: 'afternoon',
+  exposureKey: -3.5,
   create: createStreet,
 }

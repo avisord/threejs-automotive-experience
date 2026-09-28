@@ -62,6 +62,7 @@ const SSR_QUALITY: Record<SsrQuality, string> = { low: 'Low', medium: 'Medium', 
 const LOOK_LABEL: Record<GradeLook, string> = {
   natural: 'Natural',
   daylight: 'Daylight',
+  afternoon: 'Afternoon',
   golden: 'Golden hour',
   cyber: 'Cyber',
   warm: 'Warm',

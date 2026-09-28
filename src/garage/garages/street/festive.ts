@@ -146,7 +146,8 @@ export function createFestive(buildings: Buildings, materials: FestiveMaterials)
     // (as fat as the reference's: a thigh-thick cane two and a half metres long)
     canes.push(new THREE.Matrix4().compose(at.add(new THREE.Vector3(0, 0.12, 0)), q, new THREE.Vector3(2.4, 1.3, 2.4)))
   }
-  for (const [s, d] of [[21, -5.0], [23.2, -5.2], [24.6, -4.8], [27, -5.1]]) {
+  const pave = ROAD.width / 2
+  for (const [s, d] of [[21, -(pave + 1.4)], [23.2, -(pave + 1.6)], [24.6, -(pave + 1.2)], [27, -(pave + 1.5)]]) {
     const p = MAIN.at(s, d)
     giftAt(onPavement(new THREE.Vector3(p.x, 0, p.y)), new THREE.Vector3(1, 0, 0), 0.8 + rand() * 0.4)
   }
