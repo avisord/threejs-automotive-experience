@@ -279,6 +279,7 @@ function installRoom(): void {
   applyDaylight()
   const interior = savedInteriors[garageDef.id]
   if (room.interior && interior) room.interior.set(interior)
+  if (room.view) takeRoomView(room.view)
   captureEnvironment()
   // a sky still loading: capture again once it's in, if this room is still up
   const installed = room
@@ -289,6 +290,15 @@ function installRoom(): void {
     post.refreshGlow() // (its late meshes — trees, props — may reflect)
     invalidate(4)
   })
+}
+
+/** bring the orbit camera round to the room's own view of the car (walking or flying: where the orbit comes back to) */
+function takeRoomView(view: [number, number, number]): void {
+  const at = controls.target.clone().add(new THREE.Vector3(...view))
+  if (freeCam.mode === 'orbit') {
+    camera.position.copy(at)
+    controls.update()
+  } else orbitHome = at
 }
 
 /**

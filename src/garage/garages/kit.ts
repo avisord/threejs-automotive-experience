@@ -86,6 +86,12 @@ export interface Room {
    * right by the lens (the background gets ~a third of it, post.ts `lensCoc`).
    */
   depthOfField?: { bokehScale: number }
+  /**
+   * Where the orbit camera comes to when the garage is opened: its offset from the car's centre (m).
+   * A room built around one view (a street leading away behind the car) frames it; without one the
+   * camera stays where it was.
+   */
+  view?: [number, number, number]
 }
 
 /**
