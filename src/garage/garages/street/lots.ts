@@ -256,10 +256,14 @@ export function planLots(): Lot[] {
 }
 
 /** a side street's closing house across its far end, so the view down it ends on a facade */
-export function endLots(): { street: Street; s: number; width: number; storeys: number; wall: string; base: string }[] {
+export function endLots(): { street: Street; s: number; width: number; lot: Lot }[] {
   const rand = seeded(4242)
+  const pool: FamilyId[] = ['ochre', 'blue', 'terracotta', 'green']
   return SIDES.map((j: SideStreet, i) => {
-    const family = Object.values(FAMILIES)[(i * 3 + 1) % 8]
-    return { street: j.street, s: j.houses + 4, width: j.street.width + 2 * j.street.sidewalk + 8, storeys: 2, wall: pick(family.walls, rand()), base: pick(family.bases, rand()) }
+    const family = FAMILIES[pool[i % pool.length]]
+    const width = j.street.width + 2 * j.street.sidewalk + 8
+    // (a lot on no street of its own: its facade is built across the side street's end)
+    const lot = makeLot(j.street, 1, 0, width, 12, family, 2, rand)
+    return { street: j.street, s: j.houses + 4, width, lot }
   })
 }

@@ -174,8 +174,8 @@ export function createPaving(materials: { road: THREE.Material; pavement: THREE.
     return meshes
   }
   return {
-    road: setUp(road.build(materials.road, 'road', { uv: true })),
-    pavement: setUp(top.build(materials.pavement, 'pavement', { uv: true })),
-    kerb: setUp(kerb.build(materials.kerb, 'kerb', { uv: true })),
+    road: setUp(road.build(materials.road, 'road', { uv: 'world' })),
+    pavement: setUp(top.build(materials.pavement, 'pavement', { uv: 'world' })),
+    kerb: setUp(kerb.build(materials.kerb, 'kerb', { uv: 'world' })),
   }
 }

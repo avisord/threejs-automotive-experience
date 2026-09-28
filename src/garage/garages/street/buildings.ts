@@ -1,17 +1,17 @@
 import * as THREE from 'three'
 import { seeded } from '../landform'
 import { CellMesh } from './mesh'
+import { buildFacade, gardenFront, type FacadeMeshes } from './facade'
 import { UPPER, endLots, planLots, type Lot } from './lots'
-import { CHURCH, FRONT, MAIN, ROAD, streetY } from './site'
+import { CHURCH, FRONT, MAIN, ROAD, SIDES, SIDE_ROAD, streetY } from './site'
 
 /**
- * The town's houses as massing (phase 1 of the street: scale and composition):
- * each lot a block standing on the valley floor, its front on the building
- * line, its roofline at its storeys plus a parapet or under a tiled roof, a
- * base band in the family's dado colour, the paint a little faded house to
- * house. Neighbouring lots share their corners along the street, so the street
- * wall is continuous round the bends. Facades, windows and balconies come on
- * top of these blocks later.
+ * The town's houses: each lot a block standing on the valley floor, its front
+ * on the building line, its roofline at its storeys plus a parapet or under a
+ * tiled roof, the paint a little faded house to house. Neighbouring lots share
+ * their corners along the street, so the street wall is continuous round the
+ * bends. The street front — and a corner house's side on the side street — is
+ * a facade with its openings (facade.ts); party walls and backs stay plain.
  */
 
 const lin = (hex: string) => new THREE.Color(hex) // (THREE.Color parses CSS hex as sRGB → linear)
@@ -28,7 +28,7 @@ export interface Buildings {
 }
 
 /** a block from four ground corners (front-left, front-right, back-right, back-left, seen from the street) */
-function block(mesh: CellMesh, corners: THREE.Vector2[], bottom: number, top: number, colors: { wall: THREE.Color; roof: THREE.Color }, roof: 'flat' | 'tiled' = 'flat'): void {
+function block(mesh: CellMesh, corners: THREE.Vector2[], bottom: number, top: number, colors: { wall: THREE.Color; roof: THREE.Color }, roof: 'flat' | 'tiled' = 'flat', skip: number[] = []): void {
   const lo = corners.map((c) => new THREE.Vector3(c.x, bottom, c.y))
   const hi = corners.map((c) => new THREE.Vector3(c.x, top, c.y))
   const centre = new THREE.Vector3()
@@ -36,6 +36,7 @@ function block(mesh: CellMesh, corners: THREE.Vector2[], bottom: number, top: nu
   centre.divideScalar(4)
   // walls, each facing out from the block's centre
   for (let i = 0; i < 4; i++) {
+    if (skip.includes(i)) continue
     const j = (i + 1) % 4
     wall(mesh, lo[i], lo[j], hi[j], hi[i], centre, colors.wall)
   }
@@ -75,7 +76,16 @@ function upQuad(mesh: CellMesh, a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vec
   else mesh.quad(a, d, c, b, color)
 }
 
-function lotBlock(mesh: CellMesh, lot: Lot): void {
+/** does a lot's end at `s` stand on a corner — a side street's mouth or the church's plaza beside it */
+function onCorner(lot: Lot, s: number): boolean {
+  if (lot.street !== MAIN) return false
+  const c = SIDE_ROAD.width / 2 + SIDE_ROAD.sidewalk
+  const ends = SIDES.filter((j) => j.side === lot.side).flatMap((j) => [j.at - c, j.at + c])
+  if (lot.side === Math.sign(CHURCH.d)) ends.push(CHURCH.s - 26, CHURCH.s + 26)
+  return ends.some((e) => Math.abs(e - s) < 0.3)
+}
+
+function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[]): void {
   const { street, side } = lot
   const front = street.width / 2 + street.sidewalk + lot.setback
   const back = street.width / 2 + street.sidewalk + Math.max(lot.depth, lot.setback + 8)
@@ -85,29 +95,39 @@ function lotBlock(mesh: CellMesh, lot: Lot): void {
   const frontHigh = Math.max(ground[0], ground[1])
   const bottom = Math.min(...ground) - 1.5
   const height = lot.family.ground + (lot.storeys - 1) * UPPER + lot.parapet
-  const top = frontHigh + ROAD.curb + height
+  const base = frontHigh + ROAD.curb
+  const top = base + height
   const rand = seeded(lot.seed)
   const wallColor = lin(lot.wall).lerp(CHALK, lot.fade)
+  const dado = lin(lot.base)
   const roof = lot.family.roof === 'tiled' ? ROOF_TILE.clone().multiplyScalar(0.85 + rand() * 0.3) : ROOF_FLAT.clone().multiplyScalar(0.8 + rand() * 0.3)
-  block(mesh, corners, bottom, top, { wall: wallColor, roof }, lot.family.roof)
-  // the base band: a dado ~0.9 m up the front, standing proud of the wall by a few centimetres
-  const band = lot.family.id === 'stone' ? 0.6 : 0.8 + rand() * 0.4
-  const proud = 0.03
-  const fl = street.at(lot.s0, side * (front - proud))
-  const fr = street.at(lot.s1, side * (front - proud))
-  const baseColor = lin(lot.base)
-  const a = new THREE.Vector3(fl.x, frontLow - 0.2, fl.y)
-  const b = new THREE.Vector3(fr.x, frontLow - 0.2, fr.y)
-  const c = new THREE.Vector3(fr.x, frontLow + ROAD.curb + band, fr.y)
-  const d = new THREE.Vector3(fl.x, frontLow + ROAD.curb + band, fl.y)
-  const toStreet = street.at((lot.s0 + lot.s1) / 2, 0)
-  wall(mesh, a, b, c, d, new THREE.Vector3(toStreet.x, 0, toStreet.y).lerp(new THREE.Vector3((fl.x + fr.x) / 2, 0, (fl.y + fr.y) / 2), 2), baseColor)
-  // a front garden's wall along the building line
+  // the facades are built with their openings; the block's own walls stand everywhere else
+  const cornerStart = onCorner(lot, lot.s0)
+  const cornerEnd = onCorner(lot, lot.s1)
+  const skip = [0, ...(cornerEnd ? [1] : []), ...(cornerStart ? [3] : [])]
+  block(meshes.wall, corners, bottom, top, { wall: wallColor, roof }, lot.family.roof, skip)
+  const street0 = street.at((lot.s0 + lot.s1) / 2, 0)
+  const centre = corners.reduce((c, p) => c.add(p), new THREE.Vector2()).divideScalar(4)
+  const dadoTop = frontLow + ROAD.curb + (lot.family.id === 'stone' ? 0.6 : 0.8 + rand() * 0.4)
+  const opts = { base, top, bottom, wall: wallColor, dado, dadoTop }
+  buildFacade(meshes, lot, corners[0], corners[1], street0.clone().sub(corners[0]), opts)
+  if (cornerEnd) buildFacade(meshes, lot, corners[1], corners[2], corners[1].clone().sub(centre), { ...opts, side: true })
+  if (cornerStart) buildFacade(meshes, lot, corners[3], corners[0], corners[0].clone().sub(centre), { ...opts, side: true })
+  // a water tank on a good share of the flat roofs, toward the back
+  if (lot.family.roof === 'flat' && rand() < 0.4) {
+    const p = corners[2].clone().lerp(corners[3], 0.2 + rand() * 0.6).lerp(centre, 0.35)
+    tanks.push(new THREE.Vector3(p.x, top - lot.parapet, p.y))
+  }
+  // a front garden: a low rendered wall with stone piers and iron railings along the building line, a gate
   if (lot.setback > 0) {
     const line = street.width / 2 + street.sidewalk
-    const g = [street.at(lot.s0, side * line), street.at(lot.s1, side * line), street.at(lot.s1, side * (line + 0.35)), street.at(lot.s0, side * (line + 0.35))]
-    const gy = g.map((p) => streetY(p.x, p.y))
-    block(mesh, g, Math.min(...gy) - 0.3, Math.max(...gy) + ROAD.curb + 1.5, { wall: wallColor, roof: baseColor })
+    const a = street.at(lot.s0, side * line)
+    const b = street.at(lot.s1, side * line)
+    gardenFront(meshes, a, b, street0.clone().sub(a), { wall: wallColor, pier: lin('#d6cab2'), seed: lot.seed })
+    // the garden's ground, a little under the pavement (its beds and trees come with the planting)
+    const yard = [street.at(lot.s0, side * (line + 0.3)), street.at(lot.s1, side * (line + 0.3)), street.at(lot.s1, side * front), street.at(lot.s0, side * front)]
+    const gy = Math.min(...yard.map((p) => streetY(p.x, p.y)))
+    block(meshes.wall, yard, gy - 0.6, gy + 0.06, { wall: dado, roof: lin('#5d5a3e') })
   }
 }
 
@@ -159,24 +179,51 @@ function createChurch(): THREE.Group {
   return group
 }
 
-/** every house in town as massing, the side streets' closing houses, and the church */
-export function createBuildings(material: THREE.Material): Buildings {
+export interface BuildingMaterials {
+  wall: THREE.Material
+  glass: THREE.Material
+  iron: THREE.Material
+  lace: THREE.Material
+  tank: THREE.Material
+}
+
+/** every house in town with its facades, the side streets' closing houses, the roof tanks, and the church */
+export function createBuildings(materials: BuildingMaterials): Buildings {
   const lots = planLots()
-  const mesh = new CellMesh(60)
-  for (const lot of lots) lotBlock(mesh, lot)
+  const meshes: FacadeMeshes = { wall: new CellMesh(60), glass: new CellMesh(60), iron: new CellMesh(60), lace: new CellMesh(60) }
+  const tanks: THREE.Vector3[] = []
+  for (const lot of lots) lotBlock(meshes, lot, tanks)
   for (const end of endLots()) {
-    const { street } = end
+    const { street, lot } = end
     const half = end.width / 2
-    const corners = [street.at(end.s, -half), street.at(end.s, half), street.at(end.s + 12, half), street.at(end.s + 12, -half)]
+    const corners = [street.at(end.s, half), street.at(end.s, -half), street.at(end.s + 12, -half), street.at(end.s + 12, half)]
     const ground = corners.map((c) => streetY(c.x, c.y))
-    const top = Math.max(ground[0], ground[1]) + 4.2 + UPPER + 0.8
-    block(mesh, corners, Math.min(...ground) - 1.5, top, { wall: lin(end.wall), roof: ROOF_FLAT })
+    const base = Math.max(ground[0], ground[1]) + ROAD.curb
+    const top = base + lot.family.ground + UPPER + lot.parapet
+    const bottom = Math.min(...ground) - 1.5
+    const wallColor = lin(lot.wall).lerp(CHALK, lot.fade)
+    block(meshes.wall, corners, bottom, top, { wall: wallColor, roof: ROOF_FLAT }, 'flat', [0])
+    const toward = street.at(end.s - 10, 0)
+    buildFacade(meshes, lot, corners[0], corners[1], toward.clone().sub(corners[0]), { base, top, bottom, wall: wallColor, dado: lin(lot.base), dadoTop: Math.min(ground[0], ground[1]) + ROAD.curb + 0.9 })
   }
-  const meshes = mesh.build(material, 'houses', { colors: true })
-  for (const m of meshes) {
+  const built = [
+    ...meshes.wall.build(materials.wall, 'houses', { colors: true }),
+    ...meshes.glass.build(materials.glass, 'windows', { colors: true }),
+    ...meshes.iron.build(materials.iron, 'ironwork'),
+    ...meshes.lace.build(materials.lace, 'railings', { uv: 'stored' }),
+  ]
+  for (const m of built) {
     m.castShadow = true
     m.receiveShadow = true
   }
-  return { meshes, lots, church: createChurch() }
+  // the black plastic water tanks every flat roof in the region carries
+  const tankGeometry = new THREE.CylinderGeometry(0.55, 0.6, 1.25, 12).translate(0, 0.625, 0)
+  const tankMesh = new THREE.InstancedMesh(tankGeometry, materials.tank, tanks.length)
+  const m4 = new THREE.Matrix4()
+  tanks.forEach((p, i) => tankMesh.setMatrixAt(i, m4.makeTranslation(p.x, p.y, p.z)))
+  tankMesh.castShadow = true
+  tankMesh.receiveShadow = true
+  tankMesh.name = 'roof tanks'
+  tankMesh.computeBoundingSphere()
+  return { meshes: [...built, tankMesh], lots, church: createChurch() }
 }
-

@@ -3,6 +3,8 @@ import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
 import { disposeTree, type GarageDef, type Room } from './kit'
 import { outdoorMaterial } from './terrain'
 import { createBuildings } from './street/buildings'
+import { railingTexture } from './street/facade'
+import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
 import { createTown } from './street/town'
@@ -29,7 +31,19 @@ function createStreet(): Room {
   })
   group.add(...paving.road, ...paving.pavement, ...paving.kerb)
 
-  const buildings = createBuildings(outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 })))
+  const railings = railingTexture()
+  // (the glass keeps the street's reflection at full strength — a window is a mirror of the street, not
+  // lit ground — but takes the town-wide shadows like everything else)
+  const glass = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.05, metalness: 0 })
+  receiveFarShadow(glass)
+  const iron = { color: new THREE.Color('#1d1c1b'), roughness: 0.5, metalness: 0.45 }
+  const buildings = createBuildings({
+    wall: outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 })),
+    glass,
+    iron: outdoorMaterial(new THREE.MeshStandardMaterial(iron)),
+    lace: outdoorMaterial(new THREE.MeshStandardMaterial({ ...iron, map: railings, alphaTest: 0.5, side: THREE.DoubleSide })),
+    tank: outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#161616'), roughness: 0.55 })),
+  })
   group.add(...buildings.meshes, buildings.church)
   for (const m of new Set(buildings.church.children.map((c) => (c as THREE.Mesh).material as THREE.MeshStandardMaterial))) outdoorMaterial(m)
 
