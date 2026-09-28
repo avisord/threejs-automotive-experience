@@ -23,6 +23,7 @@ import { ColourBalanceEffect, NEUTRAL_WHEEL, type Wheel } from './colour-balance
 import { FilmEffect } from './film-effect'
 import { SsaoPass } from './ssao'
 import { SsrPass, type SsrQuality, type SsrScope } from './ssr'
+import { DEFAULT_SHADOWS, type ShadowSettings } from './shadows'
 
 export type { ToneMapper } from './tone-map-effect'
 export type { Wheel } from './colour-balance-effect'
@@ -137,6 +138,8 @@ export interface GraphicsSettings {
    * and per-point sky visibility, or the earlier estimate (a constant bounce, a fixed sky share)
    */
   gi: { probes: boolean }
+  /** the sun's shadow maps in open-air garages — applied by main.ts, see shadows.ts */
+  shadows: ShadowSettings
   /** sunlight shafts through the air (ray-marched through the sun's shadow map), open-air garages */
   volumetric: { enabled: boolean; strength: number; quality: VolumetricQuality }
   /** glare, starburst and ghosts when the sun is in view — see lens-flare-effect.ts */
@@ -333,6 +336,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 36, showFps: true },
   atmosphere: { enabled: true, strength: 1 },
   gi: { probes: true },
+  shadows: { ...DEFAULT_SHADOWS },
   volumetric: { enabled: true, strength: 1, quality: 'medium' },
   lensFlare: { enabled: true, intensity: 1 },
   dof: { mode: 'auto', strength: 1, range: 6 },

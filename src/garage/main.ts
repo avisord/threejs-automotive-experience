@@ -26,6 +26,7 @@ import { rolesPage } from './ui/roles-page'
 import { bakeContactShadow, disposeContactShadow } from './contact-shadow'
 import { createConfigurator, type CarConfigurator } from './configurator'
 import { LOOKS, REFLECTION_SCALE, createPostProcessing, type PostProcessing } from './post'
+import { applyShadows } from './shadows'
 import { mountPanel, menuList, type Nav, type Page } from './ui/panel'
 import { carPage } from './ui/car-page'
 import { collectionPage } from './ui/collection-page'
@@ -833,6 +834,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   garageDef = def
   room = def.create()
   room.gi?.set(post.settings.gi.probes)
+  syncShadows()
   if (bay) room.floorLayers.push(bay.shadow)
   installRoom()
   placement.refit() // a smaller room may not fit where the car stood
@@ -920,6 +922,7 @@ const videoStage: Stage = (() => {
       if (tracedShown) hideTraced()
       placement.helper.visible = false // never in a video
       directing = { size }
+      syncShadows() // (larger maps for a capture)
       app.classList.add('is-directing')
       resize()
     },
@@ -935,6 +938,7 @@ const videoStage: Stage = (() => {
       placement.helper.visible = saved?.gizmo ?? placement.helper.visible
       saved = null
       directing = null
+      syncShadows()
       app.classList.remove('is-directing')
       resize()
       noteActivity()
@@ -1627,7 +1631,12 @@ window.garage = garage
 // ─── settings that live outside the composer ────────────────────────────────
 // (the first room was built before the settings existed)
 room.gi?.set(post.settings.gi.probes)
+syncShadows()
 post.onChange((sections) => {
+  if (sections.includes('shadows')) {
+    syncShadows()
+    traceSceneChanged()
+  }
   if (sections.includes('gi') && room.gi) {
     room.gi.set(post.settings.gi.probes)
     lightingChanged() // (re-capture, and the probes rebake if they're on)
@@ -1645,6 +1654,13 @@ post.onChange((sections) => {
 for (const type of ['input', 'change', 'click']) app.addEventListener(type, () => invalidate())
 window.addEventListener('keydown', () => invalidate())
 applyQuality()
+
+/** the room's sun shadows as set (Settings › Graphics › Shadows); captures may take larger maps */
+function syncShadows(): void {
+  const s = post.settings.shadows
+  applyShadows(room.group, s, renderer, directing !== null && s.captureBoost)
+  invalidate(3)
+}
 
 // ─── path tracing (Settings › Graphics) ──────────────────────────────────────
 
