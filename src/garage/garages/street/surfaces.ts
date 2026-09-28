@@ -110,9 +110,9 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
     uMarkA: { value: pad(detail.marks.map((m) => m[0]), MARKS, () => new THREE.Vector4(0, 0, 0, 0)) },
     uMarkB: { value: pad(detail.marks.map((m) => m[1]), MARKS, () => new THREE.Vector4(0, 0, 0, 0)) },
     uPatch: { value: pad(detail.patches, PATCHES, () => new THREE.Vector4(0, 0, 0, 0)) },
-    uStone: { value: lin('#6f665c') },
-    uJoint: { value: lin('#2f2a24') },
-    uAsphalt: { value: lin('#302e2c') },
+    uStone: { value: lin('#a39a8c') },
+    uJoint: { value: lin('#5a5349') },
+    uAsphalt: { value: lin('#46433f') },
   }
   surface(material, 'road', {
     uniforms,
@@ -251,7 +251,7 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
 /** flagstones in running bond along the street, a few cracked, grimy at the wall and the kerb */
 export function pavementMaterial(): THREE.MeshStandardMaterial {
   return surface(outdoorMaterial(new THREE.MeshStandardMaterial({ roughness: 0.85 })), 'pavement', {
-    uniforms: { uSlab: { value: lin('#a2998b') } },
+    uniforms: { uSlab: { value: lin('#b3aa9c') } },
     vertexHead: 'attribute vec3 street;\nvarying vec3 vSD;',
     vertex: 'vSD = street;',
     head: 'varying vec3 vSD;\nuniform vec3 uSlab;',

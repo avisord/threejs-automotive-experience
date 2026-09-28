@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js'
 import { disposeTree, type GarageDef, type Room } from './kit'
+import { OUTDOOR_SKY_LIGHT } from './sky'
 import { outdoorMaterial } from './terrain'
 import { createBuildings } from './street/buildings'
 import { railingTexture } from './street/facade'
@@ -132,6 +133,18 @@ function createStreet(): Room {
   outdoor.add(woods.group)
   group.add(outdoor)
 
+  // The street's own surfaces take the sky from an environment captured down in the street (walls and all),
+  // so its canyon already dims it: the landscape's OUTDOOR_SKY_LIGHT (calibrated for open ground under a
+  // map captured in the open) on top dimmed it twice, and the shade — half the frame — went near black.
+  group.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh || isUnder(mesh, outdoor)) return
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const standard = m as THREE.MeshStandardMaterial
+      if (standard.isMeshStandardMaterial && standard.envMapIntensity === OUTDOOR_SKY_LIGHT) standard.envMapIntensity = STREET_SKY_LIGHT
+    }
+  })
+
   // no floor mirror in a street: a stand-in the app's bookkeeping can hold, never drawn
   const reflector = new Reflector(new THREE.PlaneGeometry(0.01, 0.01), { textureWidth: 1, textureHeight: 1 })
   reflector.visible = false
@@ -229,12 +242,20 @@ function roadDetail(): RoadDetail {
   return { fans, marks, patches: [box(-31, -1.6, 0.4, 1.6), box(36, 1.5, 0.7, 0.5), box(96, 0.6, 0.55, 0.55)] }
 }
 
+/** how strongly the street-level env map lights the street's own surfaces (see createStreet) */
+const STREET_SKY_LIGHT = 0.75
+
+function isUnder(o: THREE.Object3D, root: THREE.Object3D): boolean {
+  for (let p = o.parent; p; p = p.parent) if (p === root) return true
+  return false
+}
+
 export const calleColonial: GarageDef = {
   id: 'calle-colonial',
   name: 'Calle Colonial',
   tag: 'Out in the street of a colourful hillside colonial town, the road leading up the valley to the church',
   palette: ['#c65a4a', '#e2b441', '#6d9fc4', '#e8e3d6'],
   look: 'afternoon',
-  exposureKey: -3.5,
+  exposureKey: -2.6,
   create: createStreet,
 }
