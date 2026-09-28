@@ -3,6 +3,7 @@ import type { AtmosphereParams } from '../../atmosphere-effect'
 import { GROUND_BOUNCE, WALL_BOUNCE, aimFarShadow, createFarShadowLight } from '../far-shadow'
 import type { Room } from '../kit'
 import { createSky, sunDirection, sunLight, type SunPosition } from '../sky'
+import { createCumulus } from '../coast/clouds'
 
 /**
  * Late afternoon: the sun behind the camera's right shoulder (−x, −z) at a
@@ -26,6 +27,8 @@ export interface StreetWorld {
   sun: THREE.DirectionalLight
   atmosphere: AtmosphereParams
   hooks: Pick<Room, 'sun' | 'atmosphere' | 'shadowsChanged'>
+  /** re-render both sun shadow maps (the trees arrived, a car came or went) */
+  shadowsChanged(): void
   sky: ReturnType<typeof createSky>
   dispose(): void
 }
@@ -33,7 +36,9 @@ export interface StreetWorld {
 /** the sky, the sun with its near and town-wide shadows, the sky's fill, and the air */
 export function createStreetWorld(group: THREE.Group): StreetWorld {
   const sky = createSky({ coverage: 0.3, scale: 0.5, density: 0.8 })
-  group.add(sky.mesh)
+  // heaped fair-weather cumulus round the horizon (impostor cards 11.5 km out), over the sky's thin deck
+  const cumulus = createCumulus()
+  group.add(sky.mesh, cumulus.group)
 
   const sun = new THREE.DirectionalLight(0xffffff, 2.2)
   sun.castShadow = true
@@ -79,6 +84,7 @@ export function createStreetWorld(group: THREE.Group): StreetWorld {
     const light = sunLight(sunAt.elevation)
     const day = THREE.MathUtils.smoothstep(sunAt.elevation, 0, 25)
     sky.setSun(dir)
+    cumulus.setSun(dir, light.color, day)
     sun.position.copy(dir).multiplyScalar(200)
     sun.color.copy(light.color)
     sun.intensity = light.intensity * 1.7
@@ -111,7 +117,12 @@ export function createStreetWorld(group: THREE.Group): StreetWorld {
         farShadow.shadow.needsUpdate = true
       },
     },
+    shadowsChanged() {
+      sun.shadow.needsUpdate = true
+      farShadow.shadow.needsUpdate = true
+    },
     dispose() {
+      cumulus.atlas.dispose()
       GROUND_BOUNCE.value.setRGB(0, 0, 0)
       WALL_BOUNCE.value.setRGB(0, 0, 0)
     },

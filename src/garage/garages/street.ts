@@ -14,6 +14,7 @@ import { createInteriorLights } from './interior'
 import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
+import { createWoods } from './street/woods'
 import { createStreetWorld } from './street/world'
 import { MAIN, ROAD, SIDES, groundTexture } from './street/site'
 import {
@@ -126,6 +127,9 @@ function createStreet(): Room {
   const outdoor = new THREE.Group()
   outdoor.name = 'street-outdoor'
   outdoor.add(createStreetTerrain())
+  // the trees: garden, plaza, back yards, and the woods on the hills (grown asynchronously)
+  const woods = createWoods(buildings.lots)
+  outdoor.add(woods.group)
   group.add(outdoor)
 
   // no floor mirror in a street: a stand-in the app's bookkeeping can hold, never drawn
@@ -144,7 +148,9 @@ function createStreet(): Room {
     environmentIntensity: 1,
     resize: () => {},
     setReflectionScale: () => {},
-    ready: Promise.all([road.ready, rubble.ready]).then(() => {}),
+    ready: Promise.all([road.ready, rubble.ready, woods.ready]).then(() => {
+      world.shadowsChanged() // (the trees arrived: they cast into both shadow maps)
+    }),
     dispose: () => {
       disposeTree(group)
       ground.texture.dispose()

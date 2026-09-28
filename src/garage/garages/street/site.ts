@@ -365,6 +365,12 @@ export function hills(x: number, z: number, out = outOfTown(x, z)): number {
   return near * crest + head + far
 }
 
+/** 0–1: how wooded the land is — the hills are forest, broken by clearings; the valley round the town is open */
+export function woodedness(x: number, z: number, out = outOfTown(x, z)): number {
+  const lift = hills(x, z, out)
+  return smoothstep(lift, 8, 60) * smoothstep(fbm(x / 420 + 11, z / 420 - 3, 4), 0.34, 0.5)
+}
+
 /** the ground: the valley floor, the hills on it, and a little roughness away from the streets */
 export function heightAt(x: number, z: number): number {
   const m = MAIN.nearest(x, z, nearMain)
@@ -385,8 +391,11 @@ export function groundTexture(): { texture: THREE.DataTexture; rect: THREE.Vecto
   // (round every street, its houses and a margin)
   const b = STREETS.reduce((r, st) => ({ x0: Math.min(r.x0, st.box.x0), x1: Math.max(r.x1, st.box.x1), z0: Math.min(r.z0, st.box.z0), z1: Math.max(r.z1, st.box.z1) }), { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity })
   const m = 60
-  const rect = new THREE.Vector4(Math.floor(b.x0 - m), Math.floor(b.z0 - m), Math.ceil(b.x1 - b.x0 + 2 * m), Math.ceil(b.z1 - b.z0 + 2 * m))
   const step = 2
+  // (whole texels: a width that wasn't a multiple of the step sheared every row of the texture, and the
+  // walls' "height above the pavement" came out in diagonal bands — dark V-shaped dirt up whole walls)
+  const snap = (v: number) => Math.ceil(v / step) * step
+  const rect = new THREE.Vector4(Math.floor(b.x0 - m), Math.floor(b.z0 - m), snap(b.x1 - b.x0 + 2 * m), snap(b.z1 - b.z0 + 2 * m))
   const w = rect.z / step
   const h = rect.w / step
   const data = new Uint16Array(w * h)
