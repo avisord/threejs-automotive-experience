@@ -93,8 +93,9 @@ const MARKS = 10
 const PATCHES = 4
 
 /**
- * Stone setts in courses across the street (0.34 m courses, stones 0.5–0.66 m, running
- * bond, wavy joints), fanned round the junctions with a border course where a fan meets
+ * Stone setts in courses across the street (~17 cm courses, stones 0.1–0.3 m, some split,
+ * rounded, of four kinds of stone, each tilted and polished its own way; wandering joints
+ * filled with sand or soil), fanned round the junctions with a border course where a fan meets
  * the straight courses, a gutter channel of long stones along each kerb. Street
  * coordinates come in the `street` attribute: (s along, d across, half-width).
  */
@@ -147,46 +148,97 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
           break;
         }
       }
-      // wavy joints: stones are hand-laid
-      q += vec2( sfNoise( q * 2.1 ), sfNoise( q.yx * 2.3 + 5.0 ) ) * 0.025;
+      // hand-laid setts: the joints wander at two scales, no course or stone runs dead straight
+      q += vec2( sfNoise( q * 3.7 ), sfNoise( q.yx * 4.1 + 5.0 ) ) * 0.035 + vec2( sfNoise( q * 9.0 + 2.0 ), sfNoise( q.yx * 9.5 + 3.0 ) ) * 0.005;
       vec2 id;
       float e;
+      // the stone's own offset from its centre (m), for its tilt
+      vec2 fc = vec2( 0.0 );
       float gutterD = ad - ( hw - 0.36 );
-      float P = 0.34;
-      float L = 0.58;
+      float P = 0.17;
+      float L = 0.24;
       if ( gutterD > 0.0 && ! fan ) {
         // the gutter channel: a single course of long stones along the kerb
         float x = sd.x / 0.8;
         id = vec2( floor( x ), 500.0 + sign( sd.y ) );
         e = min( min( fract( x ), 1.0 - fract( x ) ) * 0.8, min( gutterD, 0.36 - gutterD ) );
+        fc = vec2( ( fract( x ) - 0.5 ) * 0.8, gutterD - 0.18 );
         L = 0.8;
+        P = 0.36;
       } else if ( fan && border < 0.32 ) {
         // the border course round a fan
         float x = q.x / 0.9;
         id = vec2( floor( x ), 700.0 );
         e = min( min( fract( x ), 1.0 - fract( x ) ) * 0.9, min( border, 0.32 - border ) );
+        fc = vec2( ( fract( x ) - 0.5 ) * 0.9, border - 0.16 );
+        L = 0.9;
+        P = 0.32;
       } else {
+        // courses ~17 cm; each course's stones its own length (0.2–0.3 m), some split in two unevenly
         float row = floor( q.y / P );
-        L = 0.5 + 0.16 * sfHash( vec2( mod( row, 997.0 ), 7.0 ) );
+        float rh = sfHash( vec2( mod( row, 997.0 ), 7.0 ) );
+        L = 0.2 + 0.1 * rh;
         float x = q.x / L + sfHash( vec2( mod( row, 991.0 ), 3.0 ) );
-        vec2 f = vec2( fract( x ) * L, fract( q.y / P ) * P );
-        id = vec2( floor( x ), row );
-        e = min( min( f.x, L - f.x ), min( f.y, P - f.y ) );
+        float cell = floor( x );
+        float fx = fract( x );
+        float sh = sfHash( vec2( mod( cell, 997.0 ), mod( row, 991.0 ) + 0.5 ) );
+        float a0 = 0.0;
+        float a1 = 1.0;
+        if ( sh > 0.55 ) {
+          float cut = 0.35 + 0.3 * sfHash( vec2( mod( cell, 997.0 ) + 0.3, mod( row, 991.0 ) ) );
+          if ( fx < cut ) a1 = cut; else a0 = cut;
+          cell += fx < cut ? 0.0 : 0.5;
+        }
+        float fy = fract( q.y / P ) * P;
+        float ex = min( fx - a0, a1 - fx ) * L;
+        float ey = min( fy, P - fy );
+        // rounded corners, each stone its own radius, and its edges pulled in unevenly (the joints vary)
+        float rr = 0.025 + 0.025 * sh;
+        ex -= 0.006 * sfHash( vec2( cell, row ) + 9.1 );
+        ey -= 0.006 * sfHash( vec2( cell, row ) + 4.7 );
+        e = min( ex, ey );
+        if ( ex < rr && ey < rr ) e = rr - length( rr - vec2( ex, ey ) );
+        id = vec2( cell * 2.0, row );
+        fc = vec2( ( fx - ( a0 + a1 ) * 0.5 ) * L, fy - P * 0.5 );
       }
       vec2 hid = mod( id, 997.0 ) + 0.37;
       float h = sfHash( hid );
       float h2 = sfHash( hid + 5.1 );
-      vec3 stone = uStone * ( 0.78 + 0.4 * h );
-      stone *= mix( vec3( 1.0 ), vec3( 1.07, 0.98, 0.9 ), h2 );
-      if ( h2 > 0.94 ) stone *= vec3( 0.72, 0.68, 0.66 );
-      if ( h2 < 0.04 ) stone *= vec3( 1.2, 1.15, 1.08 );
-      stone *= 0.88 + 0.24 * sfNoise( sd * 3.1 + h * 40.0 );
-      stone *= 0.9 + 0.2 * sfFbm( vW.xz * 0.12 );
-      // the joints, box-filtered: a joint narrower than the pixel fades to its share of the ground
-      float jw = 0.012 + 0.006 * sfNoise( q * 9.0 );
-      float joint = 1.0 - smoothstep( jw - px * 0.5, jw + px * 0.5, e );
-      joint = mix( joint, clamp( 2.0 * jw / P + 2.0 * jw / L, 0.0, 1.0 ), smoothstep( 0.012, 0.05, px ) );
-      vec3 col = mix( stone, uJoint * ( 0.8 + 0.4 * sfNoise( sd * 2.0 ) ), joint );
+      float h3 = sfHash( hid + 8.3 );
+      // how much of a stone's own look survives at this distance (a stone under a few pixels fades to the
+      // mean, or the frame shimmers)
+      float near = 1.0 - smoothstep( 0.02, 0.09, px );
+      // four kinds of stone, laid mixed: grey granite, warm limestone, dark basalt, a few pink
+      vec3 kind = h2 < 0.52 ? vec3( 1.0 ) : h2 < 0.8 ? vec3( 1.05, 1.0, 0.9 ) : h2 < 0.93 ? vec3( 0.7, 0.68, 0.66 ) : vec3( 1.04, 0.96, 0.93 );
+      // (far off, a little of each stone's own shade stays: an even grey there read as poured concrete)
+      vec3 stone = uStone * mix( vec3( 0.96 ) * ( 0.93 + 0.14 * h ), kind * ( 0.86 + 0.28 * h ), near );
+      // worn: the crown polished paler, the edges grubby; a fine speckle in the grain
+      stone *= 1.0 + 0.05 * smoothstep( 0.0, 0.05, e ) * near;
+      stone *= 1.0 - 0.1 * ( 1.0 - smoothstep( 0.0, 0.03, e ) ) * near;
+      stone *= 1.0 + ( sfNoise( vW.xz * 90.0 ) - 0.5 ) * 0.18 * ( 1.0 - smoothstep( 0.004, 0.012, px ) );
+      // mottling at the scale of a few metres (worn tracks, newer and older stone): the texture that
+      // survives into the distance
+      stone *= 0.86 + 0.28 * sfFbm( vW.xz * 0.12 );
+      stone *= 0.9 + 0.2 * sfFbm( vW.xz * 0.6 + 13.0 );
+      // relaid patches: a few metres of newer, more even, paler stone where the street was dug up
+      vec2 rc = floor( vW.xz / 3.5 );
+      float relaid = step( 0.965, sfHash( rc + 0.21 ) ) * step( 0.2, fract( vW.x / 3.5 ) ) * step( 0.25, fract( vW.z / 3.5 ) );
+      stone = mix( stone, uStone * vec3( 1.12, 1.1, 1.06 ) * ( 0.95 + 0.1 * h ), relaid );
+      // the joints, box-filtered: a joint narrower than the pixel fades to its share of the ground;
+      // filled with sand in places, dark soil and grime in others
+      float jw = 0.008 + 0.007 * sfNoise( q * 5.0 );
+      // (filtered by how fast the distance to the joint changes across this pixel, not by the pixel's
+      // footprint: at a grazing angle the footprint is long one way and short the other, and a fixed width
+      // broke the joints across the view into dashes)
+      float fw = max( fwidth( e ), 1e-5 );
+      float joint = 1.0 - smoothstep( jw - fw, jw + fw, e );
+      joint = mix( joint, clamp( 2.0 * jw / P + 2.0 * jw / L + 0.08, 0.0, 1.0 ), smoothstep( 0.5, 1.5, fw / jw ) );
+      vec3 fill = mix( uJoint, vec3( 0.3, 0.26, 0.2 ), smoothstep( 0.35, 0.7, sfNoise( vW.xz * 1.7 ) ) );
+      vec3 col = mix( stone, fill * ( 0.8 + 0.4 * sfNoise( vW.xz * 6.0 ) ), joint * 0.85 );
+      // dust blown against the kerbs and in drifts, damp stains
+      float dust = smoothstep( 0.55, 0.8, sfFbm( vW.xz * 0.45 + 21.0 ) ) * 0.35 + smoothstep( hw - 1.4, hw - 0.3, ad ) * 0.25;
+      col = mix( col, vec3( 0.3, 0.27, 0.22 ), dust * ( 0.5 + 0.5 * sfNoise( vW.xz * 3.0 ) ) );
+      col *= 1.0 - 0.12 * smoothstep( 0.66, 0.86, sfFbm( vW.xz * 0.22 + 5.0 ) );
       // wheel paths polished and a shade darker, an oil drip line between them, dirt in the gutters
       // lanes: one each way on a narrow street, two on the broad main street; the wheels run 0.8 m either
       // side of a lane's middle, oil drips down the middle
@@ -200,7 +252,8 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       float gutter = smoothstep( hw - 1.0, hw - 0.05, ad );
       col = mix( col, col * vec3( 0.78, 0.73, 0.66 ), gutter * ( 0.5 + 0.5 * sfNoise( sd * 1.3 ) ) );
       col *= 1.0 - 0.13 * smoothstep( 0.62, 0.85, sfFbm( vW.xz * 0.35 + 11.0 ) );
-      float rough = 0.78 + 0.14 * h - 0.14 * wheel + 0.12 * joint + 0.08 * gutter;
+      // each stone its own polish (the wheel paths the glossiest), dust and joints matt
+      float rough = 0.7 + 0.2 * h3 * near - 0.14 * wheel + 0.15 * joint + 0.08 * gutter + 0.1 * dust;
       // asphalt repairs over a trench or a pothole: flat, dark, a tarred seam round the edge
       for ( int k = 0; k < ${PATCHES}; k ++ ) {
         vec4 pa = uPatch[ k ];
@@ -241,7 +294,15 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       diffuseColor.rgb = col;
       sfRough = rough;
       // stones crowned a few millimetres, the joints sunk; faded out once the stones are a few pixels
-      sfH = ( 0.004 * smoothstep( 0.0, 0.06, e ) - 0.003 * joint + 0.0006 * sfNoise( sd * 40.0 ) ) * ( 1.0 - smoothstep( 0.006, 0.03, px ) );
+      // each stone crowned, tilted a little its own way, a few sunk
+      float tilt = dot( fc, vec2( h - 0.5, h3 - 0.5 ) ) * 0.06;
+      float sunk = -0.004 * step( 0.9, sfHash( hid + 2.9 ) );
+      // (no step down into the joint and no fine grain in the bump: derivatives come in 2×2 pixel blocks, and
+      // a sharp drop there dotted every joint; the crown's roll down to the joint is smooth enough)
+      // (tilt and sinking both reach zero at the stone's edge: a height that jumped from one stone to the next
+      // across the joint dotted it the same way)
+      float body = smoothstep( 0.0, 0.05, e );
+      sfH = ( 0.009 + tilt + sunk ) * body * ( 1.0 - smoothstep( 0.006, 0.03, px ) );
     `,
   })
   return { material, ready: grit.ready }
