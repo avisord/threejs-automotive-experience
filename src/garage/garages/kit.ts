@@ -78,6 +78,8 @@ export interface Room {
   atmosphere?: AtmosphereParams
   /** something that casts the sun's shadow changed (a car arrived or left): re-render its shadow map */
   shadowsChanged?(): void
+  /** the car's world box where it now stands (loaded, moved, turned), or null for an empty bay */
+  carPlaced?(car: THREE.Box3 | null): void
   /** the room's own light fittings, in groups the user can switch, dim and warm (Menu › Garage) */
   interior?: InteriorLights
   /**

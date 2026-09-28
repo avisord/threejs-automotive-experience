@@ -639,6 +639,7 @@ const placement = createCarPlacement({
       if (spot.isSpotLight && spot.castShadow) spot.shadow.needsUpdate = true
     })
     room.shadowsChanged?.()
+    carPlaced()
     traceSceneChanged()
     invalidate(2)
     panelNav?.refresh() // the Car page shows where it is
@@ -696,6 +697,13 @@ function clearBay(): void {
   garage.lamps = undefined
 }
 
+/** tell the room where the car stands now (its world box), or that the bay is empty */
+function carPlaced(): void {
+  if (!bay) return room.carPlaced?.(null)
+  bay.root.updateMatrixWorld()
+  room.carPlaced?.(bay.box.clone().applyMatrix4(bay.root.matrixWorld))
+}
+
 /** what car-dependent pages show when there's no car to work on */
 const bayPlaceholder = () => (loadingId ? 'Loading car…' : 'No car in the bay — pick one in Collection.')
 
@@ -707,6 +715,7 @@ async function showCar(id: string, { quiet = false } = {}): Promise<void> {
     setPicking(false)
     clearBay()
     room.shadowsChanged?.()
+    carPlaced()
     try {
       localStorage.setItem(CAR_KEY, NO_CAR)
     } catch {
@@ -764,6 +773,7 @@ async function showCar(id: string, { quiet = false } = {}): Promise<void> {
     frameLength(Math.max(size.x, size.z))
     centreOnCar()
     room.shadowsChanged?.()
+    carPlaced()
     traceSceneChanged()
     post.refreshGlow()
     invalidate(4) // first frames also compile the new car's shaders
@@ -837,6 +847,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   syncShadows()
   if (bay) room.floorLayers.push(bay.shadow)
   installRoom()
+  carPlaced()
   placement.refit() // a smaller room may not fit where the car stood
   post.setAtmosphere(room.atmosphere ?? null)
   post.setExposureKey(def.exposureKey)
