@@ -93,7 +93,7 @@ const MARKS = 10
 const PATCHES = 4
 
 /**
- * Stone setts in courses across the street (~17 cm courses, stones 0.1–0.3 m, some split,
+ * Stone setts in courses across the street (~34 cm courses, stones 0.2–0.6 m, some split,
  * rounded, of four kinds of stone, each tilted and polished its own way; wandering joints
  * filled with sand or soil), fanned round the junctions with a border course where a fan meets
  * the straight courses, a gutter channel of long stones along each kerb. Street
@@ -149,14 +149,14 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
         }
       }
       // hand-laid setts: the joints wander at two scales, no course or stone runs dead straight
-      q += vec2( sfNoise( q * 3.7 ), sfNoise( q.yx * 4.1 + 5.0 ) ) * 0.035 + vec2( sfNoise( q * 9.0 + 2.0 ), sfNoise( q.yx * 9.5 + 3.0 ) ) * 0.005;
+      q += vec2( sfNoise( q * 1.9 ), sfNoise( q.yx * 2.1 + 5.0 ) ) * 0.06 + vec2( sfNoise( q * 4.5 + 2.0 ), sfNoise( q.yx * 4.8 + 3.0 ) ) * 0.009;
       vec2 id;
       float e;
       // the stone's own offset from its centre (m), for its tilt
       vec2 fc = vec2( 0.0 );
       float gutterD = ad - ( hw - 0.36 );
-      float P = 0.17;
-      float L = 0.24;
+      float P = 0.34;
+      float L = 0.48;
       if ( gutterD > 0.0 && ! fan ) {
         // the gutter channel: a single course of long stones along the kerb
         float x = sd.x / 0.8;
@@ -174,10 +174,10 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
         L = 0.9;
         P = 0.32;
       } else {
-        // courses ~17 cm; each course's stones its own length (0.2–0.3 m), some split in two unevenly
+        // courses ~34 cm; each course's stones its own length (0.4–0.6 m), some split in two unevenly
         float row = floor( q.y / P );
         float rh = sfHash( vec2( mod( row, 997.0 ), 7.0 ) );
-        L = 0.2 + 0.1 * rh;
+        L = 0.4 + 0.2 * rh;
         float x = q.x / L + sfHash( vec2( mod( row, 991.0 ), 3.0 ) );
         float cell = floor( x );
         float fx = fract( x );
@@ -193,9 +193,9 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
         float ex = min( fx - a0, a1 - fx ) * L;
         float ey = min( fy, P - fy );
         // rounded corners, each stone its own radius, and its edges pulled in unevenly (the joints vary)
-        float rr = 0.025 + 0.025 * sh;
-        ex -= 0.006 * sfHash( vec2( cell, row ) + 9.1 );
-        ey -= 0.006 * sfHash( vec2( cell, row ) + 4.7 );
+        float rr = 0.05 + 0.05 * sh;
+        ex -= 0.012 * sfHash( vec2( cell, row ) + 9.1 );
+        ey -= 0.012 * sfHash( vec2( cell, row ) + 4.7 );
         e = min( ex, ey );
         if ( ex < rr && ey < rr ) e = rr - length( rr - vec2( ex, ey ) );
         id = vec2( cell * 2.0, row );
@@ -207,14 +207,14 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       float h3 = sfHash( hid + 8.3 );
       // how much of a stone's own look survives at this distance (a stone under a few pixels fades to the
       // mean, or the frame shimmers)
-      float near = 1.0 - smoothstep( 0.02, 0.09, px );
+      float near = 1.0 - smoothstep( 0.04, 0.18, px );
       // four kinds of stone, laid mixed: grey granite, warm limestone, dark basalt, a few pink
       vec3 kind = h2 < 0.52 ? vec3( 1.0 ) : h2 < 0.8 ? vec3( 1.05, 1.0, 0.9 ) : h2 < 0.93 ? vec3( 0.7, 0.68, 0.66 ) : vec3( 1.04, 0.96, 0.93 );
       // (far off, a little of each stone's own shade stays: an even grey there read as poured concrete)
       vec3 stone = uStone * mix( vec3( 0.96 ) * ( 0.93 + 0.14 * h ), kind * ( 0.86 + 0.28 * h ), near );
       // worn: the crown polished paler, the edges grubby; a fine speckle in the grain
-      stone *= 1.0 + 0.05 * smoothstep( 0.0, 0.05, e ) * near;
-      stone *= 1.0 - 0.1 * ( 1.0 - smoothstep( 0.0, 0.03, e ) ) * near;
+      stone *= 1.0 + 0.05 * smoothstep( 0.0, 0.1, e ) * near;
+      stone *= 1.0 - 0.1 * ( 1.0 - smoothstep( 0.0, 0.06, e ) ) * near;
       stone *= 1.0 + ( sfNoise( vW.xz * 90.0 ) - 0.5 ) * 0.18 * ( 1.0 - smoothstep( 0.004, 0.012, px ) );
       // mottling at the scale of a few metres (worn tracks, newer and older stone): the texture that
       // survives into the distance
@@ -226,7 +226,7 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       stone = mix( stone, uStone * vec3( 1.12, 1.1, 1.06 ) * ( 0.95 + 0.1 * h ), relaid );
       // the joints, box-filtered: a joint narrower than the pixel fades to its share of the ground;
       // filled with sand in places, dark soil and grime in others
-      float jw = 0.008 + 0.007 * sfNoise( q * 5.0 );
+      float jw = 0.011 + 0.009 * sfNoise( q * 2.5 );
       // (filtered by how fast the distance to the joint changes across this pixel, not by the pixel's
       // footprint: at a grazing angle the footprint is long one way and short the other, and a fixed width
       // broke the joints across the view into dashes)
@@ -296,13 +296,13 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       // stones crowned a few millimetres, the joints sunk; faded out once the stones are a few pixels
       // each stone crowned, tilted a little its own way, a few sunk
       float tilt = dot( fc, vec2( h - 0.5, h3 - 0.5 ) ) * 0.06;
-      float sunk = -0.004 * step( 0.9, sfHash( hid + 2.9 ) );
+      float sunk = -0.006 * step( 0.9, sfHash( hid + 2.9 ) );
       // (no step down into the joint and no fine grain in the bump: derivatives come in 2×2 pixel blocks, and
       // a sharp drop there dotted every joint; the crown's roll down to the joint is smooth enough)
       // (tilt and sinking both reach zero at the stone's edge: a height that jumped from one stone to the next
       // across the joint dotted it the same way)
-      float body = smoothstep( 0.0, 0.05, e );
-      sfH = ( 0.009 + tilt + sunk ) * body * ( 1.0 - smoothstep( 0.006, 0.03, px ) );
+      float body = smoothstep( 0.0, 0.1, e );
+      sfH = ( 0.014 + tilt + sunk ) * body * ( 1.0 - smoothstep( 0.01, 0.05, px ) );
     `,
   })
   return { material, ready: grit.ready }
