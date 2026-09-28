@@ -104,7 +104,7 @@ function wallLantern(): { iron: THREE.BufferGeometry; glass: THREE.BufferGeometr
 }
 
 /** paint a part for a vertex-coloured material */
-function colour(g: THREE.BufferGeometry, c: THREE.Color): THREE.BufferGeometry {
+export function colour(g: THREE.BufferGeometry, c: THREE.Color): THREE.BufferGeometry {
   const n = g.getAttribute('position').count
   const a = new Float32Array(n * 3)
   for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3)
@@ -140,10 +140,10 @@ function bollard(): THREE.BufferGeometry {
   return merged([new THREE.LatheGeometry(profile, 10), new THREE.SphereGeometry(0.075, 10, 6).translate(0, 0.8, 0)])
 }
 
-function merged(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+export function merged(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const hasColor = parts.some((p) => p.getAttribute('color'))
   const clean = parts.map((p) => {
-    const g = p.index ? p.toNonIndexed() : p
+    const g = p.index ? p.toNonIndexed() : p.clone()
     if (!hasColor) g.deleteAttribute('color')
     for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) g.deleteAttribute(name)
     return g
@@ -160,7 +160,7 @@ function merged(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
  * true 1–2 cm, wires more than a few tens of metres off fell between pixels
  * and broke into crawling dashes.
  */
-class Wires {
+export class Wires {
   private position: number[] = []
   private centre: number[] = []
   private normal: number[] = []
@@ -242,7 +242,7 @@ export function wireMaterial(): THREE.MeshStandardMaterial {
 }
 
 /** keep the wire material's pixel size up to date for the camera drawing it (0 for shadow maps: true width) */
-function trackPixel(mesh: THREE.Mesh): void {
+export function trackPixel(mesh: THREE.Mesh): void {
   const pixel = (mesh.material as THREE.Material).userData.pixel as { value: number }
   const size = new THREE.Vector2()
   mesh.onBeforeRender = (renderer, _scene, camera) => {
@@ -264,11 +264,12 @@ function plate(mesh: CellMesh, centre: THREE.Vector3, facing: THREE.Vector3, w: 
   const right = new THREE.Vector3(facing.z, 0, -facing.x).normalize()
   const corner = (sx: number, sy: number, push: number) => centre.clone().addScaledVector(right, (sx * w) / 2).add(new THREE.Vector3(0, (sy * h) / 2, 0)).addScaledVector(facing, push)
   const [u0, v0, u1, v1] = cell
+  // (seen from the front, `right` is the viewer's right: the picture's u runs along it)
   mesh.facing(corner(-1, -1, 0.004), corner(1, -1, 0.004), corner(1, 1, 0.004), corner(-1, 1, 0.004), facing, undefined, [
-    [u1, v0],
     [u0, v0],
-    [u0, v1],
+    [u1, v0],
     [u1, v1],
+    [u0, v1],
   ])
   const [b0, c0, b1, c1] = SIGN.back
   mesh.facing(corner(-1, -1, -0.004), corner(1, -1, -0.004), corner(1, 1, -0.004), corner(-1, 1, -0.004), facing.clone().negate(), undefined, [

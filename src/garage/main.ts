@@ -263,6 +263,14 @@ try {
 } catch {
   // defaults
 }
+const OPTIONS_KEY = 'garage.options.v1'
+/** scene switches picked per garage (Room.options) */
+let savedOptions: Record<string, Record<string, boolean>> = {}
+try {
+  savedOptions = JSON.parse(localStorage.getItem(OPTIONS_KEY) ?? '{}') as Record<string, Record<string, boolean>>
+} catch {
+  // defaults
+}
 installRoom()
 
 /** put `room` in the scene and light the car with it */
@@ -279,6 +287,10 @@ function installRoom(): void {
   applyDaylight()
   const interior = savedInteriors[garageDef.id]
   if (room.interior && interior) room.interior.set(interior)
+  for (const option of room.options ?? []) {
+    const saved = savedOptions[garageDef.id]?.[option.id]
+    if (saved !== undefined) option.set(saved)
+  }
   if (room.view) takeRoomView(room.view)
   captureEnvironment()
   // a sky still loading: capture again once it's in, if this room is still up
@@ -385,6 +397,22 @@ function setInterior(settings: InteriorSettings): void {
   } catch {
     // not remembered — fine
   }
+  lightingChanged()
+}
+
+/** flip one of the room's scene switches (Room.options) and remember it for this garage */
+function setRoomOption(id: string, on: boolean): void {
+  const option = room.options?.find((o) => o.id === id)
+  if (!option) return
+  option.set(on)
+  savedOptions[garageDef.id] = { ...savedOptions[garageDef.id], [id]: on }
+  try {
+    localStorage.setItem(OPTIONS_KEY, JSON.stringify(savedOptions))
+  } catch {
+    // not remembered — fine
+  }
+  post.refreshGlow() // (what glows may have come or gone)
+  room.shadowsChanged?.()
   lightingChanged()
 }
 
@@ -1156,6 +1184,8 @@ const pages: Record<string, Page> = {
     setSun,
     interior: () => (room.interior ? { groups: room.interior.groups, settings: room.interior.get(), defaults: room.interior.defaults() } : null),
     setInterior,
+    options: () => room.options?.map((o) => ({ id: o.id, name: o.name, hint: o.hint, on: o.get() })) ?? [],
+    setOption: setRoomOption,
   }),
   collection: collectionPage({
     current: () => bay?.id ?? (loadingId ? null : NO_CAR),

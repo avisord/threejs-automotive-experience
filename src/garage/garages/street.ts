@@ -6,6 +6,10 @@ import { createBuildings } from './street/buildings'
 import { railingTexture } from './street/facade'
 import { createInfrastructure, wireMaterial } from './street/infra'
 import { createSignTexture } from './street/signs'
+import { createLeafTexture, createPlants } from './street/plants'
+import { createProps } from './street/props'
+import { createFestive } from './street/festive'
+import { foliage } from './foliage'
 import { createInteriorLights } from './interior'
 import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
@@ -68,11 +72,36 @@ function createStreet(): Room {
     ),
   })
   group.add(infra.group)
-  // the street's own lights: off by day (the lanterns' glass pale), switched on for dusk and night
+
+  // life on the houses and the pavements: pots and climbers, shop fronts' wares, furniture, bikes, parked cars
+  const leaves = foliage(
+    outdoorMaterial(new THREE.MeshStandardMaterial({ map: createLeafTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 })),
+    { crownNormals: true, matte: true, coverage: true },
+  )
+  group.add(createPlants(buildings, { leaves, pot: outdoorMaterial(new THREE.MeshStandardMaterial({ roughness: 0.85 })) }))
+  const props = outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.05 }))
+  group.add(
+    createProps(buildings, {
+      props,
+      paint: outdoorMaterial(new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.1 })),
+      glass: outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#0d1012'), roughness: 0.08 })),
+      rubber: outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#161616'), roughness: 0.9 })),
+    }),
+  )
+
+  // the festive layer, off until asked for (Menu › Garage › Scene)
+  const bulbs = outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#fff4dc'), emissive: new THREE.Color('#ffe2b0'), emissiveIntensity: 2.2, roughness: 0.3 }))
+  bulbs.userData.glow = true
+  const festive = createFestive(buildings, { props, bulbs, wire: outdoorMaterial(wireMaterial()) })
+  festive.visible = false
+  group.add(festive)
+
+  // the street's own lights: the lamps off by day (the lanterns' glass pale), switched on for dusk and night
   const interior = createInteriorLights([
     { id: 'street-lamps', name: 'Street lamps', hint: 'The iron lanterns on the posts and the walls', kelvin: 2700, members: [{ emissive: lampGlass }] },
+    { id: 'festive-lights', name: 'Festive lights', hint: 'The strings of bulbs across the street (with Scene › Festive decorations on)', kelvin: 3200, members: [{ emissive: bulbs }] },
   ])
-  interior.set({ master: 1, groups: { 'street-lamps': { on: false, intensity: 1, kelvin: 2700 } } })
+  interior.set({ master: 1, groups: { 'street-lamps': { on: false, intensity: 1, kelvin: 2700 }, 'festive-lights': { on: true, intensity: 1, kelvin: 3200 } } })
   for (const m of new Set(buildings.church.children.map((c) => (c as THREE.Mesh).material as THREE.MeshStandardMaterial))) outdoorMaterial(m)
 
   // what's lit by the open sky out past the street: the ground, the hills and the town up the slopes
@@ -112,6 +141,18 @@ function createStreet(): Room {
     view: [1.1, 1.25, -7.4],
     depthOfField: { bokehScale: 3 },
     interior,
+    options: [
+      {
+        id: 'festive',
+        name: 'Festive decorations',
+        hint: 'Strings of lights across the street, giant candy canes and gifts by the shops, wreaths on doors.',
+        default: false,
+        get: () => festive.visible,
+        set: (on) => {
+          festive.visible = on
+        },
+      },
+    ],
   }
 }
 

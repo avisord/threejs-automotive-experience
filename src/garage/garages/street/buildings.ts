@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { seeded } from '../landform'
 import { CellMesh } from './mesh'
-import { buildFacade, gardenFront, type FacadeMeshes } from './facade'
+import { buildFacade, gardenFront, type FacadeMeshes, type Feature } from './facade'
 import { UPPER, endLots, planLots, type Lot } from './lots'
 import { CHURCH, FRONT, MAIN, ROAD, SIDES, SIDE_ROAD, streetY } from './site'
 
@@ -24,6 +24,8 @@ export interface Buildings {
   meshes: THREE.Mesh[]
   /** the houses' service-wire brackets, with the street and side they face */
   drops: { p: THREE.Vector3; street: Lot['street']; side: 1 | -1; s: number }[]
+  /** each house's facades' places for plants and props (facade.ts Feature) */
+  features: { lot: Lot; list: Feature[] }[]
   lots: Lot[]
   /** the church (its own meshes) */
   church: THREE.Group
@@ -87,7 +89,7 @@ function onCorner(lot: Lot, s: number): boolean {
   return ends.some((e) => Math.abs(e - s) < 0.3)
 }
 
-function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops: Buildings['drops']): void {
+function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops: Buildings['drops'], features: Buildings['features']): void {
   const { street, side } = lot
   const front = street.width / 2 + street.sidewalk + lot.setback
   const back = street.width / 2 + street.sidewalk + Math.max(lot.depth, lot.setback + 8)
@@ -112,10 +114,12 @@ function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops:
   const centre = corners.reduce((c, p) => c.add(p), new THREE.Vector2()).divideScalar(4)
   const dadoTop = frontLow + ROAD.curb + (lot.family.id === 'stone' ? 0.6 : 0.8 + rand() * 0.4)
   const opts = { base, top, bottom, wall: wallColor, dado, dadoTop }
-  const { drop } = buildFacade(meshes, lot, corners[0], corners[1], street0.clone().sub(corners[0]), opts)
-  if (drop && lot.setback === 0) drops.push({ p: drop, street, side, s: street.nearest(drop.x, drop.z).s })
-  if (cornerEnd) buildFacade(meshes, lot, corners[1], corners[2], corners[1].clone().sub(centre), { ...opts, side: true })
-  if (cornerStart) buildFacade(meshes, lot, corners[3], corners[0], corners[0].clone().sub(centre), { ...opts, side: true })
+  const facade = buildFacade(meshes, lot, corners[0], corners[1], street0.clone().sub(corners[0]), opts)
+  if (facade.drop && lot.setback === 0) drops.push({ p: facade.drop, street, side, s: street.nearest(facade.drop.x, facade.drop.z).s })
+  const list = [...facade.features]
+  if (cornerEnd) list.push(...buildFacade(meshes, lot, corners[1], corners[2], corners[1].clone().sub(centre), { ...opts, side: true }).features)
+  if (cornerStart) list.push(...buildFacade(meshes, lot, corners[3], corners[0], corners[0].clone().sub(centre), { ...opts, side: true }).features)
+  features.push({ lot, list })
   // a water tank on a good share of the flat roofs, toward the back
   if (lot.family.roof === 'flat' && rand() < 0.4) {
     const p = corners[2].clone().lerp(corners[3], 0.2 + rand() * 0.6).lerp(centre, 0.35)
@@ -197,7 +201,8 @@ export function createBuildings(materials: BuildingMaterials): Buildings {
   const meshes: FacadeMeshes = { wall: new CellMesh(60), glass: new CellMesh(60), iron: new CellMesh(60), lace: new CellMesh(60), signs: new CellMesh(60) }
   const tanks: THREE.Vector3[] = []
   const drops: Buildings['drops'] = []
-  for (const lot of lots) lotBlock(meshes, lot, tanks, drops)
+  const features: Buildings['features'] = []
+  for (const lot of lots) lotBlock(meshes, lot, tanks, drops, features)
   for (const end of endLots()) {
     const { street, lot } = end
     const half = end.width / 2
@@ -231,5 +236,5 @@ export function createBuildings(materials: BuildingMaterials): Buildings {
   tankMesh.receiveShadow = true
   tankMesh.name = 'roof tanks'
   tankMesh.computeBoundingSphere()
-  return { meshes: [...built, tankMesh], lots, drops, church: createChurch() }
+  return { meshes: [...built, tankMesh], lots, drops, features, church: createChurch() }
 }

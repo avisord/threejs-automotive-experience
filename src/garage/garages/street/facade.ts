@@ -203,9 +203,19 @@ export interface FacadeOptions {
   side?: boolean
 }
 
+/**
+ * Where a facade offers room for life: a balcony's floor along its rail, a window sill, a
+ * doorstep, a shop's front, the parapet's edge — what plants and props are set on (decor).
+ * Points are in the world; `out` is the facade's outward direction, `along` runs along it.
+ */
+export type Feature =
+  | { kind: 'balcony' | 'ledge' | 'sill' | 'parapet'; a: THREE.Vector3; b: THREE.Vector3; out: THREE.Vector3 }
+  | { kind: 'door' | 'shop'; p: THREE.Vector3; along: THREE.Vector3; out: THREE.Vector3; width: number; top: number; shop?: number }
+
 export interface FacadeResult {
   /** where the house's electricity comes in: a service wire from the street's poles ends here (null: none) */
   drop: THREE.Vector3 | null
+  features: Feature[]
 }
 
 /**
@@ -222,6 +232,9 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
   const { base, top } = opts
   const reveal = opts.wall.clone().multiplyScalar(0.9)
   const revealDado = opts.dado.clone().multiplyScalar(0.9)
+  const features: Feature[] = []
+  const out = face.out.clone()
+  const along = face.along.clone()
 
   // ─── the bays and what opens in them ───────────────────────────────
   const inner = L - 2 * style.margin
@@ -329,6 +342,11 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
     if (o.kind === 'window' && o.window !== 'french') {
       const t = surround ? 0.22 : 0.1
       face.box(meshes.wall, u0 - t, u1 + t, y0 - 0.08, y0, -0.09, 0, surround ?? THRESHOLD)
+      // (the sill's top, in the reveal's mouth: a pot or two fits there)
+      features.push({ kind: 'sill', a: face.p(u0 + 0.12, y0, 0.06), b: face.p(u1 - 0.12, y0, 0.06), out })
+    }
+    if (o.kind === 'door' && !opts.side) {
+      features.push({ kind: 'door', p: face.p((u0 + u1) / 2, face.ground((u0 + u1) / 2), -0.02), along, out, width: u1 - u0, top: y1 })
     }
     // an iron grille over a ground-floor window
     if (o.kind === 'window' && o.floor === base && rand() < style.grille) grille(meshes, face, o)
@@ -342,11 +360,20 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
     const row = openings.filter((o) => o.floor === f)
     const pattern = lot.family.id === 'colonial' ? 1 : rand() < 0.5 ? 0 : 1
     if (kind === 'juliet') {
-      for (const o of row) juliet(meshes, face, o, pattern)
+      for (const o of row) {
+        juliet(meshes, face, o, pattern)
+        features.push({ kind: 'ledge', a: face.p(o.u0 - 0.05, f + 0.02, -0.08), b: face.p(o.u1 + 0.05, f + 0.02, -0.08), out })
+      }
     } else if (kind === 'continuous') {
-      balcony(meshes, face, row[0].u0 - 0.35, row[row.length - 1].u1 + 0.35, f, 0.85, slabColor, pattern)
+      const u0 = row[0].u0 - 0.35
+      const u1 = row[row.length - 1].u1 + 0.35
+      balcony(meshes, face, u0, u1, f, 0.85, slabColor, pattern)
+      features.push({ kind: 'balcony', a: face.p(u0 + 0.2, f, -0.62), b: face.p(u1 - 0.2, f, -0.62), out })
     } else {
-      for (const o of row) balcony(meshes, face, o.u0 - 0.3, o.u1 + 0.3, f, 0.65, slabColor, pattern)
+      for (const o of row) {
+        balcony(meshes, face, o.u0 - 0.3, o.u1 + 0.3, f, 0.65, slabColor, pattern)
+        features.push({ kind: 'balcony', a: face.p(o.u0 - 0.1, f, -0.44), b: face.p(o.u1 + 0.1, f, -0.44), out })
+      }
     }
   }
 
@@ -354,6 +381,7 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
   const band = surround ?? opts.wall.clone().multiplyScalar(0.92)
   if (style.string) for (let k = 1; k < floors; k++) face.box(meshes.wall, 0, L, floorY(k) - 0.3, floorY(k) - 0.14, -0.05, 0, band)
   if (lot.family.roof === 'flat') {
+    features.push({ kind: 'parapet', a: face.p(0.3, top - 0.2, -0.09), b: face.p(L - 0.3, top - 0.2, -0.09), out })
     face.box(meshes.wall, -0.02, L + 0.02, top - 0.2, top + 0.04, -0.09, 0, band)
     // rain spouts through the parapet (gárgolas), every few metres
     for (let u = 1.6 + rand(); u < L - 1; u += 3.5 + rand() * 2) face.box(meshes.wall, u - 0.07, u + 0.07, top - 0.62, top - 0.5, -0.55, 0, lin('#8a7a66'))
@@ -369,9 +397,16 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
     const h = 0.8
     const w = Math.min(shop.u1 - shop.u0, h * 4)
     const c = (shop.u0 + shop.u1) / 2
-    const y0 = shop.y1 + 0.35
+    const y0 = shop.y1 + 0.55
+    const name = lot.seed % SHOP_CELLS.length
+    features.push({ kind: 'shop', p: face.p(c, face.ground(c), -0.02), along, out, width: shop.u1 - shop.u0, top: shop.y1, shop: name })
+    // a striped canvas awning over most shops, the board above it
+    if (rand() < 0.65) awning(meshes, face, shop.u0 - 0.15, shop.u1 + 0.15, shop.y1 + 0.3, rand)
     face.box(meshes.wall, c - w / 2 - 0.05, c + w / 2 + 0.05, y0 - 0.05, y0 + h + 0.05, -0.08, 0, lin('#3a2f26'))
-    const [su0, sv0, su1, sv1] = SHOP_CELLS[lot.seed % SHOP_CELLS.length]
+    const [a0, sv0, a1, sv1] = SHOP_CELLS[name]
+    // (the lettering runs to the right of someone facing the wall: u along the facade may run either way)
+    const facingRight = face.along.x * face.out.z - face.along.z * face.out.x > 0
+    const [su0, su1] = facingRight ? [a0, a1] : [a1, a0]
     face.front(meshes.signs, c - w / 2, c + w / 2, y0, y0 + h, -0.081, WHITE, [
       [su0, sv0],
       [su1, sv0],
@@ -391,7 +426,42 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
       drop = face.p(u, y, -0.18)
     }
   }
-  return { drop }
+  return { drop, features }
+}
+
+const AWNINGS: [string, string][] = [
+  ['#b3312a', '#efe6d4'],
+  ['#2f6b45', '#efe6d4'],
+  ['#2c4f86', '#efe6d4'],
+  ['#c98a2b', '#f2e9d6'],
+]
+
+/** a canvas awning: stripes down its slope from the wall out 1.3 m, a scalloped-looking valance, both faces */
+function awning(meshes: FacadeMeshes, face: Face, u0: number, u1: number, y: number, rand: () => number): void {
+  const [c0, c1] = AWNINGS[Math.floor(rand() * AWNINGS.length)].map(lin)
+  const reach = 1.3
+  const drop = 0.55
+  const stripes = Math.max(4, Math.round((u1 - u0) / 0.28))
+  const up = new THREE.Vector3(0, 1, 0)
+  const underside = new THREE.Vector3(0, -1, 0)
+  for (let i = 0; i < stripes; i++) {
+    const a = u0 + ((u1 - u0) * i) / stripes
+    const b = u0 + ((u1 - u0) * (i + 1)) / stripes
+    const color = i % 2 ? c1 : c0
+    const p0 = face.p(a, y, 0)
+    const p1 = face.p(b, y, 0)
+    const p2 = face.p(b, y - drop, -reach)
+    const p3 = face.p(a, y - drop, -reach)
+    meshes.wall.facing(p0, p1, p2, p3, up, color)
+    meshes.wall.facing(p0, p1, p2, p3, underside, color.clone().multiplyScalar(0.75))
+    // the valance
+    const v0 = face.p(a, y - drop - 0.22, -reach)
+    const v1 = face.p(b, y - drop - 0.22, -reach)
+    meshes.wall.facing(p3, p2, v1, v0, face.out, color)
+    meshes.wall.facing(p3, p2, v1, v0, face.out.clone().negate(), color.clone().multiplyScalar(0.75))
+  }
+  // its iron arms at the ends, from the wall up to the valance
+  for (const u of [u0 + 0.05, u1 - 0.05]) ironBar(meshes.iron, face.p(u, y - 0.9, 0), face.p(u, y - drop, -reach))
 }
 
 const WHITE = new THREE.Color(1, 1, 1)

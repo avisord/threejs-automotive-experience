@@ -32,6 +32,9 @@ export interface GarageState {
   /** the current garage's own lights, if it has any the user can set */
   interior(): { groups: InteriorLights['groups']; settings: InteriorSettings; defaults: InteriorSettings } | null
   setInterior(settings: InteriorSettings): void
+  /** the current garage's scene switches (a seasonal layer…) */
+  options(): { id: string; name: string; hint: string; on: boolean }[]
+  setOption(id: string, on: boolean): void
 }
 
 /** a colour temperature in words, with a swatch of it */
@@ -72,6 +75,18 @@ export function garagePage(state: GarageState): Page {
         grid,
         el('p', 'cfg-note cfg-gap', 'Each garage sets its own colour grade look when picked — fine-tune it in Settings › Graphics.'),
       )
+
+      // what's in the scene: the garage's own switches
+      for (const o of state.options()) {
+        const sw = toggle(o.on, o.name, (on) => {
+          state.setOption(o.id, on)
+          nav.refresh()
+        })
+        const block = section(o.name, sw)
+        block.append(el('p', 'cfg-note', `${o.hint} Saved per garage.`))
+        if (!o.on) block.classList.add('is-off')
+        body.append(block)
+      }
 
       // open-air garages: put the sun anywhere
       const sun = state.sun()

@@ -92,6 +92,21 @@ export interface Room {
    * camera stays where it was.
    */
   view?: [number, number, number]
+  /**
+   * Switches for what's in the scene (Menu › Garage › Scene): a seasonal layer, say. Saved per garage;
+   * `set` must invalidate nothing itself — the app redraws, re-captures the environment and re-gathers glow.
+   */
+  options?: RoomOption[]
+}
+
+export interface RoomOption {
+  id: string
+  name: string
+  hint: string
+  /** how the room is built (before anything is saved) */
+  default: boolean
+  get(): boolean
+  set(on: boolean): void
 }
 
 /**
