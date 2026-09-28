@@ -298,6 +298,8 @@ function decal(mesh: CellMesh, centre: THREE.Vector3, along: THREE.Vector3, w: n
 
 export interface Infrastructure {
   group: THREE.Group
+  /** every lantern's centre (w: its strength — a post's 1, a wall lantern's less) */
+  lamps: THREE.Vector4[]
 }
 
 /** the lamps, poles, wires, signs, drains and bollards */
@@ -493,5 +495,10 @@ export function createInfrastructure(buildings: Buildings, materials: InfraMater
   }
   group.add(instanced(bollard(), materials.iron, bollards, 'bollards'))
 
-  return { group }
+  // where the light comes from: each lantern's glass (the post's at 4.07 m, a wall lantern's 0.6 m out, 0.46 m down)
+  const lamps = [
+    ...posts.map((m) => new THREE.Vector3(0, 4.07, 0).applyMatrix4(m)).map((p) => new THREE.Vector4(p.x, p.y, p.z, 1)),
+    ...lanterns.map((m) => new THREE.Vector3(0, -0.46, 0.6).applyMatrix4(m)).map((p) => new THREE.Vector4(p.x, p.y, p.z, 0.6)),
+  ]
+  return { group, lamps }
 }

@@ -11,7 +11,8 @@ import { createLeafTexture, createPlants } from './street/plants'
 import { createProps } from './street/props'
 import { createFestive } from './street/festive'
 import { foliage } from './foliage'
-import { createInteriorLights } from './interior'
+import { createInteriorLights, kelvinToRGB } from './interior'
+import { createLampLight } from './street/lamplight'
 import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
@@ -128,8 +129,17 @@ function createStreet(): Room {
   group.add(festive)
 
   // the street's own lights: the lamps off by day (the lanterns' glass pale), switched on for dusk and night
+  // the lamps' light (lamplight.ts): its designed output — a sodium-warm 2700 K, strength tuned so a pool under
+  // a post reads at dusk as clearly as the lit facades do (the shader divides by d² + 1)
+  const lampOutput = kelvinToRGB(2700).multiplyScalar(LAMP_STRENGTH)
   const interior = createInteriorLights([
-    { id: 'street-lamps', name: 'Street lamps', hint: 'The iron lanterns on the posts and the walls', kelvin: 2700, members: [{ emissive: lampGlass }] },
+    {
+      id: 'street-lamps',
+      name: 'Street lamps',
+      hint: 'The iron lanterns on the posts and the walls, and the pools of light they throw',
+      kelvin: 2700,
+      members: [{ emissive: lampGlass }, { output: lampOutput }],
+    },
     { id: 'festive-lights', name: 'Festive lights', hint: 'The strings of bulbs across the street (with Scene › Festive decorations on)', kelvin: 3200, members: [{ emissive: bulbs }] },
   ])
   interior.set({ master: 1, groups: { 'street-lamps': { on: false, intensity: 1, kelvin: 2700 }, 'festive-lights': { on: true, intensity: 1, kelvin: 3200 } } })
@@ -156,6 +166,8 @@ function createStreet(): Room {
   // map captured in the open) on top dimmed it twice, and the shade — half the frame — went near black.
   // (That is the older estimate. With the light probes on — Settings › Graphics › Street lighting — the
   // diffuse sky and bounce come from gi.ts instead: measured sky visibility and coloured bounce.)
+  // the lamps' light on everything in the street (switched and warmed by the Street lamps group)
+  const lampLight = createLampLight(infra.lamps, ground.rect, lampOutput)
   const gi = createStreetGI({ footprints: buildings.footprints, ground, showSunDisc: (on) => world.sky.showSunDisc(on) })
   mark('light probes')
   console.info(`[garage] street built (ms): ${timings.join(', ')}`)
@@ -169,6 +181,7 @@ function createStreet(): Room {
       patched.add(standard)
       if (standard.envMapIntensity === OUTDOOR_SKY_LIGHT) standard.envMapIntensity = STREET_SKY_LIGHT
       gi.patch(standard)
+      lampLight.patch(standard)
     }
   })
   // What the probes see: the houses, the paving, the church, the ground and the woods (not the car, the
@@ -210,6 +223,7 @@ function createStreet(): Room {
     },
     dispose: () => {
       gi.dispose()
+      lampLight.dispose()
       disposeTree(group)
       ground.texture.dispose()
       world.dispose()
@@ -286,6 +300,9 @@ function roadDetail(): RoadDetail {
   }
   return { fans, marks, patches: [box(-31, -1.6, 0.4, 1.6), box(36, 1.5, 0.7, 0.5), box(96, 0.6, 0.55, 0.55)] }
 }
+
+/** the street lamps' designed output (lamplight.ts) */
+const LAMP_STRENGTH = 18
 
 /** how strongly the street-level env map lights the street's own surfaces (see createStreet) */
 const STREET_SKY_LIGHT = 0.75
