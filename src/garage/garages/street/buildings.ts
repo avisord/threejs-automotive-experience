@@ -32,7 +32,7 @@ export interface Buildings {
 }
 
 /** a block from four ground corners (front-left, front-right, back-right, back-left, seen from the street) */
-function block(mesh: CellMesh, corners: THREE.Vector2[], bottom: number, top: number, colors: { wall: THREE.Color; roof: THREE.Color }, roof: 'flat' | 'tiled' = 'flat', skip: number[] = []): void {
+function block(mesh: CellMesh, corners: THREE.Vector2[], bottom: number, top: number, colors: { wall: THREE.Color; roof: THREE.Color }, roof: 'flat' | 'tiled' = 'flat', skip: number[] = [], roofMesh: CellMesh = mesh): void {
   const lo = corners.map((c) => new THREE.Vector3(c.x, bottom, c.y))
   const hi = corners.map((c) => new THREE.Vector3(c.x, top, c.y))
   const centre = new THREE.Vector3()
@@ -59,8 +59,8 @@ function block(mesh: CellMesh, corners: THREE.Vector2[], bottom: number, top: nu
   const e1 = eave(hi[1], hi[2])
   const e2 = eave(hi[2], hi[1])
   const e3 = eave(hi[3], hi[0])
-  upQuad(mesh, e0, e1, r1, r0, colors.roof)
-  upQuad(mesh, e2, e3, r0, r1, colors.roof)
+  upQuad(roofMesh, e0, e1, r1, r0, colors.roof)
+  upQuad(roofMesh, e2, e3, r0, r1, colors.roof)
   wall(mesh, hi[0], hi[3], r0, r0, centre, colors.wall)
   wall(mesh, hi[2], hi[1], r1, r1, centre, colors.wall)
 }
@@ -109,7 +109,7 @@ function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops:
   const cornerStart = onCorner(lot, lot.s0)
   const cornerEnd = onCorner(lot, lot.s1)
   const skip = [0, ...(cornerEnd ? [1] : []), ...(cornerStart ? [3] : [])]
-  block(meshes.wall, corners, bottom, top, { wall: wallColor, roof }, lot.family.roof, skip)
+  block(lot.family.id === 'stone' ? meshes.rubble : meshes.wall, corners, bottom, top, { wall: wallColor, roof }, lot.family.roof, skip, lot.family.roof === 'tiled' ? meshes.roof : undefined)
   const street0 = street.at((lot.s0 + lot.s1) / 2, 0)
   const centre = corners.reduce((c, p) => c.add(p), new THREE.Vector2()).divideScalar(4)
   const dadoTop = frontLow + ROAD.curb + (lot.family.id === 'stone' ? 0.6 : 0.8 + rand() * 0.4)
@@ -134,7 +134,8 @@ function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops:
     // the garden's ground, a little under the pavement (its beds and trees come with the planting)
     const yard = [street.at(lot.s0, side * (line + 0.3)), street.at(lot.s1, side * (line + 0.3)), street.at(lot.s1, side * front), street.at(lot.s0, side * front)]
     const gy = Math.min(...yard.map((p) => streetY(p.x, p.y)))
-    block(meshes.wall, yard, gy - 0.6, gy + 0.06, { wall: dado, roof: lin('#5d5a3e') })
+    // (a hand's breadth up: the rough ground under it poked through at pavement height)
+    block(meshes.wall, yard, gy - 0.6, gy + 0.22, { wall: dado, roof: lin('#5d5a3e') })
   }
 }
 
@@ -150,7 +151,7 @@ function createChurch(): THREE.Group {
   group.position.set(p.x, streetY(line.x, line.y), p.y)
   // its front faces the street: local −z toward the street, −side × (tz, −tx)
   group.rotation.y = Math.atan2(side * f.tz, -side * f.tx) + CHURCH.turn
-  const stone = new THREE.MeshStandardMaterial({ color: lin('#e3d3b4'), roughness: 0.9 })
+  const stone = new THREE.MeshStandardMaterial({ color: lin('#e3d3b4'), roughness: 0.9, name: 'church stone' })
   const tile = new THREE.MeshStandardMaterial({ color: lin('#d9a441'), roughness: 0.6 })
   const blue = new THREE.MeshStandardMaterial({ color: lin('#3c6aa4'), roughness: 0.55 })
   const add = (g: THREE.BufferGeometry, m: THREE.Material, x: number, yy: number, z: number) => {
@@ -193,12 +194,26 @@ export interface BuildingMaterials {
   lace: THREE.Material
   tank: THREE.Material
   signs: THREE.Material
+  stone: THREE.Material
+  wood: THREE.Material
+  rubble: THREE.Material
+  roof: THREE.Material
 }
 
 /** every house in town with its facades, the side streets' closing houses, the roof tanks, and the church */
 export function createBuildings(materials: BuildingMaterials): Buildings {
   const lots = planLots()
-  const meshes: FacadeMeshes = { wall: new CellMesh(60), glass: new CellMesh(60), iron: new CellMesh(60), lace: new CellMesh(60), signs: new CellMesh(60) }
+  const meshes: FacadeMeshes = {
+    wall: new CellMesh(60),
+    glass: new CellMesh(60),
+    iron: new CellMesh(60),
+    lace: new CellMesh(60),
+    signs: new CellMesh(60),
+    stone: new CellMesh(60),
+    wood: new CellMesh(60),
+    rubble: new CellMesh(60),
+    roof: new CellMesh(60),
+  }
   const tanks: THREE.Vector3[] = []
   const drops: Buildings['drops'] = []
   const features: Buildings['features'] = []
@@ -222,6 +237,10 @@ export function createBuildings(materials: BuildingMaterials): Buildings {
     ...meshes.iron.build(materials.iron, 'ironwork'),
     ...meshes.lace.build(materials.lace, 'railings', { uv: 'stored' }),
     ...meshes.signs.build(materials.signs, 'shop signs', { uv: 'stored' }),
+    ...meshes.stone.build(materials.stone, 'stonework', { colors: true }),
+    ...meshes.wood.build(materials.wood, 'woodwork', { colors: true }),
+    ...meshes.rubble.build(materials.rubble, 'rubble walls', { uv: 'box' }),
+    ...meshes.roof.build(materials.roof, 'tile roofs', { colors: true }),
   ]
   for (const m of built) {
     m.castShadow = true

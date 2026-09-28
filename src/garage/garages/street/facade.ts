@@ -111,6 +111,14 @@ export interface FacadeMeshes {
   lace: CellMesh
   /** painted signs (uv into the sign atlas, signs.ts) */
   signs: CellMesh
+  /** dressed stone: surrounds, sills, cornices, balcony slabs, piers, thresholds (vertex coloured) */
+  stone: CellMesh
+  /** painted and bare wood: doors, frames, glazing bars (vertex coloured) */
+  wood: CellMesh
+  /** rubble masonry: the stone houses' walls (photographed) */
+  rubble: CellMesh
+  /** clay tile roofs */
+  roof: CellMesh
 }
 
 /** a facade's plane: u along it (m), y up (world), d into the wall (m; negative stands proud) */
@@ -219,7 +227,8 @@ export interface FacadeResult {
 }
 
 /**
- * Build one facade of a lot (a to b along the wall, `outward` toward the street) into `meshes`.
+ * Build one facade of a lot (a to b along the wall, `outward` toward the street) into `meshes`
+ * (each piece into the mesh of its surface: render, stone, wood, iron, glass…).
  */
 export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b: THREE.Vector2, outward: THREE.Vector2, opts: FacadeOptions): FacadeResult {
   const face = new Face(a, b, outward)
@@ -233,6 +242,8 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
   const reveal = opts.wall.clone().multiplyScalar(0.9)
   const revealDado = opts.dado.clone().multiplyScalar(0.9)
   const features: Feature[] = []
+  // (a stone house's walls are the rubble itself, not render over it)
+  const plaster = lot.family.id === 'stone' ? meshes.rubble : meshes.wall
   const out = face.out.clone()
   const along = face.along.clone()
 
@@ -304,8 +315,8 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
     const solid = (y0: number, y1: number) => {
       // the dado below its line, the paint above
       const split = THREE.MathUtils.clamp(opts.dadoTop, y0, y1)
-      if (split > y0) face.front(meshes.wall, ua, ub, y0, split, 0, opts.dado)
-      if (y1 > split) face.front(meshes.wall, ua, ub, split, y1, 0, opts.wall)
+      if (split > y0) face.front(plaster, ua, ub, y0, split, 0, opts.dado)
+      if (y1 > split) face.front(plaster, ua, ub, split, y1, 0, opts.wall)
     }
     for (const h of holes) {
       if (h.y0 > y) solid(y, h.y0)
@@ -322,11 +333,12 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
     // jambs (split at the dado line), soffit, sill / threshold
     for (const [u, dir] of [[u0, face.along], [u1, face.along.clone().negate()]] as const) {
       const split = THREE.MathUtils.clamp(opts.dadoTop, y0, y1)
-      if (split > y0) meshes.wall.facing(P(u, y0, 0), P(u, split, 0), P(u, split, D), P(u, y0, D), dir, revealColor(y0))
-      if (y1 > split) meshes.wall.facing(P(u, split, 0), P(u, y1, 0), P(u, y1, D), P(u, split, D), dir, reveal)
+      if (split > y0) plaster.facing(P(u, y0, 0), P(u, split, 0), P(u, split, D), P(u, y0, D), dir, revealColor(y0))
+      if (y1 > split) plaster.facing(P(u, split, 0), P(u, y1, 0), P(u, y1, D), P(u, split, D), dir, reveal)
     }
-    meshes.wall.facing(P(u0, y1, 0), P(u1, y1, 0), P(u1, y1, D), P(u0, y1, D), new THREE.Vector3(0, -1, 0), reveal)
-    meshes.wall.facing(P(u0, y0, 0), P(u1, y0, 0), P(u1, y0, D), P(u0, y0, D), new THREE.Vector3(0, 1, 0), o.kind === 'door' ? THRESHOLD : revealColor(y0))
+    plaster.facing(P(u0, y1, 0), P(u1, y1, 0), P(u1, y1, D), P(u0, y1, D), new THREE.Vector3(0, -1, 0), reveal)
+    const sill = o.kind === 'door' ? meshes.stone : plaster
+    sill.facing(P(u0, y0, 0), P(u1, y0, 0), P(u1, y0, D), P(u0, y0, D), new THREE.Vector3(0, 1, 0), o.kind === 'door' ? THRESHOLD : revealColor(y0))
 
     const back = D - 0.02
     if (o.kind === 'door') doorInfill(meshes, face, o, back, door, frame, style.door.fanlight && y1 - y0 > 2.9)
@@ -335,13 +347,13 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
     // surrounds: jambs and a lintel standing proud, a sill under windows
     if (surround && o.kind !== 'shop') {
       const t = 0.16
-      face.box(meshes.wall, u0 - t, u0, y0, y1, -0.05, 0, surround)
-      face.box(meshes.wall, u1, u1 + t, y0, y1, -0.05, 0, surround)
-      face.box(meshes.wall, u0 - t - 0.06, u1 + t + 0.06, y1, y1 + 0.22, -0.07, 0, surround)
+      face.box(meshes.stone, u0 - t, u0, y0, y1, -0.05, 0, surround)
+      face.box(meshes.stone, u1, u1 + t, y0, y1, -0.05, 0, surround)
+      face.box(meshes.stone, u0 - t - 0.06, u1 + t + 0.06, y1, y1 + 0.22, -0.07, 0, surround)
     }
     if (o.kind === 'window' && o.window !== 'french') {
       const t = surround ? 0.22 : 0.1
-      face.box(meshes.wall, u0 - t, u1 + t, y0 - 0.08, y0, -0.09, 0, surround ?? THRESHOLD)
+      face.box(meshes.stone, u0 - t, u1 + t, y0 - 0.08, y0, -0.09, 0, surround ?? THRESHOLD)
       // (the sill's top, in the reveal's mouth: a pot or two fits there)
       features.push({ kind: 'sill', a: face.p(u0 + 0.12, y0, 0.06), b: face.p(u1 - 0.12, y0, 0.06), out })
     }
@@ -379,15 +391,15 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
 
   // ─── mouldings: string courses, coping, pilasters, spouts ────────────
   const band = surround ?? opts.wall.clone().multiplyScalar(0.92)
-  if (style.string) for (let k = 1; k < floors; k++) face.box(meshes.wall, 0, L, floorY(k) - 0.3, floorY(k) - 0.14, -0.05, 0, band)
+  if (style.string) for (let k = 1; k < floors; k++) face.box(meshes.stone, 0, L, floorY(k) - 0.3, floorY(k) - 0.14, -0.05, 0, band)
   if (lot.family.roof === 'flat') {
     features.push({ kind: 'parapet', a: face.p(0.3, top - 0.2, -0.09), b: face.p(L - 0.3, top - 0.2, -0.09), out })
-    face.box(meshes.wall, -0.02, L + 0.02, top - 0.2, top + 0.04, -0.09, 0, band)
+    face.box(meshes.stone, -0.02, L + 0.02, top - 0.2, top + 0.04, -0.09, 0, band)
     // rain spouts through the parapet (gárgolas), every few metres
-    for (let u = 1.6 + rand(); u < L - 1; u += 3.5 + rand() * 2) face.box(meshes.wall, u - 0.07, u + 0.07, top - 0.62, top - 0.5, -0.55, 0, lin('#8a7a66'))
+    for (let u = 1.6 + rand(); u < L - 1; u += 3.5 + rand() * 2) face.box(meshes.stone, u - 0.07, u + 0.07, top - 0.62, top - 0.5, -0.55, 0, lin('#8a7a66'))
   }
   if (style.pilasters && surround) {
-    for (const u of [0, L - 0.32]) face.box(meshes.wall, u, u + 0.32, opts.bottom, top - 0.2, -0.04, 0, surround)
+    for (const u of [0, L - 0.32]) face.box(meshes.stone, u, u + 0.32, opts.bottom, top - 0.2, -0.04, 0, surround)
   }
 
   // ─── the street's services and trade ─────────────────────────────────
@@ -402,7 +414,7 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
     features.push({ kind: 'shop', p: face.p(c, face.ground(c), -0.02), along, out, width: shop.u1 - shop.u0, top: shop.y1, shop: name })
     // a striped canvas awning over most shops, the board above it
     if (rand() < 0.65) awning(meshes, face, shop.u0 - 0.15, shop.u1 + 0.15, shop.y1 + 0.3, rand)
-    face.box(meshes.wall, c - w / 2 - 0.05, c + w / 2 + 0.05, y0 - 0.05, y0 + h + 0.05, -0.08, 0, lin('#3a2f26'))
+    face.box(meshes.wood, c - w / 2 - 0.05, c + w / 2 + 0.05, y0 - 0.05, y0 + h + 0.05, -0.08, 0, lin('#3a2f26'))
     const [a0, sv0, a1, sv1] = SHOP_CELLS[name]
     // (the lettering runs to the right of someone facing the wall: u along the facade may run either way)
     const facingRight = face.along.x * face.out.z - face.along.z * face.out.x > 0
@@ -470,11 +482,11 @@ const WHITE = new THREE.Color(1, 1, 1)
 function doorInfill(meshes: FacadeMeshes, face: Face, o: Opening, d: number, color: THREE.Color, frame: THREE.Color, fanlight: boolean): void {
   const { u0, u1, y0, y1 } = o
   const leafTop = fanlight ? y1 - 0.7 : y1
-  face.front(meshes.wall, u0, u1, y0, leafTop, d, color)
+  face.front(meshes.wood, u0, u1, y0, leafTop, d, color)
   if (fanlight) {
     face.front(meshes.glass, u0, u1, leafTop + 0.08, y1, d + 0.01, GLASS[0])
-    face.box(meshes.wall, u0, u1, leafTop, leafTop + 0.08, d - 0.04, d, frame)
-    face.box(meshes.wall, (u0 + u1) / 2 - 0.03, (u0 + u1) / 2 + 0.03, leafTop, y1, d - 0.03, d, frame)
+    face.box(meshes.wood, u0, u1, leafTop, leafTop + 0.08, d - 0.04, d, frame)
+    face.box(meshes.wood, (u0 + u1) / 2 - 0.03, (u0 + u1) / 2 + 0.03, leafTop, y1, d - 0.03, d, frame)
   }
   const leaves = u1 - u0 > 1.2 ? 2 : 1
   const lw = (u1 - u0) / leaves
@@ -482,12 +494,12 @@ function doorInfill(meshes: FacadeMeshes, face: Face, o: Opening, d: number, col
   for (let l = 0; l < leaves; l++) {
     const a = u0 + l * lw
     // the meeting stile's groove
-    if (l > 0) face.box(meshes.wall, a - 0.012, a + 0.012, y0, leafTop, d - 0.005, d, panel.clone().multiplyScalar(0.5))
+    if (l > 0) face.box(meshes.wood, a - 0.012, a + 0.012, y0, leafTop, d - 0.005, d, panel.clone().multiplyScalar(0.5))
     // three raised panels up the leaf
     const ph = (leafTop - y0 - 0.5) / 3
     for (let p = 0; p < 3; p++) {
       const py = y0 + 0.2 + p * (ph + 0.05)
-      face.box(meshes.wall, a + 0.12, a + lw - 0.12, py, py + ph - 0.05, d - 0.025, d, panel)
+      face.box(meshes.wood, a + 0.12, a + lw - 0.12, py, py + ph - 0.05, d - 0.025, d, panel)
     }
   }
 }
@@ -499,30 +511,30 @@ function windowInfill(meshes: FacadeMeshes, face: Face, o: Opening, d: number, f
   face.front(meshes.glass, u0, u1, y0, y1, d, glass)
   const t = 0.06
   // outer frame
-  face.box(meshes.wall, u0, u1, y0, y0 + t, d - 0.05, d, frame)
-  face.box(meshes.wall, u0, u1, y1 - t, y1, d - 0.05, d, frame)
-  face.box(meshes.wall, u0, u0 + t, y0, y1, d - 0.05, d, frame)
-  face.box(meshes.wall, u1 - t, u1, y0, y1, d - 0.05, d, frame)
+  face.box(meshes.wood, u0, u1, y0, y0 + t, d - 0.05, d, frame)
+  face.box(meshes.wood, u0, u1, y1 - t, y1, d - 0.05, d, frame)
+  face.box(meshes.wood, u0, u0 + t, y0, y1, d - 0.05, d, frame)
+  face.box(meshes.wood, u1 - t, u1, y0, y1, d - 0.05, d, frame)
   if (o.kind === 'shop') {
     // a shopfront: mullions every metre or so, a transom band
     const n = Math.max(1, Math.round((u1 - u0) / 1.3))
     for (let i = 1; i < n; i++) {
       const u = u0 + ((u1 - u0) * i) / n
-      face.box(meshes.wall, u - 0.035, u + 0.035, y0, y1, d - 0.06, d, frame)
+      face.box(meshes.wood, u - 0.035, u + 0.035, y0, y1, d - 0.06, d, frame)
     }
     const ty = y1 - 0.55
-    face.box(meshes.wall, u0, u1, ty - 0.035, ty + 0.035, d - 0.06, d, frame)
+    face.box(meshes.wood, u0, u1, ty - 0.035, ty + 0.035, d - 0.06, d, frame)
     return
   }
   // the meeting rails of two casements, a transom, and glazing bars across each light
   const mid = (u0 + u1) / 2
-  face.box(meshes.wall, mid - 0.035, mid + 0.035, y0, y1, d - 0.045, d, frame)
+  face.box(meshes.wood, mid - 0.035, mid + 0.035, y0, y1, d - 0.045, d, frame)
   const transom = y1 - Math.min(0.55, (y1 - y0) * 0.25)
-  if (y1 - y0 > 1.4) face.box(meshes.wall, u0, u1, transom - 0.03, transom + 0.03, d - 0.045, d, frame)
+  if (y1 - y0 > 1.4) face.box(meshes.wood, u0, u1, transom - 0.03, transom + 0.03, d - 0.045, d, frame)
   const lights = Math.max(1, Math.round((transom - y0) / 0.6))
   for (let i = 1; i < lights; i++) {
     const y = y0 + ((transom - y0) * i) / lights
-    face.box(meshes.wall, u0, u1, y - 0.015, y + 0.015, d - 0.035, d, frame)
+    face.box(meshes.wood, u0, u1, y - 0.015, y + 0.015, d - 0.035, d, frame)
   }
 }
 
@@ -562,16 +574,16 @@ function railRun(meshes: FacadeMeshes, face: Face, u0: number, u1: number, y: nu
 /** a Juliet balcony: an iron rail across the French window's opening, a narrow stone ledge */
 function juliet(meshes: FacadeMeshes, face: Face, o: Opening, pattern: number): void {
   const d = -0.14
-  face.box(meshes.wall, o.u0 - 0.12, o.u1 + 0.12, o.floor - 0.1, o.floor + 0.02, -0.2, 0, THRESHOLD)
+  face.box(meshes.stone, o.u0 - 0.12, o.u1 + 0.12, o.floor - 0.1, o.floor + 0.02, -0.2, 0, THRESHOLD)
   railRun(meshes, face, o.u0 - 0.08, o.u1 + 0.08, o.floor + 0.02, d, pattern, 0.9)
 }
 
 /** a stone balcony slab on brackets with an iron railing round its three open sides */
 function balcony(meshes: FacadeMeshes, face: Face, u0: number, u1: number, floor: number, depth: number, stone: THREE.Color, pattern: number): void {
-  face.box(meshes.wall, u0, u1, floor - 0.15, floor, -depth, 0, stone)
+  face.box(meshes.stone, u0, u1, floor - 0.15, floor, -depth, 0, stone)
   // the slab's moulded edge and its brackets
-  face.box(meshes.wall, u0 - 0.03, u1 + 0.03, floor - 0.19, floor - 0.13, -depth - 0.03, -depth + 0.1, stone.clone().multiplyScalar(0.93))
-  for (const u of [u0 + 0.12, u1 - 0.12]) face.box(meshes.wall, u - 0.07, u + 0.07, floor - 0.5, floor - 0.15, -depth + 0.08, 0, stone)
+  face.box(meshes.stone, u0 - 0.03, u1 + 0.03, floor - 0.19, floor - 0.13, -depth - 0.03, -depth + 0.1, stone.clone().multiplyScalar(0.93))
+  for (const u of [u0 + 0.12, u1 - 0.12]) face.box(meshes.stone, u - 0.07, u + 0.07, floor - 0.5, floor - 0.15, -depth + 0.08, 0, stone)
   const d = -depth + 0.05
   railRun(meshes, face, u0 + 0.04, u1 - 0.04, floor, d, pattern)
   // the sides: back to the wall
@@ -628,8 +640,8 @@ export function gardenFront(meshes: FacadeMeshes, a: THREE.Vector2, b: THREE.Vec
   for (let u = 3; u < L - 1.5; u += 3) if (Math.abs(u - gate.u) > gate.w / 2 + 1) piers.push(u)
   piers.sort((p, q) => p - q)
   for (const u of piers) {
-    face.box(meshes.wall, u - 0.25, u + 0.25, base - 1, base + 2.0, -0.15, 0.35, opts.pier)
-    face.box(meshes.wall, u - 0.3, u + 0.3, base + 2.0, base + 2.12, -0.2, 0.4, opts.pier)
+    face.box(meshes.stone, u - 0.25, u + 0.25, base - 1, base + 2.0, -0.15, 0.35, opts.pier)
+    face.box(meshes.stone, u - 0.3, u + 0.3, base + 2.0, base + 2.12, -0.2, 0.4, opts.pier)
   }
   // the plinth and its railings between the piers (not across the gate)
   for (let i = 0; i + 1 < piers.length; i++) {
@@ -639,11 +651,11 @@ export function gardenFront(meshes: FacadeMeshes, a: THREE.Vector2, b: THREE.Vec
     const gateway = gate.u > u0 && gate.u < u1
     if (!gateway) {
       face.box(meshes.wall, u0, u1, base - 1, plinth, -0.08, 0.3, opts.wall)
-      face.box(meshes.wall, u0, u1, plinth, plinth + 0.07, -0.11, 0.33, opts.pier)
+      face.box(meshes.stone, u0, u1, plinth, plinth + 0.07, -0.11, 0.33, opts.pier)
       railRun(meshes, face, u0, u1, plinth + 0.07, 0.1, 0, 1.2)
     } else {
       // the gates: two leaves of the same iron, a step at their foot
-      face.box(meshes.wall, u0, u1, base - 1, base + 0.02, -0.1, 0.3, THRESHOLD)
+      face.box(meshes.stone, u0, u1, base - 1, base + 0.02, -0.1, 0.3, THRESHOLD)
       railRun(meshes, face, u0 + 0.03, gate.u - 0.02, base + 0.08, 0.1, 1, 1.8)
       railRun(meshes, face, gate.u + 0.02, u1 - 0.03, base + 0.08, 0.1, 1, 1.8)
     }

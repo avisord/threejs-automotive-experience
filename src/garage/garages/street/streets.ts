@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { CellMesh } from './mesh'
-import { CORNER, FRONT, MAIN, ROAD, SIDES, SIDE_ROAD, Street, streetY } from './site'
+import { CORNER, FRONT, MAIN, ROAD, SIDES, SIDE_ROAD, STREETS, Street, streetY } from './site'
 
 /**
  * The paved surfaces: each street's carriageway as a ribbon (running on under
@@ -133,6 +133,24 @@ function corner(top: CellMesh, kerb: CellMesh, at: number, side: 1 | -1, which: 
   }
 }
 
+/** a street's own coordinates at a point: (s, d, half the carriageway) */
+const streetCoords = (street: Street) => (x: number, z: number): [number, number, number] => {
+  const n = street.nearest(x, z)
+  return [n.s, n.d, street.width / 2]
+}
+
+/** the coordinates of whichever street a point belongs to (the nearest centre line along its length) */
+function nearestCoords(x: number, z: number): [number, number, number] {
+  let best: [number, number, number] = [0, 1e9, ROAD.width / 2]
+  for (const street of STREETS) {
+    if (!street.near(x, z, 15)) continue
+    const n = street.nearest(x, z)
+    if (n.s < street.start - 1 || n.s > street.end + 1) continue
+    if (Math.abs(n.d) < Math.abs(best[1])) best = [n.s, n.d, street.width / 2]
+  }
+  return best
+}
+
 export interface Paving {
   road: THREE.Mesh[]
   pavement: THREE.Mesh[]
@@ -141,13 +159,17 @@ export interface Paving {
 
 /** every street's carriageway, pavements, kerbs and junction corners */
 export function createPaving(materials: { road: THREE.Material; pavement: THREE.Material; kerb: THREE.Material }): Paving {
-  const road = new CellMesh()
   const top = new CellMesh()
   const kerb = new CellMesh()
 
-  carriageway(road, MAIN, MAIN.start)
-  // (a side street's ribbon starts where the main street's ends, at its outer edge)
-  for (const side of SIDES) carriageway(road, side.street, FRONT + TUCK, 0.5)
+  // each street's carriageway its own mesh, carrying its own street coordinates (the setts' courses)
+  const roads: THREE.Mesh[] = []
+  for (const street of STREETS) {
+    const mesh = new CellMesh()
+    // (a side street's ribbon starts where the main street's ends, at its outer edge)
+    carriageway(mesh, street, street === MAIN ? MAIN.start : FRONT + TUCK, street === MAIN ? 0 : 0.5)
+    roads.push(...mesh.build(materials.road, `road ${street.name}`, { uv: 'world', street: streetCoords(street) }))
+  }
 
   // the main street's pavements, broken at each side street's mouth for the corners
   const mouth = SIDE_ROAD.width / 2 + CORNER
@@ -174,8 +196,8 @@ export function createPaving(materials: { road: THREE.Material; pavement: THREE.
     return meshes
   }
   return {
-    road: setUp(road.build(materials.road, 'road', { uv: 'world' })),
-    pavement: setUp(top.build(materials.pavement, 'pavement', { uv: 'world' })),
-    kerb: setUp(kerb.build(materials.kerb, 'kerb', { uv: 'world' })),
+    road: setUp(roads),
+    pavement: setUp(top.build(materials.pavement, 'pavement', { uv: 'world', street: nearestCoords })),
+    kerb: setUp(kerb.build(materials.kerb, 'kerb', { uv: 'world', street: nearestCoords })),
   }
 }

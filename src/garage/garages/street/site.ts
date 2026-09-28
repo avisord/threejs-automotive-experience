@@ -360,3 +360,24 @@ export function heightAt(x: number, z: number): number {
   // (under the streets the ground sinks out of sight: the ribbons are the surface there)
   return floor + hills(x, z, out) + rough * (1 - p) - 0.4 * p - 0.06
 }
+
+/**
+ * The valley floor round the town's streets as a texture (2 m texels, half floats): shaders
+ * that need a wall's height above its pavement (dirt splashed up, damp at the foot) read it.
+ * `rect`: (x0, z0, width, depth) in metres.
+ */
+export function groundTexture(): { texture: THREE.DataTexture; rect: THREE.Vector4 } {
+  const rect = new THREE.Vector4(-220, -400, 440, 1120)
+  const step = 2
+  const w = rect.z / step
+  const h = rect.w / step
+  const data = new Uint16Array(w * h)
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) data[j * w + i] = THREE.DataUtils.toHalfFloat(streetY(rect.x + (i + 0.5) * step, rect.y + (j + 0.5) * step) + ROAD.curb)
+  }
+  const texture = new THREE.DataTexture(data, w, h, THREE.RedFormat, THREE.HalfFloatType)
+  texture.magFilter = THREE.LinearFilter
+  texture.minFilter = THREE.LinearFilter
+  texture.needsUpdate = true
+  return { texture, rect }
+}

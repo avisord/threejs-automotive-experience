@@ -397,7 +397,8 @@ export function createInfrastructure(buildings: Buildings, materials: InfraMater
   const signAt = (street: Street, s: number, d: number, facing: THREE.Vector3, cell: Cell, size = 0.6) => {
     const base = at3(street, s, d, ROAD.curb)
     signPosts.push(new THREE.Matrix4().makeTranslation(base.x, base.y, base.z))
-    plate(signMesh, base.clone().setY(base.y + 2.45), facing, size, size, cell)
+    // (the plate on the post's face, not through it)
+    plate(signMesh, base.clone().setY(base.y + 2.45).addScaledVector(facing, 0.045), facing, size, size, cell)
   }
   const alongMain = (s: number, dir: 1 | -1) => {
     const f = MAIN.frame(s)

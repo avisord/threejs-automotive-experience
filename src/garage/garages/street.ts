@@ -16,7 +16,19 @@ import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
 import { createTown } from './street/town'
 import { createStreetWorld } from './street/world'
-import { ROAD } from './street/site'
+import { MAIN, ROAD, SIDES, groundTexture } from './street/site'
+import {
+  dressedStone,
+  kerbMaterial,
+  pavementMaterial,
+  plasterMaterial,
+  roadMaterial,
+  rubbleMaterial,
+  stoneMaterial,
+  tileRoofMaterial,
+  woodMaterial,
+  type RoadDetail,
+} from './street/surfaces'
 
 /**
  * Calle Colonial: no garage at all — the car stands in the street of a
@@ -31,11 +43,9 @@ function createStreet(): Room {
   group.name = 'calle-colonial'
   const world = createStreetWorld(group)
 
-  const paving = createPaving({
-    road: outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#5a524b'), roughness: 0.82 })),
-    pavement: outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#948b7e'), roughness: 0.88 })),
-    kerb: outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#a49b8c'), roughness: 0.85 })),
-  })
+  const ground = groundTexture()
+  const road = roadMaterial(roadDetail())
+  const paving = createPaving({ road: road.material, pavement: pavementMaterial(), kerb: kerbMaterial() })
   group.add(...paving.road, ...paving.pavement, ...paving.kerb)
 
   const railings = railingTexture()
@@ -46,8 +56,13 @@ function createStreet(): Room {
   const glass = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.05, metalness: 0 })
   receiveFarShadow(glass)
   const iron = { color: new THREE.Color('#1d1c1b'), roughness: 0.5, metalness: 0.45 }
+  const rubble = rubbleMaterial(ground)
   const buildings = createBuildings({
-    wall: outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 })),
+    wall: plasterMaterial(ground),
+    stone: stoneMaterial(ground),
+    wood: woodMaterial(ground),
+    rubble: rubble.material,
+    roof: tileRoofMaterial(),
     glass,
     iron: outdoorMaterial(new THREE.MeshStandardMaterial(iron)),
     lace: outdoorMaterial(new THREE.MeshStandardMaterial({ ...iron, map: railings, alphaTest: 0.5, side: THREE.DoubleSide })),
@@ -102,7 +117,10 @@ function createStreet(): Room {
     { id: 'festive-lights', name: 'Festive lights', hint: 'The strings of bulbs across the street (with Scene › Festive decorations on)', kelvin: 3200, members: [{ emissive: bulbs }] },
   ])
   interior.set({ master: 1, groups: { 'street-lamps': { on: false, intensity: 1, kelvin: 2700 }, 'festive-lights': { on: true, intensity: 1, kelvin: 3200 } } })
-  for (const m of new Set(buildings.church.children.map((c) => (c as THREE.Mesh).material as THREE.MeshStandardMaterial))) outdoorMaterial(m)
+  for (const m of new Set(buildings.church.children.map((c) => (c as THREE.Mesh).material as THREE.MeshStandardMaterial))) {
+    outdoorMaterial(m)
+    if (m.name === 'church stone') dressedStone(m, ground)
+  }
 
   // what's lit by the open sky out past the street: the ground, the hills and the town up the slopes
   const outdoor = new THREE.Group()
@@ -126,8 +144,10 @@ function createStreet(): Room {
     environmentIntensity: 1,
     resize: () => {},
     setReflectionScale: () => {},
+    ready: Promise.all([road.ready, rubble.ready]).then(() => {}),
     dispose: () => {
       disposeTree(group)
+      ground.texture.dispose()
       world.dispose()
     },
     ...world.hooks,
@@ -154,6 +174,52 @@ function createStreet(): Room {
       },
     ],
   }
+}
+
+/**
+ * Where the setts fan round the junctions, where cars have left rubber (swinging into the side
+ * street behind the car, a doughnut in front of it, braking lines up the street) and where the
+ * road has been patched.
+ */
+function roadDetail(): RoadDetail {
+  const w = (s: number, d: number) => {
+    const p = MAIN.at(s, d)
+    return new THREE.Vector2(p.x, p.y)
+  }
+  const angle = (c: THREE.Vector2, p: THREE.Vector2) => Math.atan2(p.y - c.y, p.x - c.x)
+  /** an arc of a tyre pair round centre c, inner tyre at radius r, from toward a to toward b (counter-clockwise) */
+  const arc = (c: THREE.Vector2, r: number, a: THREE.Vector2, b: THREE.Vector2, strength: number): [THREE.Vector4, THREE.Vector4] => {
+    let a0 = angle(c, a)
+    let a1 = angle(c, b)
+    // (the shader sweeps counter-clockwise from the first angle: order them so the short way round is taken)
+    if (((a1 - a0 + Math.PI * 4) % (Math.PI * 2)) > Math.PI) [a0, a1] = [a1, a0]
+    return [new THREE.Vector4(c.x, c.y, r, strength), new THREE.Vector4(a0, a1, 0, 0)]
+  }
+  // Courses that bow round toward a junction: rings about a point far down the street and a little to
+  // the junction's side, so across the road they run as gentle arcs, and a border course where the fan
+  // gives way to the straight courses (just ahead of the car at the showcase junction). Centred on the
+  // junction itself the rings ran along the street beside the car, radiating like shards.
+  const fans = [SIDES[0], SIDES[3]].map((j) => {
+    const c = w(j.at - 36, j.side * 6)
+    return new THREE.Vector3(c.x, c.y, 42)
+  })
+  const turnIn = w(-10, 7.5)
+  const older = w(-5, 8.5)
+  const brake = w(40, -300)
+  const brake2 = w(118, 300)
+  const donut = w(13, 0.4)
+  const marks: [THREE.Vector4, THREE.Vector4][] = [
+    arc(turnIn, 7.0, w(-10, 0.5), w(-3, 7.5), 0.85),
+    arc(older, 5.6, w(-5, 2.9), w(1.5, 8.5), 0.4),
+    arc(brake, 300.35 - 0.35, w(30, -1.0), w(52, -1.0), 0.6),
+    arc(brake2, 300.35 - 0.35, w(106, 1.0), w(126, 1.0), 0.35),
+    [new THREE.Vector4(donut.x, donut.y, 1.4, 0.5), new THREE.Vector4(0, 6.28, 0, 0)],
+  ]
+  const box = (s: number, d: number, halfAlong: number, halfAcross: number) => {
+    const c = w(s, d)
+    return new THREE.Vector4(c.x, c.y, halfAcross, halfAlong)
+  }
+  return { fans, marks, patches: [box(-31, -1.6, 0.4, 1.6), box(36, 1.5, 0.7, 0.5), box(96, 0.6, 0.55, 0.55)] }
 }
 
 export const calleColonial: GarageDef = {

@@ -51,15 +51,23 @@ export class CellMesh {
 
   /**
    * The meshes, one per cell, in `material`. `uv`: 'world' — metres from the world x/z (for
-   * ground-lying maps); 'stored' — the uvs given with the triangles.
+   * ground-lying maps); 'stored' — the uvs given with the triangles; 'box' — each triangle
+   * projected on the world plane its normal faces most (walls and blocks, in metres).
+   * `street`: a per-vertex (s, d, half-width) — arc length along, offset from and half the width of
+   * a street's carriageway (the paving shaders lay their courses in it).
    */
-  build(material: THREE.Material, name: string, opts: { uv?: 'world' | 'stored'; colors?: boolean } = {}): THREE.Mesh[] {
+  build(
+    material: THREE.Material,
+    name: string,
+    opts: { uv?: 'world' | 'stored' | 'box'; colors?: boolean; street?: (x: number, z: number) => [number, number, number] } = {},
+  ): THREE.Mesh[] {
     const meshes: THREE.Mesh[] = []
     for (const [key, b] of this.cells) {
       const geometry = new THREE.BufferGeometry()
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(b.position, 3))
       if (opts.colors) geometry.setAttribute('color', new THREE.Float32BufferAttribute(b.color, 3))
       if (opts.uv === 'stored') geometry.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2))
+      else if (opts.uv === 'box') geometry.setAttribute('uv', new THREE.BufferAttribute(boxUV(b.position), 2))
       else if (opts.uv === 'world') {
         const uv = new Float32Array((b.position.length / 3) * 2)
         for (let i = 0, j = 0; i < b.position.length; i += 3, j += 2) {
@@ -67,6 +75,11 @@ export class CellMesh {
           uv[j + 1] = b.position[i + 2]
         }
         geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+      }
+      if (opts.street) {
+        const st = new Float32Array(b.position.length)
+        for (let i = 0; i < b.position.length; i += 3) st.set(opts.street(b.position[i], b.position[i + 2]), i)
+        geometry.setAttribute('street', new THREE.BufferAttribute(st, 3))
       }
       geometry.computeVertexNormals()
       geometry.computeBoundingSphere()
@@ -77,6 +90,33 @@ export class CellMesh {
     this.cells.clear()
     return meshes
   }
+}
+
+/** per triangle: the two world axes of the plane its normal faces most, in metres */
+function boxUV(position: number[]): Float32Array {
+  const uv = new Float32Array((position.length / 3) * 2)
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  for (let t = 0; t < position.length; t += 9) {
+    a.fromArray(position, t)
+    b.fromArray(position, t + 3)
+    c.fromArray(position, t + 6)
+    const n = b.clone().sub(a).cross(c.clone().sub(a))
+    const ax = Math.abs(n.x)
+    const ay = Math.abs(n.y)
+    const az = Math.abs(n.z)
+    for (let k = 0; k < 3; k++) {
+      const x = position[t + k * 3]
+      const y = position[t + k * 3 + 1]
+      const z = position[t + k * 3 + 2]
+      const o = (t / 3 + k) * 2
+      if (ay >= ax && ay >= az) uv.set([x, z], o)
+      else if (ax >= az) uv.set([z, y], o)
+      else uv.set([x, y], o)
+    }
+  }
+  return uv
 }
 
 const WHITE = new THREE.Color(1, 1, 1)
