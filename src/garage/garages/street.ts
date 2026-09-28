@@ -16,6 +16,7 @@ import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
 import { createWoods } from './street/woods'
+import { CAPTURE_LAYER, SKY_LAYER, createStreetGI } from './street/gi'
 import { createStreetWorld } from './street/world'
 import { MAIN, ROAD, SIDES, groundTexture } from './street/site'
 import {
@@ -136,14 +137,30 @@ function createStreet(): Room {
   // The street's own surfaces take the sky from an environment captured down in the street (walls and all),
   // so its canyon already dims it: the landscape's OUTDOOR_SKY_LIGHT (calibrated for open ground under a
   // map captured in the open) on top dimmed it twice, and the shade — half the frame — went near black.
+  // (That is the older estimate. With the light probes on — Settings › Graphics › Street lighting — the
+  // diffuse sky and bounce come from gi.ts instead: measured sky visibility and coloured bounce.)
+  const gi = createStreetGI({ footprints: buildings.footprints, ground, showSunDisc: (on) => world.sky.showSunDisc(on) })
+  const patched = new Set<THREE.Material>()
   group.traverse((o) => {
     const mesh = o as THREE.Mesh
     if (!mesh.isMesh || isUnder(mesh, outdoor)) return
     for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       const standard = m as THREE.MeshStandardMaterial
-      if (standard.isMeshStandardMaterial && standard.envMapIntensity === OUTDOOR_SKY_LIGHT) standard.envMapIntensity = STREET_SKY_LIGHT
+      if (!standard.isMeshStandardMaterial || patched.has(standard)) continue
+      patched.add(standard)
+      if (standard.envMapIntensity === OUTDOOR_SKY_LIGHT) standard.envMapIntensity = STREET_SKY_LIGHT
+      gi.patch(standard)
     }
   })
+  // What the probes see: the houses, the paving, the church, the ground and the woods (not the car, the
+  // props, the plants or the wires — small, and a lot of draw calls six times per probe), and the lights.
+  const captured = [...paving.road, ...paving.pavement, ...paving.kerb, ...buildings.meshes, buildings.church, outdoor]
+  for (const root of captured) root.traverse((o) => o.layers.enable(CAPTURE_LAYER))
+  group.traverse((o) => {
+    if ((o as THREE.Light).isLight) o.layers.enable(CAPTURE_LAYER)
+  })
+  world.sky.mesh.layers.enable(SKY_LAYER)
+  world.cumulus.traverse((o) => o.layers.enable(SKY_LAYER))
 
   // no floor mirror in a street: a stand-in the app's bookkeeping can hold, never drawn
   const reflector = new Reflector(new THREE.PlaneGeometry(0.01, 0.01), { textureWidth: 1, textureHeight: 1 })
@@ -163,8 +180,17 @@ function createStreet(): Room {
     setReflectionScale: () => {},
     ready: Promise.all([road.ready, rubble.ready, woods.ready]).then(() => {
       world.shadowsChanged() // (the trees arrived: they cast into both shadow maps)
+      woods.group.traverse((o) => o.layers.enable(CAPTURE_LAYER)) // (and the probes see them)
     }),
+    gi: {
+      set: (on) => {
+        gi.set(on)
+        world.setWallBounce(!on)
+      },
+      relight: (renderer, scene, redraw) => gi.relight(renderer, scene, redraw),
+    },
     dispose: () => {
+      gi.dispose()
       disposeTree(group)
       ground.texture.dispose()
       world.dispose()
@@ -256,6 +282,6 @@ export const calleColonial: GarageDef = {
   tag: 'Out in the street of a colourful hillside colonial town, the road leading up the valley to the church',
   palette: ['#c65a4a', '#e2b441', '#6d9fc4', '#e8e3d6'],
   look: 'afternoon',
-  exposureKey: -2.6,
+  exposureKey: -2.9,
   create: createStreet,
 }

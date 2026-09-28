@@ -132,6 +132,11 @@ export interface GraphicsSettings {
   }
   /** distance haze in open-air garages — see atmosphere-effect.ts */
   atmosphere: { enabled: boolean; strength: number }
+  /**
+   * How a street garage lights its shade: measured light probes (the sunlit facades' coloured bounce)
+   * and per-point sky visibility, or the earlier estimate (a constant bounce, a fixed sky share)
+   */
+  gi: { probes: boolean }
   /** sunlight shafts through the air (ray-marched through the sun's shadow map), open-air garages */
   volumetric: { enabled: boolean; strength: number; quality: VolumetricQuality }
   /** glare, starburst and ghosts when the sun is in view — see lens-flare-effect.ts */
@@ -327,6 +332,7 @@ export const DEFAULT_GRAPHICS: GraphicsSettings = {
   // ~37 mm on full frame: a photographer's lens for a car, not a wide game camera
   display: { fpsCap: 0, onDemand: true, pauseUnfocused: false, fov: 36, showFps: true },
   atmosphere: { enabled: true, strength: 1 },
+  gi: { probes: true },
   volumetric: { enabled: true, strength: 1, quality: 'medium' },
   lensFlare: { enabled: true, intensity: 1 },
   dof: { mode: 'auto', strength: 1, range: 6 },

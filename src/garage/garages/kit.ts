@@ -97,6 +97,15 @@ export interface Room {
    * `set` must invalidate nothing itself — the app redraws, re-captures the environment and re-gathers glow.
    */
   options?: RoomOption[]
+  /**
+   * Measured indirect light (Settings › Graphics › Street lighting): `set` switches it against the
+   * room's older estimate; `relight` is called after every environment capture to rebake it from the
+   * scene as it's lit now (asynchronously — `redraw` asks for frames once it's done).
+   */
+  gi?: {
+    set(on: boolean): void
+    relight(renderer: THREE.WebGLRenderer, scene: THREE.Scene, redraw: () => void): void
+  }
 }
 
 export interface RoomOption {

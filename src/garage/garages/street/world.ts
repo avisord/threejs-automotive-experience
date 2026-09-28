@@ -30,6 +30,9 @@ export interface StreetWorld {
   /** re-render both sun shadow maps (the trees arrived, a car came or went) */
   shadowsChanged(): void
   sky: ReturnType<typeof createSky>
+  cumulus: THREE.Group
+  /** the older, constant canyon bounce (off while the street's light probes measure it) */
+  setWallBounce(on: boolean): void
   dispose(): void
 }
 
@@ -77,6 +80,7 @@ export function createStreetWorld(group: THREE.Group): StreetWorld {
   const dayAir = new THREE.Color(0.3, 0.4, 0.62)
   const lowAir = new THREE.Color(0.3, 0.37, 0.56)
 
+  let wallBounceOn = true
   let sunAt: SunPosition = { ...STREET_SUN }
   function applySun(next: SunPosition): void {
     sunAt = { ...next }
@@ -97,7 +101,7 @@ export function createStreetWorld(group: THREE.Group): StreetWorld {
     // the sunny facades lighting the street: pastel render (ρ ~0.45, warm) under the sun's light on a wall
     // (∝ cos elevation), about half of them in sun, filling ~a third of what a point in the street sees,
     // ×2 for the light going on between the walls and the paving
-    const onWalls = sun.intensity * Math.cos(THREE.MathUtils.degToRad(sunAt.elevation)) * 0.7
+    const onWalls = (wallBounceOn ? 1 : 0) * sun.intensity * Math.cos(THREE.MathUtils.degToRad(sunAt.elevation)) * 0.7
     WALL_BOUNCE.value.copy(FACADE_ALBEDO).multiply(sun.color).multiplyScalar(onWalls * 0.5 * 0.35 * 2 * WALL_BOUNCE_GAIN)
     atmosphere.sunDirection.copy(dir)
     atmosphere.sunColor.copy(light.color).multiplyScalar(light.intensity * 0.35)
@@ -109,6 +113,11 @@ export function createStreetWorld(group: THREE.Group): StreetWorld {
     sun,
     atmosphere,
     sky,
+    cumulus: cumulus.group,
+    setWallBounce(on) {
+      wallBounceOn = on
+      applySun(sunAt)
+    },
     hooks: {
       sun: { get: () => ({ ...sunAt }), set: applySun },
       atmosphere,

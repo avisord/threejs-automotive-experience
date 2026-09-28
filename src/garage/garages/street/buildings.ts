@@ -20,12 +20,19 @@ const CHALK = lin('#d9d3c7')
 const ROOF_FLAT = lin('#a89a88')
 const ROOF_TILE = lin('#9c4a33')
 
+export interface Footprint {
+  corners: THREE.Vector2[]
+  top: number
+}
+
 export interface Buildings {
   meshes: THREE.Mesh[]
   /** the houses' service-wire brackets, with the street and side they face */
   drops: { p: THREE.Vector3; street: Lot['street']; side: 1 | -1; s: number }[]
   /** each house's facades' places for plants and props (facade.ts Feature) */
   features: { lot: Lot; list: Feature[] }[]
+  /** every building's ground plan (a convex quad) and roof height: what shades the street's sky (gi.ts) */
+  footprints: Footprint[]
   lots: Lot[]
   /** the church (its own meshes) */
   church: THREE.Group
@@ -89,7 +96,7 @@ function onCorner(lot: Lot, s: number): boolean {
   return ends.some((e) => Math.abs(e - s) < 0.3)
 }
 
-function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops: Buildings['drops'], features: Buildings['features']): void {
+function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops: Buildings['drops'], features: Buildings['features'], footprints: Footprint[]): void {
   const { street, side } = lot
   const front = street.width / 2 + street.sidewalk + lot.setback
   const back = street.width / 2 + street.sidewalk + Math.max(lot.depth, lot.setback + 8)
@@ -109,6 +116,7 @@ function lotBlock(meshes: FacadeMeshes, lot: Lot, tanks: THREE.Vector3[], drops:
   const cornerStart = onCorner(lot, lot.s0)
   const cornerEnd = onCorner(lot, lot.s1)
   const skip = [0, ...(cornerEnd ? [1] : []), ...(cornerStart ? [3] : [])]
+  footprints.push({ corners, top: lot.family.roof === 'tiled' ? top + 1.5 : top })
   block(lot.family.id === 'stone' ? meshes.rubble : meshes.wall, corners, bottom, top, { wall: wallColor, roof }, lot.family.roof, skip, lot.family.roof === 'tiled' ? meshes.roof : undefined)
   const street0 = street.at((lot.s0 + lot.s1) / 2, 0)
   const centre = corners.reduce((c, p) => c.add(p), new THREE.Vector2()).divideScalar(4)
@@ -217,7 +225,8 @@ export function createBuildings(materials: BuildingMaterials): Buildings {
   const tanks: THREE.Vector3[] = []
   const drops: Buildings['drops'] = []
   const features: Buildings['features'] = []
-  for (const lot of lots) lotBlock(meshes, lot, tanks, drops, features)
+  const footprints: Footprint[] = []
+  for (const lot of lots) lotBlock(meshes, lot, tanks, drops, features, footprints)
   for (const end of endLots()) {
     const { street, lot } = end
     const half = end.width / 2
@@ -227,6 +236,7 @@ export function createBuildings(materials: BuildingMaterials): Buildings {
     const top = base + lot.family.ground + UPPER + lot.parapet
     const bottom = Math.min(...ground) - 1.5
     const wallColor = lin(lot.wall).lerp(CHALK, lot.fade)
+    footprints.push({ corners, top })
     block(meshes.wall, corners, bottom, top, { wall: wallColor, roof: ROOF_FLAT }, 'flat', [0])
     const toward = street.at(end.s - 10, 0)
     buildFacade(meshes, lot, corners[0], corners[1], toward.clone().sub(corners[0]), { base, top, bottom, wall: wallColor, dado: lin(lot.base), dadoTop: Math.min(ground[0], ground[1]) + ROAD.curb + 0.9 })
@@ -255,5 +265,19 @@ export function createBuildings(materials: BuildingMaterials): Buildings {
   tankMesh.receiveShadow = true
   tankMesh.name = 'roof tanks'
   tankMesh.computeBoundingSphere()
-  return { meshes: [...built, tankMesh], lots, drops, features, church: createChurch() }
+  // the church's masses as boxes on the ground plan (nave, transepts, towers)
+  const church = createChurch()
+  church.updateMatrixWorld(true)
+  const box = new THREE.Box3()
+  for (const child of church.children) {
+    const mesh = child as THREE.Mesh
+    if (!mesh.isMesh || mesh.geometry.type !== 'BoxGeometry') continue
+    box.setFromObject(mesh)
+    if (box.max.y - box.min.y < 2) continue
+    footprints.push({
+      corners: [new THREE.Vector2(box.min.x, box.min.z), new THREE.Vector2(box.max.x, box.min.z), new THREE.Vector2(box.max.x, box.max.z), new THREE.Vector2(box.min.x, box.max.z)],
+      top: box.max.y,
+    })
+  }
+  return { meshes: [...built, tankMesh], lots, drops, features, footprints, church }
 }

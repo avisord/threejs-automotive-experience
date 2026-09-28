@@ -467,6 +467,25 @@ export function graphicsPage(post: PostProcessing): Page {
       air.append(el('p', 'cfg-note', 'Open-air garages: distance haze over the land, thinning with height.'))
       body.append(air)
 
+      // ─── street lighting ────────────────────────────────────────────────
+      const gi = section(
+        'Street lighting',
+        toggle(s.gi.probes, 'light probes', (on) => {
+          post.set('gi', { probes: on })
+          structural()
+        }),
+      )
+      gi.append(
+        el(
+          'p',
+          'cfg-note',
+          s.gi.probes
+            ? 'Light probes: the shade lit by the sunlit facades in their own colours and by the sky each point actually sees between the houses. Street garages (Calle Colonial).'
+            : 'Off: the earlier estimate — one even bounce and a fixed share of the sky everywhere in the street.',
+        ),
+      )
+      body.append(gi)
+
       // ─── volumetric light ───────────────────────────────────────────────
       const shafts = section(
         'Volumetric light',

@@ -364,6 +364,8 @@ function captureEnvironment(): void {
   room.outdoor?.afterCapture?.()
   for (const o of hidden) o.visible = true
   pmrem.dispose()
+  // measured indirect light (street garages): rebake it from the scene as it's now lit
+  room.gi?.relight(renderer, scene, () => invalidate(3))
 }
 
 /** open-air rooms: in daylight the car's lamps light nothing around them, only their lenses glow */
@@ -830,6 +832,7 @@ async function swapRoom(def: GarageDef): Promise<void> {
   room.dispose()
   garageDef = def
   room = def.create()
+  room.gi?.set(post.settings.gi.probes)
   if (bay) room.floorLayers.push(bay.shadow)
   installRoom()
   placement.refit() // a smaller room may not fit where the car stood
@@ -1622,7 +1625,13 @@ declare global {
 window.garage = garage
 
 // ─── settings that live outside the composer ────────────────────────────────
+// (the first room was built before the settings existed)
+room.gi?.set(post.settings.gi.probes)
 post.onChange((sections) => {
+  if (sections.includes('gi') && room.gi) {
+    room.gi.set(post.settings.gi.probes)
+    lightingChanged() // (re-capture, and the probes rebake if they're on)
+  }
   if (sections.includes('quality')) applyQuality()
   if (sections.includes('pathTracing')) syncTracer()
   if (sections.includes('display')) {
