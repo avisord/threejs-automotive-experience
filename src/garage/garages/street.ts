@@ -4,6 +4,9 @@ import { disposeTree, type GarageDef, type Room } from './kit'
 import { outdoorMaterial } from './terrain'
 import { createBuildings } from './street/buildings'
 import { railingTexture } from './street/facade'
+import { createInfrastructure, wireMaterial } from './street/infra'
+import { createSignTexture } from './street/signs'
+import { createInteriorLights } from './interior'
 import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
@@ -32,6 +35,8 @@ function createStreet(): Room {
   group.add(...paving.road, ...paving.pavement, ...paving.kerb)
 
   const railings = railingTexture()
+  const signAtlas = createSignTexture()
+  const signs = outdoorMaterial(new THREE.MeshStandardMaterial({ map: signAtlas, roughness: 0.5, metalness: 0.1 }))
   // (the glass keeps the street's reflection at full strength — a window is a mirror of the street, not
   // lit ground — but takes the town-wide shadows like everything else)
   const glass = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.05, metalness: 0 })
@@ -43,8 +48,31 @@ function createStreet(): Room {
     iron: outdoorMaterial(new THREE.MeshStandardMaterial(iron)),
     lace: outdoorMaterial(new THREE.MeshStandardMaterial({ ...iron, map: railings, alphaTest: 0.5, side: THREE.DoubleSide })),
     tank: outdoorMaterial(new THREE.MeshStandardMaterial({ color: new THREE.Color('#161616'), roughness: 0.55 })),
+    signs,
   })
   group.add(...buildings.meshes, buildings.church)
+
+  // lamps, poles and wires, signs, drains, bollards
+  const lampGlass = outdoorMaterial(
+    new THREE.MeshStandardMaterial({ color: new THREE.Color('#e6dcc6'), roughness: 0.25, emissive: new THREE.Color('#ffb46a'), emissiveIntensity: 4 }),
+  )
+  lampGlass.userData.glow = true
+  const infra = createInfrastructure(buildings, {
+    iron: outdoorMaterial(new THREE.MeshStandardMaterial({ ...iron })),
+    lampGlass,
+    pole: outdoorMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })),
+    wire: outdoorMaterial(wireMaterial()),
+    signs,
+    decals: outdoorMaterial(
+      new THREE.MeshStandardMaterial({ map: signAtlas, roughness: 0.6, metalness: 0.3, alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+    ),
+  })
+  group.add(infra.group)
+  // the street's own lights: off by day (the lanterns' glass pale), switched on for dusk and night
+  const interior = createInteriorLights([
+    { id: 'street-lamps', name: 'Street lamps', hint: 'The iron lanterns on the posts and the walls', kelvin: 2700, members: [{ emissive: lampGlass }] },
+  ])
+  interior.set({ master: 1, groups: { 'street-lamps': { on: false, intensity: 1, kelvin: 2700 } } })
   for (const m of new Set(buildings.church.children.map((c) => (c as THREE.Mesh).material as THREE.MeshStandardMaterial))) outdoorMaterial(m)
 
   // what's lit by the open sky out past the street: the ground, the hills and the town up the slopes
@@ -83,6 +111,7 @@ function createStreet(): Room {
     // low behind the car, a little to its left, looking up the street
     view: [1.1, 1.25, -7.4],
     depthOfField: { bokehScale: 3 },
+    interior,
   }
 }
 

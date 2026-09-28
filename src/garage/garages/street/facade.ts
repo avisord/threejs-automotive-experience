@@ -3,6 +3,7 @@ import { seeded } from '../landform'
 import { CellMesh } from './mesh'
 import { UPPER, type FamilyId, type Lot } from './lots'
 import { ROAD, streetY } from './site'
+import { SHOP_CELLS } from './signs'
 
 /**
  * Facades: a house's street wall built with its openings cut through it —
@@ -108,6 +109,8 @@ export interface FacadeMeshes {
   iron: CellMesh
   /** alpha-tested railing infill (uv: metres along × a pattern's row) */
   lace: CellMesh
+  /** painted signs (uv into the sign atlas, signs.ts) */
+  signs: CellMesh
 }
 
 /** a facade's plane: u along it (m), y up (world), d into the wall (m; negative stands proud) */
@@ -200,10 +203,15 @@ export interface FacadeOptions {
   side?: boolean
 }
 
+export interface FacadeResult {
+  /** where the house's electricity comes in: a service wire from the street's poles ends here (null: none) */
+  drop: THREE.Vector3 | null
+}
+
 /**
  * Build one facade of a lot (a to b along the wall, `outward` toward the street) into `meshes`.
  */
-export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b: THREE.Vector2, outward: THREE.Vector2, opts: FacadeOptions): void {
+export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b: THREE.Vector2, outward: THREE.Vector2, opts: FacadeOptions): FacadeResult {
   const face = new Face(a, b, outward)
   const style = STYLES[lot.family.id]
   const rand = seeded(lot.seed + (opts.side ? 77 : 0))
@@ -353,7 +361,40 @@ export function buildFacade(meshes: FacadeMeshes, lot: Lot, a: THREE.Vector2, b:
   if (style.pilasters && surround) {
     for (const u of [0, L - 0.32]) face.box(meshes.wall, u, u + 0.32, opts.bottom, top - 0.2, -0.04, 0, surround)
   }
+
+  // ─── the street's services and trade ─────────────────────────────────
+  const shop = openings.find((o) => o.kind === 'shop')
+  if (shop) {
+    // the shop's painted board over its front
+    const h = 0.8
+    const w = Math.min(shop.u1 - shop.u0, h * 4)
+    const c = (shop.u0 + shop.u1) / 2
+    const y0 = shop.y1 + 0.35
+    face.box(meshes.wall, c - w / 2 - 0.05, c + w / 2 + 0.05, y0 - 0.05, y0 + h + 0.05, -0.08, 0, lin('#3a2f26'))
+    const [su0, sv0, su1, sv1] = SHOP_CELLS[lot.seed % SHOP_CELLS.length]
+    face.front(meshes.signs, c - w / 2, c + w / 2, y0, y0 + h, -0.081, WHITE, [
+      [su0, sv0],
+      [su1, sv0],
+      [su1, sv1],
+      [su0, sv1],
+    ])
+  }
+  const entrance = openings.find((o) => o.kind === 'door')
+  let drop: THREE.Vector3 | null = null
+  if (entrance && !opts.side) {
+    // the electricity meter in its grey box beside the door, and the service wire's bracket high over it
+    const u = entrance.u1 + 0.45 < L - 0.3 ? entrance.u1 + 0.45 : entrance.u0 - 0.45
+    if (rand() < 0.6) face.box(meshes.wall, u - 0.16, u + 0.16, base + 1.3, base + 1.75, -0.14, 0, lin('#9a9a94'))
+    if (rand() < 0.7) {
+      const y = top - 0.9
+      face.box(meshes.iron, u - 0.02, u + 0.02, y - 0.02, y + 0.02, -0.18, 0, IRON)
+      drop = face.p(u, y, -0.18)
+    }
+  }
+  return { drop }
 }
+
+const WHITE = new THREE.Color(1, 1, 1)
 
 /** a panelled door (two leaves, raised panels), a fanlight over it on a grand house */
 function doorInfill(meshes: FacadeMeshes, face: Face, o: Opening, d: number, color: THREE.Color, frame: THREE.Color, fanlight: boolean): void {
