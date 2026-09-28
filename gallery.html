@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gallery — autoxd</title>
+    <meta
+      name="description"
+      content="Screenshots from the autoxd car showroom, rendered in real time in the browser: a colonial town street, a clifftop terrace over a tropical cove, a glass house and a meadow under Mount Fuji."
+    />
+    <link rel="canonical" href="https://autoxd.vercel.app/gallery.html" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="color-scheme" content="dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://autoxd.vercel.app/gallery.html" />
+    <meta property="og:title" content="Gallery — autoxd" />
+    <meta property="og:description" content="Real-time screenshots from a car showroom in the browser." />
+    <meta property="og:image" content="https://autoxd.vercel.app/gallery/thumbs/coast-overlook-01.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      :root {
+        --bg: #07090d;
+        --panel: #0e1117;
+        --line: rgba(255, 255, 255, 0.08);
+        --text: #e8ebf0;
+        --muted: #9aa3b0;
+        --accent: #35e0ff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      a {
+        color: var(--accent);
+      }
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 56px 20px 72px;
+      }
+      nav {
+        margin-bottom: 32px;
+        font-size: 14px;
+      }
+      nav a {
+        margin-right: 16px;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(30px, 5vw, 44px);
+        line-height: 1.1;
+      }
+      h2 {
+        margin: 48px 0 12px;
+        padding-top: 32px;
+        border-top: 1px solid var(--line);
+        font-size: 22px;
+      }
+      p {
+        max-width: 720px;
+        margin: 0 0 12px;
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+        gap: 12px;
+        margin: 20px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .grid a {
+        display: block;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+      }
+      .grid img {
+        display: block;
+        width: 100%;
+        height: auto;
+        transition: transform 0.4s ease;
+      }
+      .grid a:hover img,
+      .grid a:focus-visible img {
+        transform: scale(1.03);
+      }
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        margin: 0;
+        z-index: 10;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(3, 4, 6, 0.97);
+      }
+      .lightbox.open {
+        display: flex;
+      }
+      .lightbox img {
+        max-width: calc(100vw - 32px);
+        max-height: calc(100vh - 96px);
+        border-radius: 6px;
+      }
+      .lightbox figcaption {
+        position: absolute;
+        right: 16px;
+        bottom: 16px;
+        left: 16px;
+        color: var(--muted);
+        font-size: 14px;
+        text-align: center;
+      }
+      .lightbox button {
+        position: absolute;
+        padding: 8px 14px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(14, 17, 23, 0.8);
+        color: var(--text);
+        font: inherit;
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .lightbox button:hover {
+        border-color: var(--accent);
+      }
+      .lightbox .close {
+        top: 16px;
+        right: 16px;
+      }
+      .lightbox .prev {
+        left: 16px;
+      }
+      .lightbox .next {
+        right: 16px;
+      }
+      @media (max-width: 480px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <nav><a href="/">← Home</a><a href="/garage.html">Open the garage</a></nav>
+      <h1>Gallery</h1>
+      <p>
+        Screenshots taken with Capture › Photo — rendered in real time in the browser, no path tracing, no retouching.
+        Click any shot to see it full size.
+      </p>
+
+      <section>
+        <h2>Calle Colonial</h2>
+        <p>A colonial hillside town's street: cobbled setts, limewashed houses with iron balconies, power lines and lamp posts, from a late-afternoon sun to dusk with the street lamps on. Two cars: a race car imported through Upload, and a Mercedes 190E.</p>
+        <ul class="grid">
+          <li><a href="/gallery/calle-colonial-01.webp"><img src="/gallery/thumbs/calle-colonial-01.webp" width="960" height="540" loading="lazy" alt="A race car at a street corner, seen from above between tree branches" /></a></li>
+          <li><a href="/gallery/calle-colonial-02.webp"><img src="/gallery/thumbs/calle-colonial-02.webp" width="960" height="540" loading="lazy" alt="The race car on the cobbles, seen from a first-floor balcony" /></a></li>
+          <li><a href="/gallery/calle-colonial-03.webp"><img src="/gallery/thumbs/calle-colonial-03.webp" width="960" height="540" loading="lazy" alt="Looking down a narrow side street to the race car parked across it" /></a></li>
+          <li><a href="/gallery/calle-colonial-04.webp"><img src="/gallery/thumbs/calle-colonial-04.webp" width="960" height="540" loading="lazy" alt="Low view along the pavement toward the race car at the end of the street" /></a></li>
+          <li><a href="/gallery/calle-colonial-05.webp"><img src="/gallery/thumbs/calle-colonial-05.webp" width="960" height="540" loading="lazy" alt="The race car on the main street, with colourful houses up the hill" /></a></li>
+          <li><a href="/gallery/calle-colonial-06.webp"><img src="/gallery/thumbs/calle-colonial-06.webp" width="960" height="540" loading="lazy" alt="The race car's rear, up the main street toward the hills" /></a></li>
+          <li><a href="/gallery/calle-colonial-07.webp"><img src="/gallery/thumbs/calle-colonial-07.webp" width="960" height="540" loading="lazy" alt="The same street as the light fades, the houses in shade" /></a></li>
+          <li><a href="/gallery/calle-colonial-08.webp"><img src="/gallery/thumbs/calle-colonial-08.webp" width="960" height="540" loading="lazy" alt="Dusk: the street in deep shade, the race car's tail lights glowing" /></a></li>
+          <li><a href="/gallery/calle-colonial-09.webp"><img src="/gallery/thumbs/calle-colonial-09.webp" width="960" height="540" loading="lazy" alt="Close behind the race car in the evening, street lamps lit" /></a></li>
+          <li><a href="/gallery/calle-colonial-10.webp"><img src="/gallery/thumbs/calle-colonial-10.webp" width="960" height="540" loading="lazy" alt="Close behind the race car on a bright afternoon" /></a></li>
+          <li><a href="/gallery/calle-colonial-11.webp"><img src="/gallery/thumbs/calle-colonial-11.webp" width="960" height="540" loading="lazy" alt="A silver Mercedes 190E on the main street, from behind" /></a></li>
+          <li><a href="/gallery/calle-colonial-12.webp"><img src="/gallery/thumbs/calle-colonial-12.webp" width="960" height="540" loading="lazy" alt="The 190E from a rear three-quarter view, sun on the facades" /></a></li>
+          <li><a href="/gallery/calle-colonial-13.webp"><img src="/gallery/thumbs/calle-colonial-13.webp" width="960" height="540" loading="lazy" alt="The 190E at a corner outside a papelería" /></a></li>
+          <li><a href="/gallery/calle-colonial-14.webp"><img src="/gallery/thumbs/calle-colonial-14.webp" width="960" height="540" loading="lazy" alt="Wide view of the street at dusk with the lamps coming on" /></a></li>
+          <li><a href="/gallery/calle-colonial-15.webp"><img src="/gallery/thumbs/calle-colonial-15.webp" width="960" height="540" loading="lazy" alt="Evening on the street: the 190E, a cart and a bicycle by the houses" /></a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Coast Overlook</h2>
+        <p>A stone clifftop terrace over a tropical cove, glass balustrade, palms and the sea — at sunset, dusk and midday.</p>
+        <ul class="grid">
+          <li><a href="/gallery/coast-overlook-01.webp"><img src="/gallery/thumbs/coast-overlook-01.webp" width="960" height="540" loading="lazy" alt="The race car on the terrace at sunset, the sun over the bay reflected in the stone" /></a></li>
+          <li><a href="/gallery/coast-overlook-02.webp"><img src="/gallery/thumbs/coast-overlook-02.webp" width="960" height="540" loading="lazy" alt="Palms in silhouette over the car at dusk" /></a></li>
+          <li><a href="/gallery/coast-overlook-03.webp"><img src="/gallery/thumbs/coast-overlook-03.webp" width="960" height="540" loading="lazy" alt="The car on the terrace, seen from the lawn below" /></a></li>
+          <li><a href="/gallery/coast-overlook-04.webp"><img src="/gallery/thumbs/coast-overlook-04.webp" width="960" height="540" loading="lazy" alt="The car at midday with palms, islands and cumulus clouds" /></a></li>
+          <li><a href="/gallery/coast-overlook-05.webp"><img src="/gallery/thumbs/coast-overlook-05.webp" width="960" height="540" loading="lazy" alt="Aerial view of the terrace in the green headland above the beach" /></a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Coast House</h2>
+        <p>A glass showroom above the same cove, lit from inside.</p>
+        <ul class="grid">
+          <li><a href="/gallery/coast-01.webp"><img src="/gallery/thumbs/coast-01.webp" width="960" height="540" loading="lazy" alt="The Coast House at dusk, the car behind its glass front" /></a></li>
+          <li><a href="/gallery/coast-02.webp"><img src="/gallery/thumbs/coast-02.webp" width="960" height="540" loading="lazy" alt="Through the glass: the car against the timber and concrete walls" /></a></li>
+          <li><a href="/gallery/coast-03.webp"><img src="/gallery/thumbs/coast-03.webp" width="960" height="540" loading="lazy" alt="The car inside the Coast House, tail lights on" /></a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Fuji Meadow</h2>
+        <p>An open lawn above a lake, farmland and ranges, with Mount Fuji on the skyline — dusk, dawn and midday.</p>
+        <ul class="grid">
+          <li><a href="/gallery/fuji-meadow-01.webp"><img src="/gallery/thumbs/fuji-meadow-01.webp" width="960" height="540" loading="lazy" alt="Mount Fuji at dusk over the ranges, a car's lights far below" /></a></li>
+          <li><a href="/gallery/fuji-meadow-02.webp"><img src="/gallery/thumbs/fuji-meadow-02.webp" width="960" height="540" loading="lazy" alt="The lake and the town's lights at dusk under Fuji" /></a></li>
+          <li><a href="/gallery/fuji-meadow-03.webp"><img src="/gallery/thumbs/fuji-meadow-03.webp" width="960" height="540" loading="lazy" alt="The meadow at sunrise, Fuji small over the lake" /></a></li>
+          <li><a href="/gallery/fuji-meadow-04.webp"><img src="/gallery/thumbs/fuji-meadow-04.webp" width="960" height="540" loading="lazy" alt="The meadow and the lake valley at midday" /></a></li>
+        </ul>
+      </section>
+      <p>Car makes and designs are trademarks of their owners — see the <a href="/credits.html">credits</a>.</p>
+    </div>
+
+    <figure class="lightbox" hidden>
+      <img alt="" />
+      <figcaption></figcaption>
+      <button class="close" type="button" aria-label="Close">×</button>
+      <button class="prev" type="button" aria-label="Previous">‹</button>
+      <button class="next" type="button" aria-label="Next">›</button>
+    </figure>
+    <script type="module" src="/src/gallery.ts"></script>
+  </body>
+</html>

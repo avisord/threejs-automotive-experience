@@ -133,6 +133,16 @@
       li {
         margin: 4px 0;
       }
+      .gallery {
+        padding: 40px 0;
+        border-top: 1px solid var(--line);
+      }
+      .shots {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin: 20px 0 24px;
+      }
       .cta {
         padding: 56px 0 8px;
         border-top: 1px solid var(--line);
@@ -162,6 +172,9 @@
         section.feature:nth-of-type(even) figure {
           order: 0;
         }
+        .shots {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -176,6 +189,7 @@
         </p>
         <div class="actions">
           <a class="btn primary" href="/garage.html">Open the garage</a>
+          <a class="btn" href="/gallery.html">See the gallery</a>
         </div>
       </header>
 
@@ -262,6 +276,16 @@
           </div>
         </section>
 
+        <section class="gallery">
+          <h2>From the gallery</h2>
+          <p>Real-time screenshots, straight from the photo mode.</p>
+          <div class="shots">
+            <a href="/gallery.html"><img src="/gallery/thumbs/coast-overlook-01.webp" width="960" height="540" loading="lazy" alt="A race car on a clifftop terrace at sunset over a tropical bay" /></a>
+            <a href="/gallery.html"><img src="/gallery/thumbs/calle-colonial-09.webp" width="960" height="540" loading="lazy" alt="A race car on a colonial town street at dusk, street lamps lit" /></a>
+            <a href="/gallery.html"><img src="/gallery/thumbs/calle-colonial-13.webp" width="960" height="540" loading="lazy" alt="A Mercedes 190E at a street corner outside a papelería" /></a>
+          </div>
+          <a class="btn" href="/gallery.html">See all 27 shots</a>
+        </section>
       </main>
 
       <section class="cta">
@@ -278,6 +302,7 @@
         <p>
           The car models come from Sketchfab creators under Creative Commons licences —
           <a href="/credits.html">see the credits</a> for every model, texture and library.
+          More screenshots in the <a href="/gallery.html">gallery</a>.
         </p>
       </footer>
     </div>
