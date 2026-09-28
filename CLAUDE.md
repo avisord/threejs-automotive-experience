@@ -11,6 +11,9 @@ https://autoxd.vercel.app (`vercel.json` redirects `/balls` → `/balls/`):
   + `robots.txt` list `/`, `/garage.html`, `/balls/` for Google Search Console — add new pages there.
   GA4 is injected into every page at build time by the `ga4` plugin in `vite.config.ts` from the
   `GA_MEASUREMENT_ID` env var (Vercel project env; nothing injected without it or in dev).
+  Custom events go through `track()` in `src/analytics.ts` (no-op without gtag): `car_select`,
+  `car_load_failed`, `garage_select`, `camera_mode`, `panel_page`, `photo_capture`, `video_preview`,
+  `video_export`, `video_export_done`, `video_failed`, `model_upload(_failed)`, `path_tracing_on`.
 - **`balls/index.html` → `src/main.ts`** — "ball pit": physics balls with procedural surfaces
   (`balls.ts`, `materials.ts`, `physics.ts`, `drag.ts`), scene presets in `src/scenes/`,
   composable environment modules in `src/modules/`. Older, mostly finished.
