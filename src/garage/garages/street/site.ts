@@ -185,33 +185,42 @@ export class Street {
 
 // ─── the main street ─────────────────────────────────────────────────────────
 /**
- * Up the valley along +z: straight through the car's spot, then a long easy
- * bend right (−x) and back — gentle enough that the view up the street stays
- * open to ~300 m and the hill at its head shows over the far rooftops, while
- * the left-hand facades turn a little toward the view.
+ * The main street's heading along it (radians from +z toward +x, i.e. toward the camera's left
+ * looking up the street): straight through the car's spot, then one decided bend — an obtuse
+ * elbow of ~38° to the left, eased in over 80 m — so the view up the street ends on the
+ * facades of the bend's outside instead of running off to a vanishing point; behind the car a
+ * gentler bend the other way.
  */
-export const MAIN = new Street(
-  'main',
-  [
-    [10, -340],
-    [4, -200],
-    [0.6, -90],
-    [0, -30],
-    [0, 0],
-    [0, 40],
-    [-1, 110],
-    [-4, 200],
-    [-9, 300],
-    [-10, 420],
-    [-4, 540],
-    [0, 640],
-  ],
-  'z',
-  1,
-  ROAD.width,
-  ROAD.sidewalk,
-  [0, 0],
-)
+function mainHeading(s: number): number {
+  const ease = (a: number, b: number) => THREE.MathUtils.smoothstep(s, a, b)
+  return THREE.MathUtils.degToRad(38) * ease(40, 120) - THREE.MathUtils.degToRad(18) * (1 - ease(-130, -50))
+}
+
+/** control points along the heading, every 20 m, the car's spot at the origin */
+function mainLine(): [number, number][] {
+  const pts: [number, number][] = [[0, 0]]
+  const step = 20
+  let x = 0
+  let z = 0
+  for (let s = 0; s < 660; s += step) {
+    const h = mainHeading(s + step / 2)
+    x += Math.sin(h) * step
+    z += Math.cos(h) * step
+    pts.push([x, z])
+  }
+  x = 0
+  z = 0
+  const back: [number, number][] = []
+  for (let s = 0; s > -340; s -= step) {
+    const h = mainHeading(s - step / 2)
+    x -= Math.sin(h) * step
+    z -= Math.cos(h) * step
+    back.unshift([x, z])
+  }
+  return [...back, ...pts]
+}
+
+export const MAIN = new Street('main', mainLine(), 'z', 1, ROAD.width, ROAD.sidewalk, [0, 0])
 
 /** half the length of the level showcase stretch round the car */
 export const FLAT = 24
@@ -337,6 +346,10 @@ export function outOfTown(x: number, z: number, m: StreetPoint = MAIN.nearest(x,
  * out; ridges run along both flanks; behind, the valley opens toward a plain
  * with a mountain range on the far horizon.
  */
+/** the hill closing the valley, straight on up the street past its bend, and a shoulder off to its side */
+const HEAD = MAIN.at(MAIN.end + 2100, 250)
+const SHOULDER = MAIN.at(MAIN.end + 1400, -900)
+
 export function hills(x: number, z: number, out = outOfTown(x, z)): number {
   // (seen up the street the hill at its head stands ~3–6° over the far rooftops, as a backdrop, not a wall:
   // at twice these heights and a kilometre nearer it filled the sky over the whole street)
@@ -344,7 +357,7 @@ export function hills(x: number, z: number, out = outOfTown(x, z)): number {
   // ridges along the flanks: broken, uneven crests
   const crest = 70 * ridged(x / 1300 + 3.1, z / 1700 - 1.2, 5) ** 1.5 + 30 * fbm(x / 500, z / 500, 4)
   // the hill that closes the valley ahead, and a shoulder off to its left
-  const head = 190 * Math.exp(-(((x + 250) / 1000) ** 2 + ((z - 2700) / 700) ** 2)) + 110 * Math.exp(-(((x - 900) / 650) ** 2 + ((z - 2000) / 550) ** 2))
+  const head = 190 * Math.exp(-(((x - HEAD.x) / 1000) ** 2 + ((z - HEAD.y) / 700) ** 2)) + 110 * Math.exp(-(((x - SHOULDER.x) / 650) ** 2 + ((z - SHOULDER.y) / 550) ** 2))
   // far ranges at 5–11 km, all round: ~1–3° over the horizon from the street, pale in the haze (at twice
   // the height they stood over the whole view as a dark wall)
   const r = Math.hypot(x, z)
@@ -369,7 +382,10 @@ export function heightAt(x: number, z: number): number {
  * `rect`: (x0, z0, width, depth) in metres.
  */
 export function groundTexture(): { texture: THREE.DataTexture; rect: THREE.Vector4 } {
-  const rect = new THREE.Vector4(-220, -400, 440, 1120)
+  // (round every street, its houses and a margin)
+  const b = STREETS.reduce((r, st) => ({ x0: Math.min(r.x0, st.box.x0), x1: Math.max(r.x1, st.box.x1), z0: Math.min(r.z0, st.box.z0), z1: Math.max(r.z1, st.box.z1) }), { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity })
+  const m = 60
+  const rect = new THREE.Vector4(Math.floor(b.x0 - m), Math.floor(b.z0 - m), Math.ceil(b.x1 - b.x0 + 2 * m), Math.ceil(b.z1 - b.z0 + 2 * m))
   const step = 2
   const w = rect.z / step
   const h = rect.w / step

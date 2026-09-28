@@ -14,7 +14,6 @@ import { createInteriorLights } from './interior'
 import { receiveFarShadow } from './far-shadow'
 import { createPaving } from './street/streets'
 import { createStreetTerrain } from './street/terrain'
-import { createTown } from './street/town'
 import { createStreetWorld } from './street/world'
 import { MAIN, ROAD, SIDES, groundTexture } from './street/site'
 import {
@@ -122,10 +121,11 @@ function createStreet(): Room {
     if (m.name === 'church stone') dressedStone(m, ground)
   }
 
-  // what's lit by the open sky out past the street: the ground, the hills and the town up the slopes
+  // what's lit by the open sky out past the street: the ground and the hills (only the streets' own houses are
+  // built — the blocks behind them were never seen from the street and only cost draw time)
   const outdoor = new THREE.Group()
   outdoor.name = 'street-outdoor'
-  outdoor.add(createStreetTerrain(), createTown().group)
+  outdoor.add(createStreetTerrain())
   group.add(outdoor)
 
   // no floor mirror in a street: a stand-in the app's bookkeeping can hold, never drawn
@@ -207,13 +207,13 @@ function roadDetail(): RoadDetail {
   const turnIn = w(-12, 11)
   const older = w(-7, 12)
   const brake = w(40, -300)
-  const brake2 = w(118, 300)
+  const brake2 = w(206, 300)
   const donut = w(13, 0.4)
   const marks: [THREE.Vector4, THREE.Vector4][] = [
     arc(turnIn, 9.0, w(-12, 2), w(-3, 11), 0.85),
     arc(older, 7.5, w(-7, 4.5), w(0.5, 12), 0.4),
     arc(brake, 298.2, w(30, -1.8), w(52, -1.8), 0.6),
-    arc(brake2, 298.2, w(106, 1.8), w(126, 1.8), 0.35),
+    arc(brake2, 298.2, w(196, 1.8), w(216, 1.8), 0.35),
     [new THREE.Vector4(donut.x, donut.y, 1.4, 0.5), new THREE.Vector4(0, 6.28, 0, 0)],
   ]
   const box = (s: number, d: number, halfAlong: number, halfAcross: number) => {
