@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { seeded } from '../landform'
+import { FLORA, type Flora } from '../flora'
 import { createForest, type Forest } from '../trees'
 import type { Plant, PlantKind } from '../vegetation-layout'
 import type { Lot } from './lots'
@@ -15,6 +16,18 @@ import { CHURCH, FRONT, MAIN, STREETS, Street, heightAt, outOfTown, woodedness }
  */
 
 const TAU = Math.PI * 2
+
+/**
+ * The temperate flora cut down to what a street shows: a handful of trees near enough for full
+ * detail or foliage masses need a pine and two oaks each, not all six species; no bushes are planted.
+ * The impostors — the hills' woods — keep every species. (Growing the full set took ~1.2 s longer.)
+ */
+const STREET_FLORA: Flora = {
+  ...FLORA.temperate,
+  near: FLORA.temperate.near.filter((t) => ['Pine Medium', 'Oak Large', 'Oak Medium'].includes(t.preset)),
+  mid: FLORA.temperate.mid.filter((t) => ['Pine Large', 'Oak Large', 'Ash Large'].includes(t.preset)),
+  bushes: [],
+}
 
 /** is (x, z) on a street, its pavements or its houses' plots (other than `except`'s) */
 function onPlots(x: number, z: number, except?: Street): boolean {
@@ -83,9 +96,10 @@ export function createWoods(lots: Lot[]): { group: THREE.Group; ready: Promise<F
   const group = new THREE.Group()
   group.name = 'street-woods'
   const plants = planTrees(lots)
+  const t0 = performance.now()
   const ready = createForest({
     seed: 21,
-    flora: 'temperate',
+    flora: STREET_FLORA,
     heightAt,
     layout: { plants, cover: () => 0 },
     // (no bushes scattered round the car: the pots and gardens are the street's planting)
@@ -95,6 +109,7 @@ export function createWoods(lots: Lot[]): { group: THREE.Group; ready: Promise<F
     .then(async (forest) => {
       group.add(forest.group)
       await forest.ready
+      console.info(`[garage] street trees grown in ${Math.round(performance.now() - t0)} ms`)
       return forest
     })
     .catch((err: unknown) => {

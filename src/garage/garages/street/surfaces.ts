@@ -27,6 +27,8 @@ float sfNoise( vec2 p ) {
   return mix( mix( sfHash( i ), sfHash( i + vec2( 1, 0 ) ), u.x ), mix( sfHash( i + vec2( 0, 1 ) ), sfHash( i + 1.0 ), u.x ), u.y );
 }
 float sfFbm( vec2 p ) { float s = 0.0; float a = 0.5; for ( int i = 0; i < 4; i ++ ) { s += a * sfNoise( p ); p = p * 2.03 + 17.1; a *= 0.5; } return s / 0.9375; }
+// two octaves: enough for patterns metres across (half the cost)
+float sfFbm2( vec2 p ) { return ( 0.5 * sfNoise( p ) + 0.25 * sfNoise( p * 2.03 + 17.1 ) ) / 0.75; }
 // bump from a height field (m) by screen derivatives (three's perturbNormalArb)
 vec3 sfBump( vec3 pos, vec3 n, float h ) {
   vec3 dx = dFdx( pos ); vec3 dy = dFdy( pos );
@@ -215,11 +217,11 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       // worn: the crown polished paler, the edges grubby; a fine speckle in the grain
       stone *= 1.0 + 0.05 * smoothstep( 0.0, 0.1, e ) * near;
       stone *= 1.0 - 0.1 * ( 1.0 - smoothstep( 0.0, 0.06, e ) ) * near;
-      stone *= 1.0 + ( sfNoise( vW.xz * 90.0 ) - 0.5 ) * 0.18 * ( 1.0 - smoothstep( 0.004, 0.012, px ) );
+      if ( px < 0.012 ) stone *= 1.0 + ( sfNoise( vW.xz * 90.0 ) - 0.5 ) * 0.18 * ( 1.0 - smoothstep( 0.004, 0.012, px ) );
       // mottling at the scale of a few metres (worn tracks, newer and older stone): the texture that
       // survives into the distance
-      stone *= 0.86 + 0.28 * sfFbm( vW.xz * 0.12 );
-      stone *= 0.9 + 0.2 * sfFbm( vW.xz * 0.6 + 13.0 );
+      stone *= 0.86 + 0.28 * sfFbm2( vW.xz * 0.12 );
+      stone *= 0.9 + 0.2 * sfFbm2( vW.xz * 0.6 + 13.0 );
       // relaid patches: a few metres of newer, more even, paler stone where the street was dug up
       vec2 rc = floor( vW.xz / 3.5 );
       float relaid = step( 0.965, sfHash( rc + 0.21 ) ) * step( 0.2, fract( vW.x / 3.5 ) ) * step( 0.25, fract( vW.z / 3.5 ) );
@@ -236,9 +238,9 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       vec3 fill = mix( uJoint, vec3( 0.3, 0.26, 0.2 ), smoothstep( 0.35, 0.7, sfNoise( vW.xz * 1.7 ) ) );
       vec3 col = mix( stone, fill * ( 0.8 + 0.4 * sfNoise( vW.xz * 6.0 ) ), joint * 0.85 );
       // dust blown against the kerbs and in drifts, damp stains
-      float dust = smoothstep( 0.55, 0.8, sfFbm( vW.xz * 0.45 + 21.0 ) ) * 0.35 + smoothstep( hw - 1.4, hw - 0.3, ad ) * 0.25;
+      float dust = smoothstep( 0.55, 0.8, sfFbm2( vW.xz * 0.45 + 21.0 ) ) * 0.35 + smoothstep( hw - 1.4, hw - 0.3, ad ) * 0.25;
       col = mix( col, vec3( 0.3, 0.27, 0.22 ), dust * ( 0.5 + 0.5 * sfNoise( vW.xz * 3.0 ) ) );
-      col *= 1.0 - 0.12 * smoothstep( 0.66, 0.86, sfFbm( vW.xz * 0.22 + 5.0 ) );
+      col *= 1.0 - 0.12 * smoothstep( 0.66, 0.86, sfFbm2( vW.xz * 0.22 + 5.0 ) );
       // wheel paths polished and a shade darker, an oil drip line between them, dirt in the gutters
       // lanes: one each way on a narrow street, two on the broad main street; the wheels run 0.8 m either
       // side of a lane's middle, oil drips down the middle
@@ -251,7 +253,7 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       col *= 1.0 - 0.22 * drip;
       float gutter = smoothstep( hw - 1.0, hw - 0.05, ad );
       col = mix( col, col * vec3( 0.78, 0.73, 0.66 ), gutter * ( 0.5 + 0.5 * sfNoise( sd * 1.3 ) ) );
-      col *= 1.0 - 0.13 * smoothstep( 0.62, 0.85, sfFbm( vW.xz * 0.35 + 11.0 ) );
+      col *= 1.0 - 0.13 * smoothstep( 0.62, 0.85, sfFbm2( vW.xz * 0.35 + 11.0 ) );
       // each stone its own polish (the wheel paths the glossiest), dust and joints matt
       float rough = 0.7 + 0.2 * h3 * near - 0.14 * wheel + 0.15 * joint + 0.08 * gutter + 0.1 * dust;
       // asphalt repairs over a trench or a pothole: flat, dark, a tarred seam round the edge
@@ -273,9 +275,11 @@ export function roadMaterial(detail: RoadDetail): { material: THREE.MeshStandard
       for ( int k = 0; k < ${MARKS}; k ++ ) {
         vec4 a = uMarkA[ k ];
         if ( a.w <= 0.0 ) continue;
-        vec4 b = uMarkB[ k ];
         vec2 v = vW.xz - a.xy;
         float r = length( v );
+        // (off the pair's band: skip the angle maths — the arcs cover a sliver of the street)
+        if ( r < a.z - 0.3 || r > a.z + 1.9 ) continue;
+        vec4 b = uMarkB[ k ];
         float t = mod( atan( v.y, v.x ) - b.x + 12.566371, 6.2831853 );
         float span = mod( b.y - b.x + 12.566371, 6.2831853 );
         if ( t > span ) continue;

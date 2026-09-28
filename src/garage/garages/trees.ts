@@ -3,7 +3,7 @@ import { receiveFarShadow } from './far-shadow'
 import { SURFACES, pbrMaps } from './kit'
 import { seeded } from './landform'
 import { foliage, leafGain } from './foliage'
-import { FLORA, withTropical, type FloraId, type TreeSpec } from './flora'
+import { FLORA, withTropical, type Flora, type FloraId, type TreeSpec } from './flora'
 import { createImpostors, type ImpostorSet } from './impostors'
 import { createMasses } from './masses'
 import { OUTDOOR_SKY_LIGHT } from './sky'
@@ -34,8 +34,8 @@ export interface ForestOptions {
   /** trees placed by hand near the building: pines framing the view, a few cherries */
   accents: { x: number; z: number; kind: 'pine' | 'sakura'; height: number }[]
   seed: number
-  /** which species grow (flora.ts; default temperate) */
-  flora?: FloraId
+  /** which species grow (flora.ts; default temperate) — or a trimmed list of them (a street needs a few, not every species) */
+  flora?: FloraId | Flora
 }
 
 export interface Forest {
@@ -115,7 +115,7 @@ export async function createForest(opts: ForestOptions): Promise<Forest> {
   const { Tree, TreePreset } = await import('@dgreenheck/ez-tree')
   const presets = withTropical(TreePreset as unknown as Record<string, PresetJson>)
   const rand = seeded(opts.seed)
-  const flora = FLORA[opts.flora ?? 'temperate']
+  const flora = typeof opts.flora === 'object' ? opts.flora : FLORA[opts.flora ?? 'temperate']
 
   // The species (flora.ts), each grown full: near (LOD 0), light for the masses (LOD 1); far off they're
   // impostors of the same trees (impostors.ts)

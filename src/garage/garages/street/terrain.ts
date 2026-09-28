@@ -22,7 +22,9 @@ const ROCK = lin('#7b7466')
 
 export function createStreetTerrain(): THREE.Mesh {
   const c = new THREE.Color()
-  const geometry = polarGrid(11000, 520, 1024, (t) => t ** 2.6, (x, z, _t, _a, color) => {
+  // (320 rings × 720: ~20–30 m across the hills 2 km off, which are smooth; the ground near the town lies
+  // under the streets and houses. At 520 × 1024 it was a million triangles and 0.9 s of the build.)
+  const geometry = polarGrid(11000, 320, 720, (t) => t ** 2.6, (x, z, _t, _a, color) => {
     const y = heightAt(x, z)
     const out = outOfTown(x, z)
     // how wooded: the hills are forest, broken by fields on their lower slopes and clearings

@@ -16,10 +16,24 @@ import { fbm, seeded, smoothstep } from '../landform'
 const CELL = { w: 512, h: 256 }
 const VARIANTS = 4
 
-/** bake the cumulus atlas: rg = the puffs' normals (billboard space), b = how far the surface stands out, a = density */
+/** the atlas's pixels, painted once per session (~0.5 s of CPU): every visit makes its own texture from them */
+let painted: Uint8Array | null = null
+
+/** the cumulus atlas: rg = the puffs' normals (billboard space), b = how far the surface stands out, a = density */
 function cloudAtlas(): THREE.DataTexture {
   const W = CELL.w * VARIANTS
   const H = CELL.h
+  painted ??= paintAtlas(W, H)
+  const texture = new THREE.DataTexture(painted, W, H, THREE.RGBAFormat)
+  texture.flipY = true
+  texture.generateMipmaps = true
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.needsUpdate = true
+  return texture
+}
+
+function paintAtlas(W: number, H: number): Uint8Array {
   const data = new Uint8Array(W * H * 4)
   for (let v = 0; v < VARIANTS; v++) {
     const rand = seeded(40 + v)
@@ -109,13 +123,7 @@ function cloudAtlas(): THREE.DataTexture {
       }
     }
   }
-  const texture = new THREE.DataTexture(data, W, H, THREE.RGBAFormat)
-  texture.flipY = true
-  texture.generateMipmaps = true
-  texture.minFilter = THREE.LinearMipmapLinearFilter
-  texture.magFilter = THREE.LinearFilter
-  texture.needsUpdate = true
-  return texture
+  return data
 }
 
 const vertexShader = /* glsl */ `

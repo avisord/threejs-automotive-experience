@@ -43,11 +43,23 @@ import {
 function createStreet(): Room {
   const group = new THREE.Group()
   group.name = 'calle-colonial'
+  // (start fetching the tree generator now: its 4 MB module then loads while the street is built, not after)
+  void import('@dgreenheck/ez-tree')
+  const timings: string[] = []
+  let lap = performance.now()
+  /** how long each part of the street took to build (logged once it's all up) */
+  const mark = (what: string) => {
+    const now = performance.now()
+    timings.push(`${what} ${Math.round(now - lap)}`)
+    lap = now
+  }
   const world = createStreetWorld(group)
+  mark('sky')
 
   const ground = groundTexture()
   const road = roadMaterial(roadDetail())
   const paving = createPaving({ road: road.material, pavement: pavementMaterial(), kerb: kerbMaterial() })
+  mark('paving')
   group.add(...paving.road, ...paving.pavement, ...paving.kerb)
 
   const railings = railingTexture()
@@ -78,6 +90,7 @@ function createStreet(): Room {
     new THREE.MeshStandardMaterial({ color: new THREE.Color('#e6dcc6'), roughness: 0.25, emissive: new THREE.Color('#ffb46a'), emissiveIntensity: 4 }),
   )
   lampGlass.userData.glow = true
+  mark('houses')
   const infra = createInfrastructure(buildings, {
     iron: outdoorMaterial(new THREE.MeshStandardMaterial({ ...iron })),
     lampGlass,
@@ -91,6 +104,7 @@ function createStreet(): Room {
   group.add(infra.group)
 
   // life on the houses and the pavements: pots and climbers, shop fronts' wares, furniture, bikes, parked cars
+  mark('infrastructure')
   const leaves = foliage(
     outdoorMaterial(new THREE.MeshStandardMaterial({ map: createLeafTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 })),
     { crownNormals: true, matte: true, coverage: true },
@@ -128,10 +142,13 @@ function createStreet(): Room {
   // built — the blocks behind them were never seen from the street and only cost draw time)
   const outdoor = new THREE.Group()
   outdoor.name = 'street-outdoor'
+  mark('plants, props, festive')
   outdoor.add(createStreetTerrain())
+  mark('terrain')
   // the trees: garden, plaza, back yards, and the woods on the hills (grown asynchronously)
   const woods = createWoods(buildings.lots)
   outdoor.add(woods.group)
+  mark('tree plan')
   group.add(outdoor)
 
   // The street's own surfaces take the sky from an environment captured down in the street (walls and all),
@@ -140,6 +157,8 @@ function createStreet(): Room {
   // (That is the older estimate. With the light probes on — Settings › Graphics › Street lighting — the
   // diffuse sky and bounce come from gi.ts instead: measured sky visibility and coloured bounce.)
   const gi = createStreetGI({ footprints: buildings.footprints, ground, showSunDisc: (on) => world.sky.showSunDisc(on) })
+  mark('light probes')
+  console.info(`[garage] street built (ms): ${timings.join(', ')}`)
   const patched = new Set<THREE.Material>()
   group.traverse((o) => {
     const mesh = o as THREE.Mesh
