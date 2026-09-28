@@ -19,6 +19,7 @@ import {
   type Wheel,
 } from '../post'
 import { WHITE_POINT_MODES } from '../tone-map-effect'
+import type { ShadowResolution } from '../shadows'
 import { NEUTRAL_WHEEL } from '../colour-balance-effect'
 import type { Page } from './panel'
 import { actionButton, colourWheel, el, section, segmented, slider, toggle } from './widgets'
@@ -56,6 +57,8 @@ const TONE_NOTE: Record<ToneMapper, string> = {
 }
 
 const SSR_SCOPE: Record<SsrScope, string> = { off: 'Off', car: 'Car', room: 'Car + room', all: 'Everything' }
+
+const SHADOW_RESOLUTION: Record<ShadowResolution, string> = { 1024: '1K', 2048: '2K', 4096: '4K', 8192: '8K' }
 
 const SSR_QUALITY: Record<SsrQuality, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
@@ -450,6 +453,43 @@ export function graphicsPage(post: PostProcessing): Page {
       }
       grain.append(el('p', 'cfg-note', 'Strongest in the mid-tones, as on film; a new pattern each frame (still while the view rests).'))
       body.append(grain)
+
+      // ─── shadows ───────────────────────────────────────────────────────
+      const shade = section('Shadows')
+      shade.append(
+        el('div', 'cfg-label cfg-sub', 'Sun shadow map'),
+        segmented([1024, 2048, 4096, 8192].map(String), SHADOW_RESOLUTION, String(s.shadows.resolution), (v) => {
+          post.set('shadows', { resolution: Number(v) as ShadowResolution })
+          structural()
+        }),
+        slider('Softness', s.shadows.softness, { min: 0, max: 30, step: 0.5 }, fixed(1, ' cm'), (v) => post.set('shadows', { softness: v })),
+        slider('Sharp range', s.shadows.range, { min: 20, max: 120, step: 5 }, (v) => `±${v} m`, (v) => post.set('shadows', { range: v })),
+        slider('Bias', s.shadows.bias, { min: 0.25, max: 4, step: 0.05 }, fixed(2, '×'), (v) => post.set('shadows', { bias: v })),
+        el(
+          'p',
+          'cfg-note',
+          'Open-air garages. The sun’s sharp shadows cover the range round the car; texels are range × 2 / map size (±45 m at 4K ≈ 2 cm). Softness is the penumbra’s width. Raise the bias if surfaces stripe themselves, lower it if shadows lift off their casters.',
+        ),
+      )
+      body.append(shade)
+      const distant = section(
+        'Distant shadows',
+        toggle(s.shadows.distant, 'distant shadows', (on) => {
+          post.set('shadows', { distant: on })
+          structural()
+        }),
+      )
+      distant.append(el('p', 'cfg-note', 'Past the sharp range: houses, hills and trees shading the land, from a coarse town-wide map.'))
+      body.append(distant)
+      const capture = section(
+        'Captures at 2×',
+        toggle(s.shadows.captureBoost, 'larger shadow maps for photos and videos', (on) => {
+          post.set('shadows', { captureBoost: on })
+          structural()
+        }),
+      )
+      capture.append(el('p', 'cfg-note', 'Photos, video previews and exports render the sun’s shadow map at twice the size (8K at most).'))
+      body.append(capture)
 
       // ─── atmosphere ─────────────────────────────────────────────────────
       const air = section(
